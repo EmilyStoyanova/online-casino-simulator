@@ -1,0 +1,63 @@
+# Base configuration. Every environment-specific or sensitive value is read from
+# environment variables; locally they come from the repository-root `.env` file.
+spring:
+  application:
+    name: online-casino-simulator
+  config:
+    # `.env` uses KEY=value syntax, so it can be imported as a properties file.
+    # Real OS environment variables always take precedence over these imports.
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/casino}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      # Fail fast (default is 30 s) so requests do not hang when the database is unreachable.
+      connection-timeout: 5000
+  jpa:
+    # Never keep a DB connection open while rendering the HTTP response.
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; Hibernate only verifies that entities match it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    locations: classpath:db/migration
+  mvc:
+    # Errors are returned as RFC 9457 Problem Details (application/problem+json).
+    problemdetails:
+      enabled: true
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  error:
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  # Replaced with the Maven project version at build time (resource filtering).
+  version: '@project.version@'
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}

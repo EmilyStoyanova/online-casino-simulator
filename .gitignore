@@ -1,0 +1,27 @@
+# --- Secrets / local configuration -------------------------------------------
+.env
+.env.*
+!.env.example
+*.local
+
+# --- Backend (Maven / Java) --------------------------------------------------
+backend/target/
+*.class
+hs_err_pid*
+
+# --- Frontend (Node / Vite) --------------------------------------------------
+node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+*.tsbuildinfo
+npm-debug.log*
+
+# --- IDE / OS ----------------------------------------------------------------
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db

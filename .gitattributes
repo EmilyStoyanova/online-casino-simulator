@@ -1,0 +1,14 @@
+# Normalise line endings in the repository; check out with the platform default.
+* text=auto
+
+# Shell scripts must keep LF endings, otherwise they fail inside Linux containers / CI.
+*.sh   text eol=lf
+mvnw   text eol=lf
+
+# Windows scripts keep CRLF.
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+*.pdf  binary
+*.png  binary
+*.jpg  binary
