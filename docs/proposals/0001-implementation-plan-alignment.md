@@ -1,8 +1,11 @@
 # Change proposal 0001 — Align the implementation plan with the accepted architecture
 
-- **Status:** Proposed. The PDF is **not** modified until this proposal is approved.
+- **Status:** Applied in **version 1.1** of the plan, awaiting review.
+  - New file: `docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`
+  - Source: `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`
+  - Version 1.0 (`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`) is kept unchanged.
 - **Date:** 2026-10-29
-- **Affects:** `docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
+- **Affects:** the implementation plan PDF
 - **Schedule impact:** none. The 12-week roadmap, the stage boundaries and the MVP scope stay
   unchanged.
 
@@ -38,17 +41,22 @@ Proposed texts are given in Bulgarian, the language of the PDF.
 | C11 | §7 Acceptance criteria | Addition | API contract and architecture rules |
 | C12 | §8 Project structure | Correction | Package structure inside modules; `openapi.yaml`; `docs/plans`, `docs/proposals` |
 | C13 | §9 Workflow | Addition | API contract design step before backend implementation |
+| C14 | §3.4 (new), §10 Risk 7 | Addition | Short summary of the planned Week 2 security measures |
+| C15 | Title block, §4, §13, Appendix A (new) | Addition | Document version, "Implemented/Planned" markers, status of Weeks 1–2, version history |
 
 ## Detailed changes
 
 ### C1 — §2 Technologies
 
-| Current | Proposed |
+Applied as a third column **"Статус"** ("Реализирано" or "Планирано (Седмица N)") and these rows:
+
+| Current | Applied in v1.1 |
 |---|---|
-| "Backend тестване: JUnit 5, Mockito, Testcontainers" | "Backend тестване: JUnit Jupiter (JUnit 6 — наследник на JUnit 5, управляван от Spring Boot), Mockito, Testcontainers, ArchUnit" |
+| "Backend тестване: JUnit 5, Mockito, Testcontainers" | "Backend тестване: JUnit Jupiter (JUnit 6 — наследник на JUnit 5, управляван от Spring Boot), Mockito, Testcontainers" |
+| — (new row) | "Архитектурни тестове: ArchUnit" (Planned, Week 2) |
 | "API документация: springdoc-openapi / Swagger UI" | "API договор и документация: OpenAPI 3.1 (`openapi.yaml`, design-first), springdoc-openapi / Swagger UI" |
-| — (new row) | "Сесии: Spring Session JDBC (PostgreSQL)" |
-| "Frontend: React + TypeScript + Vite" | "Frontend: React + TypeScript + Vite, React Router" |
+| — (new row) | "Сесии: Spring Session JDBC (PostgreSQL)" (Planned, Week 2) |
+| — (new row) | "Маршрутизация (frontend): React Router" (Planned, Week 2) |
 
 Reason: ADR-0002 (Spring Boot 4.1 ships JUnit Jupiter 6), ADR-0004, ADR-0005 and ADR-0006.
 
@@ -170,6 +178,29 @@ named `online-casino-simulator` (the plan shows `online-casino/`).
 
 The remaining steps are renumbered.
 
+### C14 — §3.4 Security (new) and §10 Risk 7
+
+New subsection "3.4. Сигурност (планирано, Седмица 2)" with four bullet points:
+- server-side sessions (Spring Security + Spring Session JDBC);
+- HttpOnly/SameSite session cookie, `Secure` + `__Host-` in production;
+- CSRF protection and BCrypt;
+- roles, login/registration throttling and Problem Details errors.
+
+| Current Risk 7 solution | Applied in v1.1 |
+|---|---|
+| "Защитени cookies, сървърна валидация, автоматизирани тестове и проверка на зависимостите." | "Защитени session cookies (HttpOnly; Secure и `__Host-` в production), CSRF защита, ограничаване на опитите за вход, сървърна валидация, автоматизирани тестове и проверка на зависимостите." |
+
+Consistent with ADR-0006 (Proposed) and `docs/plans/week-02.md` revision 3.
+
+### C15 — Document version and status markers
+
+- Title block: "Версия на документа: 1.1 (29.10.2026)" and "Състояние на проекта: Седмица 1 — завършена; Седмица 2 — планирана"; legend for "Реализирано" and "Планирано (Седмица N)".
+- §4: status line under Week 1 ("Завършена") and Week 2 ("Планирана", reference to `docs/plans/week-02.md`, revision 3).
+- §5 and §6: a "Седмица" or "Статус" column; §5 states that only migration V1 exists so far.
+- §8: note that module layer packages are created when the modules are implemented.
+- §13: "(Седмица 1 — завършена)".
+- New "Приложение А. История на версиите на документа" (v1.0 dated 23.10.2026, the date of the original file; v1.1 on 29.10.2026) with this change list. Document versions are distinct from the product versions in §11.
+
 ## Not changed
 
 - MVP scope (§1.3/§1.4), target audience, responsible-play restrictions and the "not a treatment"
@@ -177,9 +208,14 @@ The remaining steps are renumbered.
 - The 12-week timeline (§4, §13) and the Week 4 priority milestone (§14).
 - Hosting providers (Cloudflare Pages, Render, Neon). C8 only refines how they are combined.
 
-## Approval and application
+## Application
 
-1. Review this proposal.
-2. After approval, the PDF is updated from its source document (or a new PDF version is produced)
-   by the plan owner. The current PDF stays in the repository history.
-3. This proposal's status becomes "Applied", with the date of the new PDF version.
+1. Applied on 2026-10-29 as version 1.1. The PDF is generated from
+   `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html` (see `docs/sources/README.md`).
+2. Version 1.0 stays unchanged next to it as the original.
+3. Verification:
+   - all 17 original pages' text was compared with the new version (only the changes C1–C15 differ);
+   - all 644 text blocks of the source are present in the PDF;
+   - no broken characters;
+   - all 23 pages were reviewed visually.
+4. After approval, the status becomes "Applied — approved".

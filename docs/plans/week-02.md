@@ -2,7 +2,7 @@
 
 - **Status:** Revision 3 (simplified), awaiting final review.
 - **Stage:** 1 — Project foundation (Weeks 1–2)
-- **Source:** Implementation plan §4 (Week 2), §5 (database), §6 (API), §7 (acceptance criteria)
+- **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`), §4 (Week 2), §5 (database), §6 (API), §7 (acceptance criteria)
 - **Architecture:** modular monolith ([ADR-0001](../decisions/0001-modular-monolith.md)), layered
   packages and design-first API ([ADR-0004](../decisions/0004-design-first-api.md)), ArchUnit
   ([ADR-0005](../decisions/0005-architecture-rules-archunit.md)), security approach
