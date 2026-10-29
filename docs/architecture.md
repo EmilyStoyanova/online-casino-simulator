@@ -48,11 +48,12 @@ Root package `com.casino`. Each direct sub-package is a module:
 - `common` depends on no business module; every module may depend on `common`.
 - Modules talk to each other only through their **public API**: services and DTOs in the module's
   `service` and `dto` packages. They never use another module's repositories, entities or controllers.
-- Expected direction: `game → wallet`, `game → responsibleplay`, `learning → wallet`,
-  `admin → (learning, responsibleplay, wallet, user)`, `auth ↔ user` via application services.
-  Cycles are not allowed.
-- Planned enforcement: an automated module-boundary test (Spring Modulith or ArchUnit), to be
-  proposed as an ADR once the first modules with cross-module calls exist (Weeks 2–3).
+- Expected direction: `auth → user`, `game → wallet`, `game → responsibleplay`, `learning → wallet`,
+  `admin → (learning, responsibleplay, wallet, user)`. Cycles are not allowed; in particular `user`
+  never depends on `auth`.
+- Enforcement: ArchUnit rules in `ModuleArchitectureTest`, run with every build
+  ([ADR-0005](decisions/0005-architecture-rules-archunit.md)). *Planned:* introduced in Week 2, and
+  until then enforced by review.
 
 ### Layers inside a module
 
@@ -110,9 +111,12 @@ frontend/src
 
 - `services/apiClient.ts` is the only place that calls `fetch`. It sends credentials (session
   cookies from Week 2), maps failures to a typed `ApiError` and supports request cancellation.
-- Development: the Vite dev server proxies `/api` to the backend (same origin → no CORS).
-  Production: `VITE_API_BASE_URL` points to the backend, which allows the frontend origin via
-  `APP_CORS_ALLOWED_ORIGINS`.
+- Development: the Vite dev server proxies `/api` to the backend (same origin, no CORS).
+- Production (decided in Week 12): the preferred setup keeps the API on the **same site** as the
+  frontend, through a reverse proxy for `/api/*`. Session cookies then stay first-party, because
+  browsers block third-party cookies. As a fallback, `VITE_API_BASE_URL` points to a backend on a
+  shared custom domain, and that backend allows the frontend origin via `APP_CORS_ALLOWED_ORIGINS`.
+  See `docs/plans/week-02.md` §7.11.
 
 ## 5. Cross-cutting concerns
 
@@ -125,7 +129,8 @@ frontend/src
 | API documentation | Swagger UI at `/swagger-ui.html`, showing the contract and the generated implementation view (to be disabled in production, Week 12) |
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
-| Security | Spring Security with session cookies, CSRF protection and role checks from Week 2 |
+| Security | *Planned for Week 2* ([ADR-0006](decisions/0006-session-authentication-security.md), proposed): Spring Security (deny by default), Spring Session JDBC (30 min idle, 12 h absolute), `HttpOnly` session cookie (`__Host-` + `Secure` in production), CSRF (SPA pattern), login/registration throttling. Session revocation on admin changes follows in Week 10. |
+| Architecture rules | *Planned for Week 2:* ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)) |
 | Testing | Unit (JUnit + Mockito), web slices (`@WebMvcTest`), integration (Testcontainers PostgreSQL), frontend (Vitest + RTL), E2E (Playwright, Week 11) |
 | CI | GitHub Actions: backend `mvnw verify`, frontend lint → typecheck → test → build |
 
