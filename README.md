@@ -47,7 +47,7 @@ server-confirmed results. Details: [`docs/architecture.md`](docs/architecture.md
 |---|---|
 | Backend | Java 21, Spring Boot 4.1, Spring Web MVC, Spring Data JPA (Hibernate 7), Bean Validation |
 | Database | PostgreSQL 17, Flyway 12 migrations |
-| API docs | springdoc-openapi 3 (OpenAPI 3 / Swagger UI) |
+| API | Design-first OpenAPI 3.1 contract (`openapi.yaml`), springdoc-openapi 3 / Swagger UI |
 | Frontend | React 19, TypeScript 6, Vite 8, Tailwind CSS 4 |
 | Testing | JUnit (Jupiter), Mockito, Testcontainers, Vitest, React Testing Library |
 | Tooling | Maven Wrapper, Docker Compose, GitHub Actions |
@@ -118,8 +118,9 @@ database chain works.
 |---|---|
 | http://localhost:5173 | Frontend |
 | http://localhost:8080/api/v1/system/status | Platform status (backend + database + schema version) |
-| http://localhost:8080/swagger-ui.html | Interactive API documentation |
-| http://localhost:8080/v3/api-docs | OpenAPI specification (JSON) |
+| http://localhost:8080/swagger-ui.html | Swagger UI: the API contract by default, plus the generated implementation view |
+| http://localhost:8080/openapi.yaml | API contract, the source of truth ([`backend/src/main/resources/static/openapi.yaml`](backend/src/main/resources/static/openapi.yaml)) |
+| http://localhost:8080/v3/api-docs | Specification generated from the code (verified against the contract by tests) |
 | http://localhost:8080/actuator/health | Liveness/readiness health check |
 
 ## Testing

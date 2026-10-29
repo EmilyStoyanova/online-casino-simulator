@@ -46,8 +46,8 @@ Root package `com.casino`. Each direct sub-package is a module:
 ### Dependency rules
 
 - `common` depends on no business module; every module may depend on `common`.
-- Modules talk to each other only through their **public application API** (services / DTOs in the
-  module's `application` package), never through another module's repositories or entities.
+- Modules talk to each other only through their **public API**: services and DTOs in the module's
+  `service` and `dto` packages. They never use another module's repositories, entities or controllers.
 - Expected direction: `game → wallet`, `game → responsibleplay`, `learning → wallet`,
   `admin → (learning, responsibleplay, wallet, user)`, `auth ↔ user` via application services.
   Cycles are not allowed.
@@ -56,23 +56,44 @@ Root package `com.casino`. Each direct sub-package is a module:
 
 ### Layers inside a module
 
+Every module uses the same layered package structure:
+
 ```
 com.casino.<module>
-├── api/             REST controllers and request/response DTOs (HTTP concerns only)
-├── application/     use-case services, ports (interfaces), module-public types
-├── domain/          entities, value objects, pure business rules (e.g. payout tables)
-└── infrastructure/  adapters: JPA repositories, external integrations, port implementations
+├── controller/   REST controllers: HTTP mapping, status codes, delegation to services (thin)
+├── service/      business logic, validation, transactions
+├── repository/   database access (Spring Data JPA repositories, other data-access adapters)
+├── entity/       JPA entities — never returned by controllers
+├── dto/          request/response records matching the schemas in openapi.yaml
+├── config/       module-specific Spring configuration
+└── exception/    module exceptions and their HTTP mapping
 ```
 
-`api → application → domain`; `infrastructure` implements ports declared in `application`.
-Sub-packages are only created when they have content. The `common.system` package (platform status)
-is the reference implementation of this layout:
+Rules:
 
-| Layer | Class |
-|---|---|
-| api | `SystemStatusController`, `SystemStatusResponse` |
-| application | `SystemStatusService`, `DatabaseProbe` (port), `SystemStatus`, `DatabaseHealth` |
-| infrastructure | `FlywayDatabaseProbe` (adapter) |
+- Calls flow one way: `controller → service → repository`. Controllers never use repositories
+  directly, and services never depend on controllers.
+- Controllers accept and return **DTOs only**; services map between entities and DTOs.
+- Constructor injection only.
+- Packages are only created when they have content (no placeholder packages).
+- Application-wide configuration and the centralised exception handler live in
+  `common.config` and `common.exception`.
+
+The `common.system` package (platform status) is the reference implementation:
+
+| Package | Class | Responsibility |
+|---|---|---|
+| `controller` | `SystemStatusController` | `GET /api/v1/system/status`; maps status to `200`/`503` |
+| `service` | `SystemStatusService` | Builds the status from the database check, version and clock |
+| `repository` | `DatabaseProbe`, `FlywayDatabaseProbe`, `DatabaseHealth` | Reads Flyway's schema history to check the database |
+| `dto` | `SystemStatusResponse`, `ComponentStatus` | API representation (`SystemStatus` schema) |
+
+### API design (design-first)
+
+The HTTP API is designed first in
+[`backend/src/main/resources/static/openapi.yaml`](../backend/src/main/resources/static/openapi.yaml),
+which is the source of truth. Controllers and DTOs implement it, and contract tests keep them in sync
+([ADR-0004](decisions/0004-design-first-api.md)).
 
 ## 4. Frontend structure
 
@@ -99,8 +120,9 @@ frontend/src
 |---|---|
 | Configuration | `application.yml` + environment variables; local `.env` imported via `spring.config.import` |
 | Schema management | Flyway migrations in `backend/src/main/resources/db/migration`; Hibernate `ddl-auto=validate` |
-| API errors | RFC 9457 Problem Details enabled; standardised error model in Week 2 |
-| API documentation | springdoc-openapi, `/swagger-ui.html` (to be disabled in production, Week 12) |
+| API errors | RFC 9457 Problem Details via `common.exception.GlobalExceptionHandler`; error codes and field errors added in Week 2 |
+| API contract | Design-first `openapi.yaml` (source of truth), verified by `OpenApiContractIT` |
+| API documentation | Swagger UI at `/swagger-ui.html`, showing the contract and the generated implementation view (to be disabled in production, Week 12) |
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
 | Security | Spring Security with session cookies, CSRF protection and role checks from Week 2 |

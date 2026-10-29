@@ -1,0 +1,263 @@
+openapi: 3.1.0
+
+# -----------------------------------------------------------------------------
+# Online Casino Simulator — API contract (design-first).
+#
+# This file is the SOURCE OF TRUTH for the HTTP API:
+#   1. Change the contract here first (new path, field, status code, ...).
+#   2. Implement it in a controller + DTO.
+#   3. `OpenApiContractIT` fails until the implementation matches the contract.
+#
+# Served at /openapi.yaml and shown first in Swagger UI (/swagger-ui.html).
+# -----------------------------------------------------------------------------
+
+info:
+  title: Online Casino Simulator API
+  version: 0.1.0
+  summary: Casino rules and probabilities with virtual currency only.
+  description: |
+    REST API of the Online Casino Simulator.
+
+    The platform uses **virtual currency only**: there are no real-money deposits,
+    withdrawals, purchases of virtual currency or cash-equivalent prizes.
+
+    ## Conventions
+    - Base path for business endpoints: `/api/v1`; administrative endpoints will use `/api/v1/admin/**`.
+    - Request and response bodies are JSON.
+    - Errors are returned as [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) Problem Details
+      (`application/problem+json`, schema `ProblemDetail`). This also applies to requests that do
+      not match any operation: unknown paths return `404`, unsupported methods `405`, unacceptable
+      media types `406`.
+    - Timestamps are ISO-8601 in UTC (`date-time`).
+  license:
+    name: Proprietary — SAP mentorship project
+
+servers:
+  - url: /
+    description: Same origin as the frontend (in development via the Vite proxy)
+
+tags:
+  - name: System
+    description: Platform status
+  - name: Operations
+    description: Infrastructure health probes provided by Spring Boot Actuator
+
+paths:
+  /api/v1/system/status:
+    get:
+      tags: [System]
+      operationId: getSystemStatus
+      summary: Get platform status
+      description: |
+        Reports the application version and whether the database is reachable, including the
+        latest applied database migration. Public, no authentication.
+      responses:
+        '200':
+          description: Platform is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemStatus'
+              example:
+                application: online-casino-simulator
+                version: 0.1.0-SNAPSHOT
+                status: UP
+                database:
+                  status: UP
+                  schemaVersion: '1'
+                timestamp: '2026-10-29T10:15:30.123Z'
+        '503':
+          description: Platform is unavailable (database unreachable). The body still describes the status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemStatus'
+              example:
+                application: online-casino-simulator
+                version: 0.1.0-SNAPSHOT
+                status: DOWN
+                database:
+                  status: DOWN
+                  schemaVersion: null
+                timestamp: '2026-10-29T10:15:30.123Z'
+        '500':
+          description: Internal Server Error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                title: Internal Server Error
+                status: 500
+                detail: An unexpected error occurred. Please try again later.
+                instance: /api/v1/system/status
+
+  /actuator/health:
+    get:
+      tags: [Operations]
+      operationId: getHealth
+      summary: Aggregated health
+      description: Health of the application including its health groups. Returns `503` when not healthy.
+      responses:
+        '200':
+          description: Application is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: UP
+                groups: [liveness, readiness]
+            application/vnd.spring-boot.actuator.v3+json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Application is not healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+            application/vnd.spring-boot.actuator.v3+json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /actuator/health/liveness:
+    get:
+      tags: [Operations]
+      operationId: getLiveness
+      summary: Liveness probe
+      description: Whether the process is alive. Used by the hosting platform to restart the container.
+      responses:
+        '200':
+          description: Alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: UP
+        '503':
+          description: Not alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /actuator/health/readiness:
+    get:
+      tags: [Operations]
+      operationId: getReadiness
+      summary: Readiness probe
+      description: Whether the application is ready to accept traffic.
+      responses:
+        '200':
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                status: UP
+        '503':
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /actuator/info:
+    get:
+      tags: [Operations]
+      operationId: getInfo
+      summary: Application info
+      description: Build and application information (currently empty).
+      responses:
+        '200':
+          description: Application info
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              example: {}
+
+components:
+  schemas:
+    ComponentStatus:
+      type: string
+      description: Availability of the platform or one of its dependencies.
+      enum: [UP, DOWN]
+
+    SystemStatus:
+      type: object
+      description: Platform status and database connectivity.
+      required: [application, version, status, database, timestamp]
+      properties:
+        application:
+          type: string
+          description: Application name
+          examples: [online-casino-simulator]
+        version:
+          type: string
+          description: Application version
+          examples: [0.1.0-SNAPSHOT]
+        status:
+          $ref: '#/components/schemas/ComponentStatus'
+        database:
+          $ref: '#/components/schemas/DatabaseStatus'
+        timestamp:
+          type: string
+          format: date-time
+          description: Time the status was determined (UTC)
+
+    DatabaseStatus:
+      type: object
+      required: [status, schemaVersion]
+      properties:
+        status:
+          $ref: '#/components/schemas/ComponentStatus'
+        schemaVersion:
+          type: [string, 'null']
+          description: Latest applied Flyway migration version; `null` when the database is unreachable.
+          examples: ['1']
+
+    ProblemDetail:
+      type: object
+      description: |
+        RFC 9457 Problem Details. Additional, error-specific members may be present at the top level
+        (for example field validation errors, added in later API versions).
+      required: [title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: URI identifying the problem type; omitted for generic HTTP errors (`about:blank`).
+        title:
+          type: string
+          description: Short, human-readable summary of the problem type
+        status:
+          type: integer
+          format: int32
+          description: HTTP status code
+        detail:
+          type: string
+          description: Human-readable explanation of this occurrence
+        instance:
+          type: string
+          format: uri-reference
+          description: Request path where the problem occurred
+      additionalProperties: true
+
+    HealthStatus:
+      type: object
+      description: Spring Boot Actuator health response.
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN, OUT_OF_SERVICE, UNKNOWN]
+        groups:
+          type: array
+          description: Names of the available health groups (aggregated endpoint only)
+          items:
+            type: string

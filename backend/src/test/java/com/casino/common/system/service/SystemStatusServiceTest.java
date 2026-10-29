@@ -1,4 +1,4 @@
-package com.casino.common.system.application;
+package com.casino.common.system.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -7,6 +7,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 
+import com.casino.common.system.dto.ComponentStatus;
+import com.casino.common.system.dto.SystemStatusResponse;
+import com.casino.common.system.repository.DatabaseHealth;
+import com.casino.common.system.repository.DatabaseProbe;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,24 +37,24 @@ class SystemStatusServiceTest {
     void reportsUpWhenDatabaseIsReachable() {
         when(databaseProbe.check()).thenReturn(DatabaseHealth.up("1"));
 
-        SystemStatus status = service.currentStatus();
+        SystemStatusResponse status = service.currentStatus();
 
-        assertThat(status.isUp()).isTrue();
-        assertThat(status.status()).isEqualTo(ComponentStatus.UP);
-        assertThat(status.database()).isEqualTo(new DatabaseHealth(ComponentStatus.UP, "1"));
-        assertThat(status.application()).isEqualTo("online-casino-simulator");
-        assertThat(status.version()).isEqualTo("1.2.3");
-        assertThat(status.timestamp()).isEqualTo(NOW);
+        assertThat(status).isEqualTo(new SystemStatusResponse(
+                "online-casino-simulator",
+                "1.2.3",
+                ComponentStatus.UP,
+                new SystemStatusResponse.Database(ComponentStatus.UP, "1"),
+                NOW));
     }
 
     @Test
     void reportsDownWhenDatabaseIsUnreachable() {
         when(databaseProbe.check()).thenReturn(DatabaseHealth.down());
 
-        SystemStatus status = service.currentStatus();
+        SystemStatusResponse status = service.currentStatus();
 
-        assertThat(status.isUp()).isFalse();
         assertThat(status.status()).isEqualTo(ComponentStatus.DOWN);
+        assertThat(status.database().status()).isEqualTo(ComponentStatus.DOWN);
         assertThat(status.database().schemaVersion()).isNull();
     }
 }

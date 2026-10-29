@@ -29,13 +29,13 @@ spring:
           time_zone: UTC
   flyway:
     locations: classpath:db/migration
-  mvc:
-    # Errors are returned as RFC 9457 Problem Details (application/problem+json).
-    problemdetails:
-      enabled: true
+  # Errors are returned as RFC 9457 Problem Details by com.casino.common.exception.GlobalExceptionHandler.
 
 server:
   port: ${SERVER_PORT:8080}
+  mime-mappings:
+    # Serve the API contract (/openapi.yaml) with its registered media type (RFC 9512).
+    yaml: application/yaml
   shutdown: graceful
   error:
     include-stacktrace: never
@@ -52,9 +52,17 @@ management:
 
 springdoc:
   api-docs:
+    # Implementation view generated from the code; verified against the contract by OpenApiContractIT.
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+    # The design-first contract (src/main/resources/static/openapi.yaml) is shown by default.
+    urls:
+      - name: Contract (openapi.yaml)
+        url: /openapi.yaml
+      - name: Implementation (generated)
+        url: /v3/api-docs
+    urls-primary-name: Contract (openapi.yaml)
 
 app:
   # Replaced with the Maven project version at build time (resource filtering).
