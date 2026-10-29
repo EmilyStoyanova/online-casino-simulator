@@ -12,7 +12,8 @@ responsible-play tools.
 > clinically validated treatment for gambling addiction.
 
 Built as part of the **SAP mentorship program** following a 12-week implementation plan
-([`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`](docs/OnlineCasinoSimulator_ImplementationPlan.pdf)).
+([`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`](docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf), version 1.1;
+the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`](docs/OnlineCasinoSimulator_ImplementationPlan.pdf)).
 
 ---
 
