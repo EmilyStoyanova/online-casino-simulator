@@ -22,8 +22,13 @@ The API is **design-first**. The contract
 
 ## Workflow for API changes
 
-1. Change `openapi.yaml` (new path, field, status code, …) and review it.
-2. Implement the controller (`controller` package) and DTO records (`dto` package).
+1. Change `openapi.yaml` (new path, field, status code, …) and review it. Operations designed ahead
+   of their implementation carry `x-implementation-status: planned` and the summary suffix
+   "(planned)". *Planned:* support for this marker is added to the contract tests in Week 2 (W2-02).
+   The tests then skip the structural comparison for planned operations, and fail if a planned
+   operation is already implemented.
+2. Implement the controller (`controller` package) and DTO records (`dto` package), and remove the
+   `planned` marker in the same change.
 3. Run `./mvnw verify`. `OpenApiContractIT` fails while the implementation and the contract differ,
    and the failure message lists every difference.
 4. Update the frontend types in `frontend/src/types/` accordingly.
@@ -63,15 +68,19 @@ Example error (`POST /api/v1/system/status` → `405`):
 
 ## Planned (from the implementation plan)
 
-These endpoints are added to the contract first, in the week they are implemented.
+These endpoints are added to the contract first, in the week they are implemented. The Week 2
+contract design (schemas, error codes, security requirements) is in
+[`docs/plans/week-02.md`](plans/week-02.md) §5.
 
 | Method | Endpoint | Purpose | Week |
 |---|---|---|---|
-| POST | `/api/v1/auth/register` | Registration | 2 |
+| GET | `/api/v1/auth/csrf` | Obtain the CSRF token cookie (SPA start-up) | 2 |
+| POST | `/api/v1/auth/register` | Registration with automatic sign-in | 2 |
 | POST | `/api/v1/auth/login` | Login (session cookie) | 2 |
 | POST | `/api/v1/auth/logout` | Logout | 2 |
 | GET | `/api/v1/users/me` | Current user profile | 2 |
 | PATCH | `/api/v1/users/me` | Update profile / interests | 2 |
+| GET | `/api/v1/interests` | Interest catalogue | 2 |
 | GET | `/api/v1/wallet` | Current virtual balance | 3 |
 | GET | `/api/v1/wallet/transactions` | Transaction history | 3 |
 | POST | `/api/v1/games/roulette/spins` | Place bets and play a round (idempotency key) | 4 |

@@ -25,10 +25,18 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 
 ## Planned tables (from the implementation plan)
 
+The Week 2 design is in [`docs/plans/week-02.md`](plans/week-02.md) §6. Deviations from the
+original plan are listed in
+[`docs/proposals/0001-implementation-plan-alignment.md`](proposals/0001-implementation-plan-alignment.md).
+
 | Table | Purpose | Week |
 |---|---|---|
 | `users` | Accounts, password hashes, status, role | 2 |
-| `user_preferences` | Educational interests and preferences | 2 |
+| `interests` | Catalogue of educational interests (reference data) | 2 |
+| `user_interests` | Interests selected by each user (replaces the plan's use of `user_preferences` for interests) | 2 |
+| `spring_session`, `spring_session_attributes` | HTTP sessions (Spring Session JDBC schema) | 2 |
+| `auth_throttle` | Fixed-window counters (hashed keys) for login/registration rate limiting | 2 |
+| `user_preferences` | UI preferences (sound, reduced motion, …) | 6 |
 | `wallets` | Current virtual balance and row version (optimistic locking) | 3 |
 | `wallet_transactions` | Immutable ledger of balance changes, unique idempotency key | 3 |
 | `roulette_rounds` | Rounds, winning number, timestamps | 4 |
@@ -38,7 +46,7 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 | `quiz_attempts` | Submitted answers and results | 8 |
 | `learning_rewards` | Reward conditions and granted rewards | 8 |
 | `play_limits` | User-defined limits, breaks, self-exclusion | 9 |
-| `user_sessions` | Session history and duration | 9 |
+| `user_sessions` | Play-session history and duration (not HTTP sessions) | 9 |
 | `audit_events` | Important system and administrative actions | 10 |
 
 ## Integrity requirements
