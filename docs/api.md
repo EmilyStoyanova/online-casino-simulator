@@ -1,20 +1,44 @@
 # API
 
-- Base path: `/api/v1` (administrative endpoints: `/api/v1/admin/**`)
-- Format: JSON; errors as RFC 9457 Problem Details (`application/problem+json`)
-- Live specification: `/v3/api-docs` · interactive UI: `/swagger-ui.html`
-- All input is validated and all authorization and business rules are enforced on the server.
+The API is **design-first**. The contract
+[`backend/src/main/resources/static/openapi.yaml`](../backend/src/main/resources/static/openapi.yaml)
+(OpenAPI 3.1) is the source of truth, and this page only summarises it
+([ADR-0004](decisions/0004-design-first-api.md)).
 
-## Implemented
-
-### `GET /api/v1/system/status`
-
-Reports whether the backend is running and can reach its database. Public, no authentication.
-
-| Status | Meaning |
+| URL (local) | Content |
 |---|---|
-| `200 OK` | Platform up |
-| `503 Service Unavailable` | Database unreachable (body still describes the status) |
+| http://localhost:8080/swagger-ui.html | Swagger UI. Shows **Contract (openapi.yaml)** by default; **Implementation (generated)** in the top-right selector |
+| http://localhost:8080/openapi.yaml | The contract (`application/yaml`) |
+| http://localhost:8080/v3/api-docs | Specification generated from the code (implementation view) |
+
+## Conventions
+
+- Base path `/api/v1`; administrative endpoints will use `/api/v1/admin/**`.
+- JSON request and response bodies; timestamps are ISO-8601 UTC.
+- Errors are RFC 9457 Problem Details (`application/problem+json`, schema `ProblemDetail`), produced
+  centrally by `common.exception.GlobalExceptionHandler`. This includes unknown paths (`404`),
+  unsupported methods (`405`) and unexpected failures (`500`, without internal details).
+- All input is validated, and authorization and business rules are enforced on the server.
+
+## Workflow for API changes
+
+1. Change `openapi.yaml` (new path, field, status code, …) and review it.
+2. Implement the controller (`controller` package) and DTO records (`dto` package).
+3. Run `./mvnw verify`. `OpenApiContractIT` fails while the implementation and the contract differ,
+   and the failure message lists every difference.
+4. Update the frontend types in `frontend/src/types/` accordingly.
+
+## Implemented endpoints
+
+| Method | Path | Tag | Responses | Description |
+|---|---|---|---|---|
+| GET | `/api/v1/system/status` | System | `200` `SystemStatus`, `503` `SystemStatus`, `500` `ProblemDetail` | Application version and database connectivity (public) |
+| GET | `/actuator/health` | Operations | `200` / `503` `HealthStatus` | Aggregated health incl. health groups |
+| GET | `/actuator/health/liveness` | Operations | `200` / `503` `HealthStatus` | Liveness probe |
+| GET | `/actuator/health/readiness` | Operations | `200` / `503` `HealthStatus` | Readiness probe |
+| GET | `/actuator/info` | Operations | `200` object | Application info (currently empty) |
+
+Example `GET /api/v1/system/status` → `200`:
 
 ```json
 {
@@ -22,16 +46,24 @@ Reports whether the backend is running and can reach its database. Public, no au
   "version": "0.1.0-SNAPSHOT",
   "status": "UP",
   "database": { "status": "UP", "schemaVersion": "1" },
-  "timestamp": "2026-10-27T18:23:39.093Z"
+  "timestamp": "2026-10-29T10:15:30.123Z"
 }
 ```
 
-### `GET /actuator/health`
+Example error (`POST /api/v1/system/status` → `405`):
 
-Spring Boot health endpoint for infrastructure probes (`/actuator/health/liveness`,
-`/actuator/health/readiness`). Only `health` and `info` actuator endpoints are exposed.
+```json
+{
+  "title": "Method Not Allowed",
+  "status": 405,
+  "detail": "Method 'POST' is not supported.",
+  "instance": "/api/v1/system/status"
+}
+```
 
 ## Planned (from the implementation plan)
+
+These endpoints are added to the contract first, in the week they are implemented.
 
 | Method | Endpoint | Purpose | Week |
 |---|---|---|---|

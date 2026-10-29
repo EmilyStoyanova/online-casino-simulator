@@ -1,7 +1,11 @@
-package com.casino.common.system.application;
+package com.casino.common.system.service;
 
 import java.time.Clock;
 
+import com.casino.common.system.dto.ComponentStatus;
+import com.casino.common.system.dto.SystemStatusResponse;
+import com.casino.common.system.repository.DatabaseHealth;
+import com.casino.common.system.repository.DatabaseProbe;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -25,10 +29,15 @@ public class SystemStatusService {
         this.version = version;
     }
 
-    public SystemStatus currentStatus() {
-        DatabaseHealth database = databaseProbe.check();
+    public SystemStatusResponse currentStatus() {
+        DatabaseHealth health = databaseProbe.check();
+        ComponentStatus databaseStatus = health.reachable() ? ComponentStatus.UP : ComponentStatus.DOWN;
         // The platform cannot serve any meaningful request without its database.
-        ComponentStatus overall = database.status() == ComponentStatus.UP ? ComponentStatus.UP : ComponentStatus.DOWN;
-        return new SystemStatus(applicationName, version, overall, database, clock.instant());
+        return new SystemStatusResponse(
+                applicationName,
+                version,
+                databaseStatus,
+                new SystemStatusResponse.Database(databaseStatus, health.schemaVersion()),
+                clock.instant());
     }
 }

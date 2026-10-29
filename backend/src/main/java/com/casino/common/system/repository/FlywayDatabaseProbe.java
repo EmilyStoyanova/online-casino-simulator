@@ -1,18 +1,16 @@
-package com.casino.common.system.infrastructure;
+package com.casino.common.system.repository;
 
-import com.casino.common.system.application.DatabaseHealth;
-import com.casino.common.system.application.DatabaseProbe;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Repository;
 
 /**
  * Checks the database by reading Flyway's schema history. A successful read proves both
  * that the connection works and which migration the schema is on.
  */
-@Component
+@Repository
 class FlywayDatabaseProbe implements DatabaseProbe {
 
     private static final Logger log = LoggerFactory.getLogger(FlywayDatabaseProbe.class);
