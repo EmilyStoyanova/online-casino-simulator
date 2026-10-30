@@ -60,17 +60,23 @@ class OpenApiContractIT {
 
     @Test
     void everyDocumentedOperationIsVerifiedByThisTest() {
-        Set<String> documented = new TreeSet<>();
-        contract.spec().getPaths().forEach((path, item) ->
-                item.readOperationsMap().keySet().forEach(method -> documented.add(method + " " + path)));
-
-        // A new operation in the contract must also get a runtime check below.
-        assertThat(documented).containsExactlyInAnyOrder(
+        // A newly implemented operation must also get a runtime check below.
+        assertThat(contract.implementedOperations()).containsExactlyInAnyOrder(
                 "GET /api/v1/system/status",
                 "GET /actuator/health",
                 "GET /actuator/health/liveness",
                 "GET /actuator/health/readiness",
                 "GET /actuator/info");
+        // Planned operations cannot be verified at runtime (validateResponse rejects them). When one is
+        // implemented, its marker is removed and it moves to the list above. Empty at the end of Week 2.
+        assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
+                "GET /api/v1/auth/csrf",
+                "POST /api/v1/auth/register",
+                "POST /api/v1/auth/login",
+                "POST /api/v1/auth/logout",
+                "GET /api/v1/users/me",
+                "PATCH /api/v1/users/me",
+                "GET /api/v1/interests");
     }
 
     @Test

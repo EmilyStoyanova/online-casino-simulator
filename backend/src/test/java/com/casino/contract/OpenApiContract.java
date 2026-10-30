@@ -30,6 +30,7 @@ import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.Parameter;
 import io.swagger.v3.oas.models.responses.ApiResponse;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
 
 /**
  * Test-side access to the design-first API contract ({@code static/openapi.yaml}).
@@ -43,16 +44,25 @@ import io.swagger.v3.oas.models.responses.ApiResponse;
  *       status code, media type and schema. Undocumented properties are reported unless the schema
  *       explicitly allows additional properties.</li>
  * </ul>
+ *
+ * <p><b>Planned elements.</b> Operations and schema properties that are designed but not implemented
+ * yet carry {@code x-implementation-status: planned}. {@link #differencesTo} skips them while the
+ * other specification does not have them, and reports them as soon as it does (the marker must be
+ * removed together with the implementation). {@link #validateResponse} rejects planned operations and
+ * reports planned properties that appear in a response.
  */
 public final class OpenApiContract {
 
     static final String CONTRACT_RESOURCE = "static/openapi.yaml";
+    static final String IMPLEMENTATION_STATUS = "x-implementation-status";
+    static final String PLANNED = "planned";
     private static final String SCHEMA_REF_PREFIX = "#/components/schemas/";
 
     private final OpenAPI spec;
 
     private OpenApiContract(OpenAPI spec) {
         this.spec = Objects.requireNonNull(spec, "Specification could not be parsed");
+        requireValidImplementationStatus();
     }
 
     /** Loads the contract from the classpath. */
@@ -79,23 +89,40 @@ public final class OpenApiContract {
         return spec;
     }
 
+    /** Operations without the planned marker, as {@code "GET /path"}. */
+    public Set<String> implementedOperations() {
+        return operationNames(false);
+    }
+
+    /** Operations marked {@code x-implementation-status: planned}, as {@code "GET /path"}. */
+    public Set<String> plannedOperations() {
+        return operationNames(true);
+    }
+
     // ------------------------------------------------------------------ structural comparison
 
     /**
      * Lists every structural difference between this specification and {@code other} for the
      * paths accepted by {@code pathFilter}. Descriptions, summaries and examples are ignored;
-     * paths, methods, operation ids, tags, parameters, request bodies, status codes, media types
-     * and schemas are compared.
+     * paths, methods, operation ids, tags, security requirements, parameters, request bodies,
+     * status codes, media types and schemas are compared. Planned elements of this specification
+     * are handled as described in the class documentation.
      */
     public List<String> differencesTo(OpenApiContract other, Predicate<String> pathFilter) {
         List<String> diffs = new ArrayList<>();
-        Map<String, PathItem> mine = paths(pathFilter);
-        Map<String, PathItem> theirs = other.paths(pathFilter);
+        Map<String, Map<PathItem.HttpMethod, Operation>> mine = operations(pathFilter);
+        Map<String, Map<PathItem.HttpMethod, Operation>> theirs = other.operations(pathFilter);
+        mine.forEach((path, myOps) -> myOps.entrySet().removeIf(op -> {
+            Operation implemented = theirs.getOrDefault(path, Map.of()).get(op.getKey());
+            return skipPlanned(op.getKey() + " " + path, op.getValue().getExtensions(),
+                    implemented != null, implemented == null ? null : implemented.getExtensions(), diffs);
+        }));
+        mine.values().removeIf(Map::isEmpty);
         compareKeys("paths", mine.keySet(), theirs.keySet(), diffs);
 
         for (String path : intersection(mine.keySet(), theirs.keySet())) {
-            Map<PathItem.HttpMethod, Operation> myOps = mine.get(path).readOperationsMap();
-            Map<PathItem.HttpMethod, Operation> theirOps = theirs.get(path).readOperationsMap();
+            Map<PathItem.HttpMethod, Operation> myOps = mine.get(path);
+            Map<PathItem.HttpMethod, Operation> theirOps = theirs.get(path);
             compareKeys(path + " methods", myOps.keySet(), theirOps.keySet(), diffs);
 
             for (PathItem.HttpMethod method : intersection(myOps.keySet(), theirOps.keySet())) {
@@ -108,18 +135,23 @@ public final class OpenApiContract {
     private void compareOperation(String loc, Operation mine, OpenApiContract other, Operation theirs, List<String> diffs) {
         compare(loc + " operationId", mine.getOperationId(), theirs.getOperationId(), diffs);
         compare(loc + " tags", asSet(mine.getTags()), asSet(theirs.getTags()), diffs);
+        compare(loc + " security", security(mine), other.security(theirs), diffs);
         compare(loc + " parameters", parameterKeys(mine.getParameters()), parameterKeys(theirs.getParameters()), diffs);
 
         Content myBody = mine.getRequestBody() == null ? null : mine.getRequestBody().getContent();
         Content theirBody = theirs.getRequestBody() == null ? null : theirs.getRequestBody().getContent();
         compareContent(loc + " requestBody", myBody, other, theirBody, diffs);
+        if (mine.getRequestBody() != null && theirs.getRequestBody() != null) {
+            compare(loc + " requestBody required", Boolean.TRUE.equals(mine.getRequestBody().getRequired()),
+                    Boolean.TRUE.equals(theirs.getRequestBody().getRequired()), diffs);
+        }
 
         Map<String, ApiResponse> myResponses = orEmpty(mine.getResponses());
         Map<String, ApiResponse> theirResponses = orEmpty(theirs.getResponses());
         compareKeys(loc + " responses", myResponses.keySet(), theirResponses.keySet(), diffs);
         for (String code : intersection(myResponses.keySet(), theirResponses.keySet())) {
-            compareContent(loc + " " + code, myResponses.get(code).getContent(),
-                    other, theirResponses.get(code).getContent(), diffs);
+            compareContent(loc + " " + code, resolve(myResponses.get(code)).getContent(),
+                    other, other.resolve(theirResponses.get(code)).getContent(), diffs);
         }
     }
 
@@ -157,8 +189,13 @@ public final class OpenApiContract {
         compare(loc + " required", asSet(mine.getRequired()), asSet(theirs.getRequired()), diffs);
         compare(loc + " additionalProperties", allowsAdditionalProperties(mine), allowsAdditionalProperties(theirs), diffs);
 
-        Map<String, Schema> myProps = orEmpty(mine.getProperties());
+        Map<String, Schema> myProps = new LinkedHashMap<>(orEmpty(mine.getProperties()));
         Map<String, Schema> theirProps = orEmpty(theirs.getProperties());
+        myProps.entrySet().removeIf(property -> {
+            Schema<?> implemented = theirProps.get(property.getKey());
+            return skipPlanned(loc + "." + property.getKey(), property.getValue().getExtensions(),
+                    implemented != null, implemented == null ? null : implemented.getExtensions(), diffs);
+        });
         compareKeys(loc + " properties", myProps.keySet(), theirProps.keySet(), diffs);
         for (String name : intersection(myProps.keySet(), theirProps.keySet())) {
             compareSchemas(loc + "." + name, myProps.get(name), other, theirProps.get(name), diffs, visited);
@@ -183,12 +220,16 @@ public final class OpenApiContract {
         if (operation == null) {
             return List.of(method + " " + path + " is not documented in the contract");
         }
+        if (isPlanned(operation.getExtensions())) {
+            return List.of(method + " " + path + " is marked " + IMPLEMENTATION_STATUS + ": " + PLANNED
+                    + "; remove the marker when implementing it");
+        }
         ApiResponse response = orEmpty(operation.getResponses()).get(String.valueOf(status));
         if (response == null) {
             return List.of(method + " " + path + ": status " + status + " is not documented");
         }
         String baseType = contentType == null ? "" : contentType.split(";")[0].trim().toLowerCase(Locale.ROOT);
-        MediaType mediaType = orEmpty(response.getContent()).get(baseType);
+        MediaType mediaType = orEmpty(resolve(response).getContent()).get(baseType);
         if (mediaType == null) {
             return List.of(method + " " + path + " " + status + ": media type '" + baseType + "' is not documented");
         }
@@ -233,7 +274,10 @@ public final class OpenApiContract {
             Map<String, Schema> properties = orEmpty(schema.getProperties());
             for (Map.Entry<String, JsonNode> field : node.properties()) {
                 Schema<?> propertySchema = properties.get(field.getKey());
-                if (propertySchema != null) {
+                if (propertySchema != null && isPlanned(propertySchema.getExtensions())) {
+                    errors.add(loc + "." + field.getKey() + ": property is marked " + IMPLEMENTATION_STATUS + ": "
+                            + PLANNED + " but present; remove the marker when implementing it");
+                } else if (propertySchema != null) {
                     validate(loc + "." + field.getKey(), field.getValue(), propertySchema, errors);
                 } else if (!allowsAdditionalProperties(schema)) {
                     errors.add(loc + ": undocumented property '" + field.getKey() + "'");
@@ -290,24 +334,112 @@ public final class OpenApiContract {
         };
     }
 
+    // ------------------------------------------------------------------ planned elements
+
+    /**
+     * Whether a planned element of this specification is left out of the comparison: it is while
+     * the other specification does not have it. If the other specification has it without the
+     * marker (it is implemented), the marker must be removed, which is reported as a difference.
+     */
+    private static boolean skipPlanned(String loc, Map<String, Object> mine, boolean presentInOther,
+                                       Map<String, Object> theirs, List<String> diffs) {
+        if (!isPlanned(mine)) {
+            return false;
+        }
+        if (!presentInOther) {
+            return true;
+        }
+        if (!isPlanned(theirs)) {
+            diffs.add(loc + ": implemented, but still marked " + IMPLEMENTATION_STATUS + ": " + PLANNED);
+        }
+        return false;
+    }
+
+    private static boolean isPlanned(Map<String, Object> extensions) {
+        return extensions != null && PLANNED.equals(extensions.get(IMPLEMENTATION_STATUS));
+    }
+
+    /**
+     * Fails fast on misuse of the marker: only the value {@code planned} is allowed (on operations
+     * and on properties of component schemas), and a planned property must not be required.
+     */
+    private void requireValidImplementationStatus() {
+        orEmpty(spec.getPaths()).forEach((path, item) -> item.readOperationsMap().forEach((method, operation) ->
+                requireValidMarker(method + " " + path, operation.getExtensions())));
+        schemas().forEach((name, schema) -> {
+            Map<String, Schema> properties = orEmpty(schema.getProperties());
+            properties.forEach((property, propertySchema) -> {
+                String loc = SCHEMA_REF_PREFIX + name + "." + property;
+                requireValidMarker(loc, propertySchema.getExtensions());
+                if (isPlanned(propertySchema.getExtensions()) && asSet(schema.getRequired()).contains(property)) {
+                    throw new IllegalStateException(loc + ": a planned property must not be required");
+                }
+            });
+        });
+    }
+
+    private static void requireValidMarker(String loc, Map<String, Object> extensions) {
+        Object status = extensions == null ? null : extensions.get(IMPLEMENTATION_STATUS);
+        if (status != null && !PLANNED.equals(status)) {
+            throw new IllegalStateException(loc + ": unsupported " + IMPLEMENTATION_STATUS + " '" + status
+                    + "' (allowed: '" + PLANNED + "', or no marker once implemented)");
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
-    private Map<String, PathItem> paths(Predicate<String> filter) {
-        Map<String, PathItem> result = new LinkedHashMap<>();
+    private Map<String, Map<PathItem.HttpMethod, Operation>> operations(Predicate<String> filter) {
+        Map<String, Map<PathItem.HttpMethod, Operation>> result = new LinkedHashMap<>();
         orEmpty(spec.getPaths()).forEach((path, item) -> {
             if (filter.test(path)) {
-                result.put(path, item);
+                result.put(path, new LinkedHashMap<>(item.readOperationsMap()));
             }
         });
         return result;
+    }
+
+    private Set<String> operationNames(boolean planned) {
+        Set<String> names = new TreeSet<>();
+        operations(path -> true).forEach((path, operations) -> operations.forEach((method, operation) -> {
+            if (isPlanned(operation.getExtensions()) == planned) {
+                names.add(method + " " + path);
+            }
+        }));
+        return names;
+    }
+
+    /**
+     * Effective security requirements of an operation (its own, otherwise the global ones), e.g.
+     * {@code [csrfHeader+sessionCookie]}. Empty means the operation is public.
+     */
+    private Set<String> security(Operation operation) {
+        List<SecurityRequirement> requirements = operation.getSecurity() != null ? operation.getSecurity() : spec.getSecurity();
+        return orEmpty(requirements).stream()
+                .map(requirement -> String.join("+", new TreeSet<>(requirement.keySet())))
+                .collect(Collectors.toCollection(TreeSet::new));
+    }
+
+    private ApiResponse resolve(ApiResponse response) {
+        if (response.get$ref() == null) {
+            return response;
+        }
+        String name = refName(response.get$ref());
+        ApiResponse resolved = spec.getComponents() == null ? null : orEmpty(spec.getComponents().getResponses()).get(name);
+        if (resolved == null) {
+            throw new IllegalStateException("Unresolvable response reference: " + name);
+        }
+        return resolved;
+    }
+
+    private Map<String, Schema> schemas() {
+        return spec.getComponents() == null ? Map.of() : orEmpty(spec.getComponents().getSchemas());
     }
 
     private Schema<?> resolve(Schema<?> schema) {
         Schema<?> current = schema;
         while (current != null && current.get$ref() != null) {
             String name = refName(current.get$ref());
-            Map<String, Schema> schemas = spec.getComponents() == null ? Map.of() : orEmpty(spec.getComponents().getSchemas());
-            current = schemas.get(name);
+            current = schemas().get(name);
             if (current == null) {
                 throw new IllegalStateException("Unresolvable schema reference: " + name);
             }
