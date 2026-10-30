@@ -46,14 +46,15 @@ Root package `com.casino`. Each direct sub-package is a module:
 ### Dependency rules
 
 - `common` depends on no business module; every module may depend on `common`.
-- Modules talk to each other only through their **public API**: services and DTOs in the module's
-  `service` and `dto` packages. They never use another module's repositories, entities or controllers.
+- Modules talk to each other only through their **public API**: the module's `service`, `dto` and
+  `exception` packages. They never use another module's repositories, entities or controllers.
 - Expected direction: `auth → user`, `game → wallet`, `game → responsibleplay`, `learning → wallet`,
   `admin → (learning, responsibleplay, wallet, user)`. Cycles are not allowed; in particular `user`
   never depends on `auth`.
-- Enforcement: ArchUnit rules in `ModuleArchitectureTest`, run with every build
-  ([ADR-0005](decisions/0005-architecture-rules-archunit.md)). *Planned:* introduced in Week 2, and
-  until then enforced by review.
+- Enforcement: ArchUnit rules R1–R12 in `ModuleArchitectureTest`, run with every build
+  (`./mvnw test`, [ADR-0005](decisions/0005-architecture-rules-archunit.md),
+  [`docs/plans/week-02.md`](plans/week-02.md) §9). `ArchitectureRulesTest` proves that each rule
+  detects its violation. A new module must be added to `ArchitectureRules.BUSINESS_MODULES`.
 
 ### Layers inside a module
 
@@ -130,7 +131,7 @@ frontend/src
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
 | Security | *Planned for Week 2* ([ADR-0006](decisions/0006-session-authentication-security.md), proposed): Spring Security (deny by default), Spring Session JDBC (30 min idle, 12 h absolute), `HttpOnly` session cookie (`__Host-` + `Secure` in production), CSRF (SPA pattern), login/registration throttling. Session revocation on admin changes follows in Week 10. |
-| Architecture rules | *Planned for Week 2:* ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)) |
+| Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
 | Testing | Unit (JUnit + Mockito), web slices (`@WebMvcTest`), integration (Testcontainers PostgreSQL), frontend (Vitest + RTL), E2E (Playwright, Week 11) |
 | CI | GitHub Actions: backend `mvnw verify`, frontend lint → typecheck → test → build |
 

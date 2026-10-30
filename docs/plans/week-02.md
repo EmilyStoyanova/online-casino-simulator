@@ -317,6 +317,15 @@ documented but unimplemented path. W2-02 adds these rules to the test code (`Ope
 `OpenApiContractTest` gets cases for all three. swagger-core already parses `x-…` extensions
 (`Operation.getExtensions()`), so no new dependency is needed.
 
+**Implemented in W2-02 (pending review):**
+- The same marker is also allowed on **schema properties**. This is needed for the extended
+  `ProblemDetail`: its new properties `code` and `errors` are shared with the implemented
+  `/system/status` operation and are planned until W2-03. A planned property must not be required.
+- Only the value `planned` is accepted; any other value fails when the contract is loaded.
+- `differencesTo` also compares the effective `security` requirements and `requestBody.required`,
+  and resolves `$ref` responses (`components/responses`).
+- Every operation declares `security` explicitly (`[]` = public), checked by `OpenApiContractTest`.
+
 ### 5.2 Operations
 
 Security schemes: `sessionCookie` (`apiKey`, cookie `SESSION`; `__Host-SESSION` in production) and
@@ -709,8 +718,14 @@ src/
 | R8 | `user.dto.UserCredentials` used only by `user` and `auth` |
 | R9 | `org.springframework.security.config..` only in `auth.config` |
 | R10 | No field injection |
+| R11 | Every top-level package is `common` or a listed business module (so R1–R10 cover new modules) |
+| R12 | Every class resides in a layer package (`<module>.<layer>`; in `common` also `common.<feature>.<layer>`) |
 
-The existing `common.system` code already complies.
+The existing `common.system` code already complies. **Implemented in W2-01:** the rules are in
+`architecture/ArchitectureRules.java` (test sources), applied by `ModuleArchitectureTest`.
+`ArchitectureRulesTest` proves each rule against a fixture (package `archfixture`, outside
+`com.casino` so it is never component-scanned). R9 has no fixture until Spring Security is added
+(W2-04). R11 and R12 were added during implementation (pending review).
 
 ---
 

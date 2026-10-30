@@ -24,9 +24,9 @@ The API is **design-first**. The contract
 
 1. Change `openapi.yaml` (new path, field, status code, …) and review it. Operations designed ahead
    of their implementation carry `x-implementation-status: planned` and the summary suffix
-   "(planned)". *Planned:* support for this marker is added to the contract tests in Week 2 (W2-02).
-   The tests then skip the structural comparison for planned operations, and fail if a planned
-   operation is already implemented.
+   "(planned)"; schema properties designed ahead carry the same marker. The contract tests skip
+   planned elements while they are not implemented, fail as soon as one is implemented with the
+   marker still present, and never validate responses of planned operations.
 2. Implement the controller (`controller` package) and DTO records (`dto` package), and remove the
    `planned` marker in the same change.
 3. Run `./mvnw verify`. `OpenApiContractIT` fails while the implementation and the contract differ,
@@ -69,7 +69,8 @@ Example error (`POST /api/v1/system/status` → `405`):
 ## Planned (from the implementation plan)
 
 These endpoints are added to the contract first, in the week they are implemented. The Week 2
-contract design (schemas, error codes, security requirements) is in
+operations, schemas, error codes and security schemes are already in `openapi.yaml` (contract
+version 0.2.0) and marked `planned` (W2-02); the design rationale is in
 [`docs/plans/week-02.md`](plans/week-02.md) §5.
 
 | Method | Endpoint | Purpose | Week |

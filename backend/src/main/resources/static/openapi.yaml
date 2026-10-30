@@ -8,12 +8,17 @@ openapi: 3.1.0
 #   2. Implement it in a controller + DTO.
 #   3. `OpenApiContractIT` fails until the implementation matches the contract.
 #
+# Designed but not yet implemented operations and schema properties carry
+# `x-implementation-status: planned` (operations also get the summary suffix "(planned)").
+# The contract tests skip them while they are not implemented and fail as soon as an
+# implementation exists, so the marker is removed in the same change as the implementation.
+#
 # Served at /openapi.yaml and shown first in Swagger UI (/swagger-ui.html).
 # -----------------------------------------------------------------------------
 
 info:
   title: Online Casino Simulator API
-  version: 0.1.0
+  version: 0.2.0
   summary: Casino rules and probabilities with virtual currency only.
   description: |
     REST API of the Online Casino Simulator.
@@ -29,6 +34,19 @@ info:
       not match any operation: unknown paths return `404`, unsupported methods `405`, unacceptable
       media types `406`.
     - Timestamps are ISO-8601 in UTC (`date-time`).
+    - Operations whose summary ends with "(planned)" (`x-implementation-status: planned`) are
+      designed and reviewed, but not available yet.
+
+    ## Authentication (planned, Week 2)
+    - Server-side sessions: registration and login set an `HttpOnly` session cookie
+      (security scheme `sessionCookie`). There are no tokens in browser storage.
+    - CSRF protection (security scheme `csrfHeader`): every `POST`, `PUT`, `PATCH` and `DELETE`
+      request, including login and registration, sends the `XSRF-TOKEN` cookie value in the
+      `X-XSRF-TOKEN` header. The token is obtained with `GET /api/v1/auth/csrf` at start-up and
+      again after registration, login and logout. On `403` with code `CSRF_TOKEN_INVALID` the
+      client fetches a new token and retries once.
+    - Operations with `security: []` are public. All other operations require a session.
+    - Error responses carry a stable `code` (see `ProblemDetail`) and `Cache-Control: no-store`.
   license:
     name: Proprietary — SAP mentorship project
 
@@ -39,6 +57,12 @@ servers:
 tags:
   - name: System
     description: Platform status
+  - name: Authentication
+    description: Registration, login, logout and CSRF token (planned, Week 2)
+  - name: Users
+    description: Profile of the signed-in user (planned, Week 2)
+  - name: Interests
+    description: Catalog of educational interests (planned, Week 2)
   - name: Operations
     description: Infrastructure health probes provided by Spring Boot Actuator
 
@@ -51,6 +75,7 @@ paths:
       description: |
         Reports the application version and whether the database is reachable, including the
         latest applied database migration. Public, no authentication.
+      security: []
       responses:
         '200':
           description: Platform is up
@@ -92,12 +117,291 @@ paths:
                 detail: An unexpected error occurred. Please try again later.
                 instance: /api/v1/system/status
 
+  /api/v1/auth/csrf:
+    get:
+      tags: [Authentication]
+      operationId: getCsrfToken
+      summary: Issue a CSRF token (planned)
+      x-implementation-status: planned
+      description: |
+        *Planned (W2-04).* Sets the `XSRF-TOKEN` cookie, which JavaScript can read. Its value is sent
+        in the `X-XSRF-TOKEN` header with every unsafe request. Call it at start-up and again after
+        registration, login and logout, because these rotate or clear the token. Public.
+      security: []
+      responses:
+        '204':
+          description: Token cookie set
+          headers:
+            Set-Cookie:
+              description: '`XSRF-TOKEN=<token>; Path=/` (readable by JavaScript; `Secure` over HTTPS)'
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      operationId: register
+      summary: Register a player account and sign in (planned)
+      x-implementation-status: planned
+      description: |
+        *Planned (W2-07).* Creates a `PLAYER` account and signs the new user in: a new session id is
+        issued and the CSRF token is rotated, so the client fetches a new one with
+        `GET /api/v1/auth/csrf`. The email is trimmed and lower-cased before it is checked and stored.
+        `adultConfirmed` must be `true`; the confirmation time is taken from the server clock.
+        Properties that are not in `RegisterRequest` (for example `role`) are ignored.
+
+        Public, but requires a CSRF token. At most 10 registration attempts per client IP and hour,
+        including attempts that end in `409`.
+      security:
+        - csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              email: alice@example.com
+              password: correct-horse-battery
+              displayName: Alice
+              adultConfirmed: true
+      responses:
+        '201':
+          description: Account created; the user is signed in
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                id: 0b8f0c2e-5f3a-4c55-9d8e-2f6c1a7e9b10
+                email: alice@example.com
+                displayName: Alice
+                role: PLAYER
+                interests: []
+                adultConfirmedAt: '2026-11-02T09:15:00Z'
+                createdAt: '2026-11-02T09:15:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/CsrfTokenInvalid'
+        '409':
+          description: The email is already registered
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                title: Conflict
+                status: 409
+                code: EMAIL_ALREADY_REGISTERED
+                detail: An account with this email already exists.
+                instance: /api/v1/auth/register
+        '429':
+          $ref: '#/components/responses/TooManyAttempts'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      operationId: login
+      summary: Sign in (planned)
+      x-implementation-status: planned
+      description: |
+        *Planned (W2-08).* Signs the user in with email and password. On success a new session id is
+        issued (session-fixation protection) and the CSRF token is rotated, so the client fetches a
+        new one with `GET /api/v1/auth/csrf`.
+
+        Every failure (unknown email, wrong password, disabled account) returns the same `401` with
+        code `INVALID_CREDENTIALS`. Repeated failures are throttled per account and client IP
+        (5 per 15 minutes) and per client IP (50 per 15 minutes) with `429`; accounts are never
+        locked. Public, but requires a CSRF token.
+      security:
+        - csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: alice@example.com
+              password: correct-horse-battery
+      responses:
+        '200':
+          description: Signed in
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Sign-in failed. The response does not reveal whether the account exists.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                title: Unauthorized
+                status: 401
+                code: INVALID_CREDENTIALS
+                detail: The email or password is incorrect.
+                instance: /api/v1/auth/login
+        '403':
+          $ref: '#/components/responses/CsrfTokenInvalid'
+        '429':
+          $ref: '#/components/responses/TooManyAttempts'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logout
+      summary: Sign out (planned)
+      x-implementation-status: planned
+      description: |
+        *Planned (W2-08).* Ends the session: the stored session is deleted, the session cookie
+        expires and the CSRF token is cleared, so the client fetches a new one with
+        `GET /api/v1/auth/csrf`. Also returns `204` without a session (idempotent). Requires a CSRF
+        token.
+      security:
+        - csrfHeader: []
+      responses:
+        '204':
+          description: Signed out (or no session existed)
+          headers:
+            Set-Cookie:
+              description: Expires the session cookie and the `XSRF-TOKEN` cookie
+              schema:
+                type: string
+        '403':
+          $ref: '#/components/responses/CsrfTokenInvalid'
+
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      operationId: getCurrentUser
+      summary: Get the signed-in user's profile (planned)
+      x-implementation-status: planned
+      description: |
+        *Planned (W2-10).* Returns the profile of the user who owns the session. The SPA also uses it
+        at start-up to find out whether a user is signed in (`401` means anonymous).
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Profile of the signed-in user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                id: 0b8f0c2e-5f3a-4c55-9d8e-2f6c1a7e9b10
+                email: alice@example.com
+                displayName: Alice
+                role: PLAYER
+                interests: [PROBABILITY, MATHEMATICS]
+                adultConfirmedAt: '2026-11-02T09:15:00Z'
+                createdAt: '2026-11-02T09:15:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    patch:
+      tags: [Users]
+      operationId: updateCurrentUser
+      summary: Update the signed-in user's profile (planned)
+      x-implementation-status: planned
+      description: |
+        *Planned (W2-10).* Partial update of the display name and/or interests. Omitted properties are
+        left unchanged; `interests` replaces the whole selection. Email, role, status and the 18+
+        confirmation cannot be changed: such properties are ignored. Requires a session and a CSRF
+        token.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+            example:
+              displayName: Alice B.
+              interests: [PROBABILITY, STATISTICS]
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfTokenInvalid'
+        '409':
+          description: The profile was changed concurrently; reload it and try again
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                title: Conflict
+                status: 409
+                code: CONCURRENT_MODIFICATION
+                detail: The profile was changed by another request. Reload it and try again.
+                instance: /api/v1/users/me
+
+  /api/v1/interests:
+    get:
+      tags: [Interests]
+      operationId: listInterests
+      summary: List the educational interests (planned)
+      x-implementation-status: planned
+      description: |
+        *Planned (W2-09).* Active interests in display order. Users choose 0–8 of them in their
+        profile. Public.
+      security: []
+      responses:
+        '200':
+          description: Active interests in display order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Interest'
+              example:
+                - code: PROBABILITY
+                  name: Probability & odds
+                  description: How likely outcomes are and how odds are expressed
+                - code: MATHEMATICS
+                  name: Mathematics of games
+                  description: Expected value, house edge and variance
+
   /actuator/health:
     get:
       tags: [Operations]
       operationId: getHealth
       summary: Aggregated health
       description: Health of the application including its health groups. Returns `503` when not healthy.
+      security: []
       responses:
         '200':
           description: Application is healthy
@@ -127,6 +431,7 @@ paths:
       operationId: getLiveness
       summary: Liveness probe
       description: Whether the process is alive. Used by the hosting platform to restart the container.
+      security: []
       responses:
         '200':
           description: Alive
@@ -149,6 +454,7 @@ paths:
       operationId: getReadiness
       summary: Readiness probe
       description: Whether the application is ready to accept traffic.
+      security: []
       responses:
         '200':
           description: Ready
@@ -171,6 +477,7 @@ paths:
       operationId: getInfo
       summary: Application info
       description: Build and application information (currently empty).
+      security: []
       responses:
         '200':
           description: Application info
@@ -182,6 +489,135 @@ paths:
               example: {}
 
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: SESSION
+      description: |
+        *Planned (W2-04).* Server-side session (Spring Session JDBC). The cookie is `HttpOnly`,
+        `SameSite=Lax`, `Path=/` and has no `Domain`. In production it is named `__Host-SESSION` and
+        is `Secure`. Issued by registration and login; it ends with logout, after 30 minutes of
+        inactivity or 12 hours after sign-in. The browser sends it automatically.
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-XSRF-TOKEN
+      description: |
+        *Planned (W2-04).* CSRF token (Spring Security SPA pattern): the value of the `XSRF-TOKEN`
+        cookie from `GET /api/v1/auth/csrf`, sent with every `POST`, `PUT`, `PATCH` and `DELETE`.
+
+  headers:
+    NoStore:
+      description: Contains `no-store`, so errors and personal data are never cached.
+      schema:
+        type: string
+        examples: ['no-cache, no-store, max-age=0, must-revalidate']
+    SessionCookie:
+      description: |
+        Session cookie with a new session id, e.g. `SESSION=<id>; Path=/; HttpOnly; SameSite=Lax`
+        (`__Host-SESSION=<id>; Path=/; Secure; HttpOnly; SameSite=Lax` in production).
+      schema:
+        type: string
+    RetryAfter:
+      description: Seconds until the current throttling window ends.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+
+  responses:
+    BadRequest:
+      description: |
+        The request is invalid. `VALIDATION_FAILED` lists the invalid properties in `errors` (rejected
+        values are never echoed); `MALFORMED_REQUEST` means the body could not be read.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          examples:
+            validationFailed:
+              value:
+                title: Bad Request
+                status: 400
+                code: VALIDATION_FAILED
+                detail: The request contains invalid values.
+                instance: /api/v1/auth/register
+                errors:
+                  - field: password
+                    message: must be at least 12 characters long
+                  - field: adultConfirmed
+                    message: must be true
+            malformedRequest:
+              value:
+                title: Bad Request
+                status: 400
+                code: MALFORMED_REQUEST
+                detail: The request body could not be read.
+                instance: /api/v1/auth/register
+    Unauthenticated:
+      description: |
+        No valid session. `AUTHENTICATION_REQUIRED`: the request had no session cookie.
+        `SESSION_EXPIRED`: the session cookie refers to a session that has ended (inactivity, maximum
+        lifetime or logout).
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          examples:
+            authenticationRequired:
+              value:
+                title: Unauthorized
+                status: 401
+                code: AUTHENTICATION_REQUIRED
+                detail: Sign in to continue.
+                instance: /api/v1/users/me
+            sessionExpired:
+              value:
+                title: Unauthorized
+                status: 401
+                code: SESSION_EXPIRED
+                detail: Your session has ended. Sign in again.
+                instance: /api/v1/users/me
+    CsrfTokenInvalid:
+      description: The `X-XSRF-TOKEN` header is missing or does not match the `XSRF-TOKEN` cookie.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            title: Forbidden
+            status: 403
+            code: CSRF_TOKEN_INVALID
+            detail: The CSRF token is missing or invalid.
+            instance: /api/v1/auth/login
+    TooManyAttempts:
+      description: Too many attempts from this client; try again after `Retry-After` seconds.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            title: Too Many Requests
+            status: 429
+            code: TOO_MANY_ATTEMPTS
+            detail: Too many attempts. Try again later.
+            instance: /api/v1/auth/login
+
   schemas:
     ComponentStatus:
       type: string
@@ -221,11 +657,127 @@ components:
           description: Latest applied Flyway migration version; `null` when the database is unreachable.
           examples: ['1']
 
+    RegisterRequest:
+      type: object
+      description: New player account. Properties not listed here are ignored.
+      required: [email, password, displayName, adultConfirmed]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: Trimmed and lower-cased by the server before it is checked and stored.
+          examples: [alice@example.com]
+        password:
+          type: string
+          minLength: 12
+          maxLength: 72
+          writeOnly: true
+          description: |
+            At least 12 characters and at most 72 bytes in UTF-8 (longer passwords are rejected,
+            never truncated). Must not equal the email or the display name. Stored only as a BCrypt
+            hash.
+        displayName:
+          type: string
+          minLength: 3
+          maxLength: 30
+          examples: [Alice]
+        adultConfirmed:
+          type: boolean
+          description: Confirms that the user is at least 18 years old. Must be `true`.
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          minLength: 1
+          maxLength: 254
+          examples: [alice@example.com]
+        password:
+          type: string
+          minLength: 1
+          writeOnly: true
+
+    UpdateProfileRequest:
+      type: object
+      description: |
+        Partial profile update. Omitted properties are left unchanged. Properties not listed here
+        (for example `email` or `role`) are ignored.
+      properties:
+        displayName:
+          type: string
+          minLength: 3
+          maxLength: 30
+        interests:
+          type: array
+          description: The complete new selection (replaces the current one). Unknown or inactive codes are rejected.
+          maxItems: 8
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^[A-Z][A-Z0-9_]*$'
+            maxLength: 40
+
+    UserProfile:
+      type: object
+      description: Profile of the signed-in user. Never contains the password or its hash.
+      required: [id, email, displayName, role, interests, adultConfirmedAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        role:
+          $ref: '#/components/schemas/UserRole'
+        interests:
+          type: array
+          description: Codes of the selected interests (see `GET /api/v1/interests`)
+          items:
+            type: string
+            pattern: '^[A-Z][A-Z0-9_]*$'
+            maxLength: 40
+        adultConfirmedAt:
+          type: string
+          format: date-time
+          description: When the user confirmed being at least 18 (server time, UTC)
+        createdAt:
+          type: string
+          format: date-time
+
+    UserRole:
+      type: string
+      description: |
+        `PLAYER` for every registered user. `ADMIN` is never assigned through the API; the first
+        administrator is created from environment configuration.
+      enum: [PLAYER, ADMIN]
+
+    Interest:
+      type: object
+      description: Educational interest from the catalog.
+      required: [code, name, description]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]*$'
+          maxLength: 40
+          examples: [PROBABILITY]
+        name:
+          type: string
+          examples: [Probability & odds]
+        description:
+          type: string
+          examples: [How likely outcomes are and how odds are expressed]
+
     ProblemDetail:
       type: object
       description: |
-        RFC 9457 Problem Details. Additional, error-specific members may be present at the top level
-        (for example field validation errors, added in later API versions).
+        RFC 9457 Problem Details. Additional, error-specific members may be present at the top level.
       required: [title, status]
       properties:
         type:
@@ -246,7 +798,45 @@ components:
           type: string
           format: uri-reference
           description: Request path where the problem occurred
+        code:
+          type: string
+          x-implementation-status: planned
+          description: |
+            *Planned (W2-03).* Stable, machine-readable error code. Clients decide on this value,
+            never on `title` or `detail`.
+          enum:
+            - VALIDATION_FAILED
+            - MALFORMED_REQUEST
+            - AUTHENTICATION_REQUIRED
+            - SESSION_EXPIRED
+            - INVALID_CREDENTIALS
+            - ACCESS_DENIED
+            - CSRF_TOKEN_INVALID
+            - NOT_FOUND
+            - METHOD_NOT_ALLOWED
+            - EMAIL_ALREADY_REGISTERED
+            - CONCURRENT_MODIFICATION
+            - TOO_MANY_ATTEMPTS
+            - INTERNAL_ERROR
+        errors:
+          type: array
+          x-implementation-status: planned
+          description: '*Planned (W2-03).* Invalid request properties; only present for `VALIDATION_FAILED`.'
+          items:
+            $ref: '#/components/schemas/FieldError'
       additionalProperties: true
+
+    FieldError:
+      type: object
+      description: One invalid request property. The rejected value is never included.
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          description: Name of the request property, e.g. `password`
+        message:
+          type: string
+          description: What is wrong with the value
 
     HealthStatus:
       type: object
