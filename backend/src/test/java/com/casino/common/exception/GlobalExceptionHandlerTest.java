@@ -1,6 +1,7 @@
 package com.casino.common.exception;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -19,6 +20,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,6 +29,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.InsufficientAuthenticationException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -45,8 +50,10 @@ import org.springframework.web.server.ResponseStatusException;
  * Every error the {@link GlobalExceptionHandler} produces: status, stable code, Problem Details
  * structure (validated against {@code ProblemDetail} in {@code openapi.yaml}), {@code no-store} and
  * no internal details. Uses a test-only controller, because no production endpoint accepts a body yet.
+ * The security filter chain is left out: this test covers Spring MVC error handling only.
  */
 @WebMvcTest(GlobalExceptionHandlerTest.ProbeController.class)
+@AutoConfigureMockMvc(addFilters = false)
 @Import(GlobalExceptionHandlerTest.ProbeController.class)
 class GlobalExceptionHandlerTest {
 
@@ -167,6 +174,17 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.detail").value(ProblemCode.SERVER_ERROR.defaultDetail()));
     }
 
+    @Test
+    void securityExceptionsAreLeftToSpringSecurity() {
+        // Rethrown to the filter chain (ExceptionTranslationFilter → 401/403), never turned into a 500.
+        for (String path : List.of("/test/errors/access-denied", "/test/errors/unauthenticated")) {
+            assertThatThrownBy(() -> mockMvc.perform(get(path)))
+                    .as(path)
+                    .rootCause()
+                    .isInstanceOfAny(AccessDeniedException.class, AuthenticationException.class);
+        }
+    }
+
     private ResultActions expectProblem(MockHttpServletRequestBuilder request, ProblemCode code) throws Exception {
         return expectProblem(request, code, code.status());
     }
@@ -252,6 +270,16 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/unavailable")
         void unavailable() {
             throw new AsyncRequestTimeoutException();
+        }
+
+        @GetMapping("/access-denied")
+        void accessDenied() {
+            throw new AccessDeniedException(SECRET);
+        }
+
+        @GetMapping("/unauthenticated")
+        void unauthenticated() {
+            throw new InsufficientAuthenticationException(SECRET);
         }
     }
 }

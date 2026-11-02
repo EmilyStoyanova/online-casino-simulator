@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import jakarta.servlet.RequestDispatcher;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -19,9 +20,11 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Edge cases of the {@code /error} fallback with the attributes the servlet container sets on a
- * forward. The forwarding itself is covered by {@code ErrorHandlingIT}.
+ * forward. The forwarding itself (including the security filter chain on the error dispatch) is covered
+ * by {@code ErrorHandlingIT}.
  */
 @WebMvcTest(ErrorFallbackController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class ErrorFallbackControllerTest {
 
     private static final String SECRET = "secret container detail";

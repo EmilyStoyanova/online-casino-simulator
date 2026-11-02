@@ -1,6 +1,8 @@
 package com.casino.contract;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
@@ -65,6 +67,7 @@ class OpenApiContractIT {
         // A newly implemented operation must also get a runtime check below.
         assertThat(contract.implementedOperations()).containsExactlyInAnyOrder(
                 "GET /api/v1/system/status",
+                "GET /api/v1/auth/csrf",
                 "GET /actuator/health",
                 "GET /actuator/health/liveness",
                 "GET /actuator/health/readiness",
@@ -72,7 +75,6 @@ class OpenApiContractIT {
         // Planned operations cannot be verified at runtime (validateResponse rejects them). When one is
         // implemented, its marker is removed and it moves to the list above. Empty at the end of Week 2.
         assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "GET /api/v1/auth/csrf",
                 "POST /api/v1/auth/register",
                 "POST /api/v1/auth/login",
                 "POST /api/v1/auth/logout",
@@ -87,6 +89,14 @@ class OpenApiContractIT {
     }
 
     @Test
+    void csrfTokenRespondsAccordingToContract() throws Exception {
+        MockHttpServletResponse response = assertConformsToContract("/api/v1/auth/csrf", get("/api/v1/auth/csrf"), 204);
+
+        assertThat(response.getCookie("XSRF-TOKEN")).isNotNull();
+        assertThat(response.getHeader(HttpHeaders.CACHE_CONTROL)).contains("no-store");
+    }
+
+    @Test
     void actuatorEndpointsRespondAccordingToContract() throws Exception {
         for (String path : new String[] {"/actuator/health", "/actuator/health/liveness",
                 "/actuator/health/readiness", "/actuator/info"}) {
@@ -98,8 +108,10 @@ class OpenApiContractIT {
     void requestsOutsideTheContractReturnProblemDetails() throws Exception {
         // The errors that info.description documents for every operation.
         Map<ProblemCode, MockHttpServletRequestBuilder> requests = Map.of(
-                ProblemCode.NOT_FOUND, get("/api/v1/system/unknown"),
-                ProblemCode.METHOD_NOT_ALLOWED, post("/api/v1/system/status"),
+                ProblemCode.AUTHENTICATION_REQUIRED, get("/api/v1/system/unknown"),
+                ProblemCode.NOT_FOUND, get("/api/v1/system/unknown").with(user("player")),
+                ProblemCode.CSRF_TOKEN_INVALID, post("/api/v1/system/status"),
+                ProblemCode.METHOD_NOT_ALLOWED, post("/api/v1/system/status").with(csrf()),
                 ProblemCode.NOT_ACCEPTABLE, get("/api/v1/system/status").accept(MediaType.APPLICATION_XML));
 
         for (Map.Entry<ProblemCode, MockHttpServletRequestBuilder> entry : requests.entrySet()) {
@@ -132,8 +144,8 @@ class OpenApiContractIT {
         assertThat(urls).containsExactlyInAnyOrder("/openapi.yaml", "/v3/api-docs");
     }
 
-    private void assertConformsToContract(String path, MockHttpServletRequestBuilder request, int expectedStatus)
-            throws Exception {
+    private MockHttpServletResponse assertConformsToContract(String path, MockHttpServletRequestBuilder request,
+                                                             int expectedStatus) throws Exception {
         MockHttpServletResponse response = perform(request);
 
         assertThat(response.getStatus()).as("%s status", path).isEqualTo(expectedStatus);
@@ -141,6 +153,7 @@ class OpenApiContractIT {
                 response.getHeader(HttpHeaders.CONTENT_TYPE), response.getContentAsString(StandardCharsets.UTF_8)))
                 .as("%s response vs contract", path)
                 .isEmpty();
+        return response;
     }
 
     private MockHttpServletResponse perform(MockHttpServletRequestBuilder request) throws Exception {

@@ -35,11 +35,15 @@ class CasinoSimulatorApplicationIT {
     @Test
     void appliesFlywayMigrationsOnStartup() {
         assertThat(flyway.info().pending()).isEmpty();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
 
         Integer functionCount = jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM pg_proc WHERE proname = 'set_updated_at'", Integer.class);
         assertThat(functionCount).isEqualTo(1);
+        // V2: Spring Session JDBC schema (unquoted names are lower-cased by PostgreSQL).
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'spring_session%'", String.class))
+                .containsExactlyInAnyOrder("spring_session", "spring_session_attributes");
     }
 
     @Test
@@ -48,7 +52,7 @@ class CasinoSimulatorApplicationIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"))
                 .andExpect(jsonPath("$.database.status").value("UP"))
-                .andExpect(jsonPath("$.database.schemaVersion").value("1"))
+                .andExpect(jsonPath("$.database.schemaVersion").value("2"))
                 .andExpect(jsonPath("$.version").isNotEmpty());
     }
 

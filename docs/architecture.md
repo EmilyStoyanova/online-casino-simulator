@@ -130,7 +130,7 @@ frontend/src
 | API documentation | Swagger UI at `/swagger-ui.html`, showing the contract and the generated implementation view (to be disabled in production, Week 12) |
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
-| Security | *Planned for Week 2* ([ADR-0006](decisions/0006-session-authentication-security.md), proposed): Spring Security (deny by default), Spring Session JDBC (30 min idle, 12 h absolute), `HttpOnly` session cookie (`__Host-` + `Secure` in production), CSRF (SPA pattern), login/registration throttling. Session revocation on admin changes follows in Week 10. |
+| Security | [ADR-0006](decisions/0006-session-authentication-security.md) (proposed). **Implemented (W2-04):** Spring Security in `auth.config.SecurityConfig` (deny by default, JSON 401/403 via `ProblemDetailFactory`), Spring Session JDBC (30 min idle), `HttpOnly`/`SameSite=Lax` session cookie (`__Host-` + `Secure` in production), CSRF (`csrf.spa()`, `GET /api/v1/auth/csrf`), CORS via a `CorsConfigurationSource`, BCrypt cost 12. **Planned:** login/registration, 12 h absolute lifetime, throttling (Week 2); session revocation on admin changes (Week 10). |
 | Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
 | Testing | Unit (JUnit + Mockito), web slices (`@WebMvcTest`), integration (Testcontainers PostgreSQL), frontend (Vitest + RTL), E2E (Playwright, Week 11) |
 | CI | GitHub Actions: backend `mvnw verify`, frontend lint → typecheck → test → build |

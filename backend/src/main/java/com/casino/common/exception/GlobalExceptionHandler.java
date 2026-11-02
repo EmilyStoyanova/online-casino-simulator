@@ -14,6 +14,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -43,9 +45,9 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  *       logged.</li>
  * </ul>
  *
- * <p>Spring Security's {@code AuthenticationException} and {@code AccessDeniedException} are not on
- * the classpath yet. When they are (W2-04), they must not reach the {@code Exception} catch-all, so
- * that Spring Security's entry point and access-denied handler answer them with {@code 401}/{@code 403}.
+ * <p>Spring Security's {@link AuthenticationException} and {@link AccessDeniedException} thrown by a
+ * controller or service are rethrown instead of becoming a {@code 500}, so that Spring Security's
+ * entry point and access-denied handler answer them with {@code 401}/{@code 403}.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
@@ -57,6 +59,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ApiException.class)
     ResponseEntity<Object> handleApiException(ApiException ex, WebRequest request) {
         return respond(ex, ProblemDetailFactory.create(ex.code(), ex.getMessage(), path(request)), new HttpHeaders(), request);
+    }
+
+    /** Lets Spring Security's {@code ExceptionTranslationFilter} handle them (see the class documentation). */
+    @ExceptionHandler({AuthenticationException.class, AccessDeniedException.class})
+    void rethrowSecurityException(Exception ex) throws Exception {
+        throw ex;
     }
 
     /** Returns {@link ProblemDetail} directly, so springdoc documents the 500 as {@code application/problem+json}. */

@@ -218,7 +218,7 @@ Week 3).
 
 | ID | Acceptance criterion |
 |---|---|
-| AC-10.1 | All errors (MVC, Spring Security 401/403, `/error` fallback) are `application/problem+json` with a stable `code` that matches the contract. |
+| AC-10.1 | All errors (MVC, Spring Security 401/403, `/error` fallback) are `application/problem+json` with a stable `code` that matches the contract. Documented exception: Spring's plain-text `403` for a disallowed CORS origin (§7.2). |
 | AC-10.2 | No stack traces, exception messages, SQL or class names in responses. |
 | AC-10.3 | Error responses carry `Cache-Control: no-store`. |
 | AC-10.4 | Passwords, session ids, CSRF tokens and request bodies are never logged. |
@@ -407,70 +407,19 @@ must not reach the `Exception` catch-all of `GlobalExceptionHandler`.
 
 Four Flyway migrations, following [`docs/database.md`](../database.md).
 
-### V2 — `V2__create_users.sql`
+**Numbered in implementation order (approved 2026-11-02):** Flyway rejects a migration whose version
+is lower than one already applied (`outOfOrder=false`). The Spring Session schema is needed first
+(W2-04), so it is **V2**; users (V3), interests (V4) and throttling (V5) follow. Revision 3 had
+V2 users, V3 interests, V4 sessions. Every migration only adds objects; none changes existing data.
 
-```sql
-CREATE TABLE users (
-    id                 UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    email              VARCHAR(254) NOT NULL,
-    password_hash      VARCHAR(100) NOT NULL,
-    display_name       VARCHAR(30)  NOT NULL,
-    role               VARCHAR(20)  NOT NULL DEFAULT 'PLAYER',
-    status             VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
-    adult_confirmed_at TIMESTAMPTZ  NOT NULL,
-    last_login_at      TIMESTAMPTZ,
-    created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    version            BIGINT       NOT NULL DEFAULT 0,
-    CONSTRAINT uq_users_email            UNIQUE (email),
-    CONSTRAINT ck_users_email_normalized CHECK (email = lower(btrim(email))),
-    CONSTRAINT ck_users_role             CHECK (role IN ('PLAYER', 'ADMIN')),
-    CONSTRAINT ck_users_status           CHECK (status IN ('ACTIVE', 'DISABLED'))
-);
+| Version | File | Task |
+|---|---|---|
+| V2 | `V2__create_spring_session.sql` | W2-04 (implemented) |
+| V3 | `V3__create_users.sql` | W2-05 |
+| V4 | `V4__create_interests.sql` | W2-05 |
+| V5 | `V5__create_auth_throttle.sql` | W2-06 |
 
-CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-```
-
-- UUID ids (not enumerable); one `role` column (two exclusive roles); `version` for optimistic
-  locking; no date of birth or IP address (data minimisation).
-- The only trigger is the existing `set_updated_at()` from V1.
-
-### V3 — `V3__create_interests.sql`
-
-```sql
-CREATE TABLE interests (
-    code        VARCHAR(40)  PRIMARY KEY,
-    name        VARCHAR(80)  NOT NULL,
-    description VARCHAR(255) NOT NULL,
-    sort_order  SMALLINT     NOT NULL,
-    active      BOOLEAN      NOT NULL DEFAULT TRUE,
-    CONSTRAINT ck_interests_code CHECK (code ~ '^[A-Z][A-Z0-9_]*$')
-);
-
-CREATE TABLE user_interests (
-    user_id       UUID        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    interest_code VARCHAR(40) NOT NULL REFERENCES interests (code),
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (user_id, interest_code)
-);
-
-INSERT INTO interests (code, name, description, sort_order) VALUES
-    ('PROBABILITY',        'Probability & odds',      'How likely outcomes are and how odds are expressed',                      10),
-    ('MATHEMATICS',        'Mathematics of games',    'Expected value, house edge and variance',                                 20),
-    ('STATISTICS',         'Statistics & data',       'Reading results, randomness and the law of large numbers',                30),
-    ('GAME_THEORY',        'Game theory & strategy',  'Decision-making under uncertainty',                                       40),
-    ('PSYCHOLOGY',         'Psychology of decisions', 'Cognitive biases such as the gambler''s fallacy',                         50),
-    ('FINANCIAL_LITERACY', 'Financial literacy',      'Budgeting, risk and personal finance basics',                             60),
-    ('HISTORY',            'History of games',        'Origins and evolution of casino games',                                   70),
-    ('RESPONSIBLE_PLAY',   'Responsible play',        'Healthy habits, limits and self-awareness (informational, not clinical)', 80);
-```
-
-The implementation plan uses `user_preferences` for interests. Interests get `user_interests`
-(many-to-many), and `user_preferences` stays reserved for UI settings in Week 6. See
-[change proposal 0001](../proposals/0001-implementation-plan-alignment.md).
-
-### V4 — `V4__create_spring_session.sql`
+### V2 — `V2__create_spring_session.sql` *(implemented in W2-04)*
 
 The official Spring Session JDBC 4.1.1 PostgreSQL schema
 (`org/springframework/session/jdbc/schema-postgresql.sql`), copied verbatim. It defines tables
@@ -505,6 +454,69 @@ CREATE TABLE SPRING_SESSION_ATTRIBUTES (
 - `spring.session.jdbc.initialize-schema=never`, so Flyway owns the schema.
 - Spring Session's cleanup job removes expired sessions (default every minute).
 - `PRINCIPAL_NAME` = user id, which allows "find all sessions of a user" for Week 10 revocation.
+
+### V3 — `V3__create_users.sql`
+
+```sql
+CREATE TABLE users (
+    id                 UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    email              VARCHAR(254) NOT NULL,
+    password_hash      VARCHAR(100) NOT NULL,
+    display_name       VARCHAR(30)  NOT NULL,
+    role               VARCHAR(20)  NOT NULL DEFAULT 'PLAYER',
+    status             VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+    adult_confirmed_at TIMESTAMPTZ  NOT NULL,
+    last_login_at      TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    version            BIGINT       NOT NULL DEFAULT 0,
+    CONSTRAINT uq_users_email            UNIQUE (email),
+    CONSTRAINT ck_users_email_normalized CHECK (email = lower(btrim(email))),
+    CONSTRAINT ck_users_role             CHECK (role IN ('PLAYER', 'ADMIN')),
+    CONSTRAINT ck_users_status           CHECK (status IN ('ACTIVE', 'DISABLED'))
+);
+
+CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+```
+
+- UUID ids (not enumerable); one `role` column (two exclusive roles); `version` for optimistic
+  locking; no date of birth or IP address (data minimisation).
+- The only trigger is the existing `set_updated_at()` from V1.
+
+### V4 — `V4__create_interests.sql`
+
+```sql
+CREATE TABLE interests (
+    code        VARCHAR(40)  PRIMARY KEY,
+    name        VARCHAR(80)  NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    sort_order  SMALLINT     NOT NULL,
+    active      BOOLEAN      NOT NULL DEFAULT TRUE,
+    CONSTRAINT ck_interests_code CHECK (code ~ '^[A-Z][A-Z0-9_]*$')
+);
+
+CREATE TABLE user_interests (
+    user_id       UUID        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    interest_code VARCHAR(40) NOT NULL REFERENCES interests (code),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, interest_code)
+);
+
+INSERT INTO interests (code, name, description, sort_order) VALUES
+    ('PROBABILITY',        'Probability & odds',      'How likely outcomes are and how odds are expressed',                      10),
+    ('MATHEMATICS',        'Mathematics of games',    'Expected value, house edge and variance',                                 20),
+    ('STATISTICS',         'Statistics & data',       'Reading results, randomness and the law of large numbers',                30),
+    ('GAME_THEORY',        'Game theory & strategy',  'Decision-making under uncertainty',                                       40),
+    ('PSYCHOLOGY',         'Psychology of decisions', 'Cognitive biases such as the gambler''s fallacy',                         50),
+    ('FINANCIAL_LITERACY', 'Financial literacy',      'Budgeting, risk and personal finance basics',                             60),
+    ('HISTORY',            'History of games',        'Origins and evolution of casino games',                                   70),
+    ('RESPONSIBLE_PLAY',   'Responsible play',        'Healthy habits, limits and self-awareness (informational, not clinical)', 80);
+```
+
+The implementation plan uses `user_preferences` for interests. Interests get `user_interests`
+(many-to-many), and `user_preferences` stays reserved for UI settings in Week 6. See
+[change proposal 0001](../proposals/0001-implementation-plan-alignment.md).
 
 ### V5 — `V5__create_auth_throttle.sql`
 
@@ -561,6 +573,28 @@ CorsFilter → SessionRepositoryFilter (Spring Session) → SecurityContextHolde
 | `/api/v1/admin/**` | `hasRole("ADMIN")` |
 | `/api/**` | `authenticated()` |
 | everything else | `denyAll()` |
+
+**Implemented in W2-04 (pending review):** `auth.config.SecurityConfig` with the rules above for the
+operations that exist. The `permitAll` rules for register, login, logout and interests are added
+with those endpoints (W2-07…W2-09), the `/admin/**` rule in W2-11; until then these paths are covered
+by `/api/**` → `401`. Details:
+- Public paths are permitted for **every method** (the table above lists the documented `GET`s):
+  `HEAD` works wherever `GET` does, and an unsupported method answers `405` instead of `401`
+  (unsafe methods need a CSRF token first).
+- A request from a disallowed origin gets Spring's plain-text `403 Invalid CORS request` (no CORS
+  headers). It is the documented exception to AC-10.1: the browser does not expose it to the foreign
+  page, and standardizing it would require replacing Spring Security's CORS filter.
+- The entry point and the access-denied handler (`auth.exception`) resolve their error through
+  Spring MVC's `HandlerExceptionResolver`, so `GlobalExceptionHandler` renders them like every other
+  error. `GlobalExceptionHandler` rethrows `AuthenticationException`/`AccessDeniedException` from
+  controllers to Spring Security instead of turning them into `500`.
+- The request cache is disabled: an anonymous `401` creates no session.
+- `csrf.spa()` (Spring Security 7) renders the `XSRF-TOKEN` cookie on every response; `GET /auth/csrf`
+  guarantees it explicitly (contract, SPA start-up).
+- Spring Boot's in-memory default user (`UserDetailsServiceAutoConfiguration`, generated and logged
+  password) is excluded until `AccountUserDetailsService` exists (W2-08).
+- Spring Boot applies `server.servlet.session.cookie.*` to the Spring Session cookie only with the
+  embedded server, so `WebSecurityIT` runs with `RANDOM_PORT`.
 
 ### 7.3 Passwords
 
@@ -780,7 +814,7 @@ The existing `common.system` code already complies. **Implemented in W2-01:** th
 
 | Test class | Covers |
 |---|---|
-| `MigrationsIT` | V2–V5 apply, constraints, interests seeded |
+| `MigrationsIT` | V3–V5 apply, constraints, interests seeded (V2 is checked by `CasinoSimulatorApplicationIT`) |
 | `RegistrationIT` | 201 + signed in + new session id; hash prefix; case-variant duplicate → 409; `REGISTER_IP` → 429; `"role":"ADMIN"` ignored |
 | `LoginLogoutIT` | login → me → logout → me = 401; session row created and deleted; disabled user → 401; identical body for unknown email / wrong password / disabled; `last_login_at` |
 | `CsrfIT` | missing/invalid token → 403 on every unsafe operation; fresh client: `GET /auth/csrf` then register works; token before login/logout rejected afterwards |
@@ -814,8 +848,8 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-01 | ArchUnit `ModuleArchitectureTest` (R1–R10) | S | — |
 | W2-02 | **Contract:** all Week 2 operations and schemas in `openapi.yaml` as `planned`, security schemes, extended `ProblemDetail`; `planned`/`security` support in `OpenApiContract` + tests. **Review gate.** | M | — |
 | W2-03 | Error model: `ApiException`, `ProblemCode`, `ProblemDetailFactory`, field errors and `no-store` in `GlobalExceptionHandler` | S | W2-02 |
-| W2-04 | Security foundation: dependencies, `SecurityConfig` (§7.1–7.2), entry point and denied handler, CORS source, Spring Session JDBC + **V4**, cookie properties, `PasswordEncoder`; **endpoint `GET /auth/csrf`** (①–⑥); adapt existing tests | L | W2-02, W2-03 |
-| W2-05 | Persistence foundation for `user`: **V2, V3**, entities `UserAccount`/`Interest`, repositories, `MigrationsIT` (shared by W2-07…W2-10) | M | W2-01 |
+| W2-04 | Security foundation: dependencies, `SecurityConfig` (§7.1–7.2), entry point and denied handler, CORS source, Spring Session JDBC + **V2**, cookie properties, `PasswordEncoder`; **endpoint `GET /auth/csrf`** (①–⑥); adapt existing tests | L | W2-02, W2-03 |
+| W2-05 | Persistence foundation for `user`: **V3, V4**, entities `UserAccount`/`Interest`, repositories, `MigrationsIT` (shared by W2-07…W2-10) | M | W2-01 |
 | W2-06 | Throttling: **V5**, `AuthThrottleRepository` (atomic upsert), `AuthThrottleService`, cleanup job, unit tests | M | W2-04 |
 | W2-07 | **Endpoint `POST /auth/register`** (①–⑥): `RegisterRequest`, `UserProfileResponse`; `AuthController`; `RegistrationService`, `UserAccountService`, `PasswordPolicy`, `SessionSignInService`; `REGISTER_IP`; `RegistrationIT`, `CsrfIT` (part) | L | W2-04, W2-05, W2-06 |
 | W2-08 | **Endpoints `POST /auth/login` and `/auth/logout`** (①–⑥): `LoginRequest`; `AccountUserDetailsService`, `LoginService`; `AbsoluteSessionTimeoutFilter`; login limits; `LoginLogoutIT`, `CsrfIT`, `SessionLifetimeIT`, `CookieAttributesIT`, `ThrottleIT` | L | W2-07 |

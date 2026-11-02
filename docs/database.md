@@ -6,7 +6,8 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 ## Migration conventions
 
 - Location: `backend/src/main/resources/db/migration`
-- Naming: `V<version>__<description>.sql`, e.g. `V2__create_users.sql`
+- Naming: `V<version>__<description>.sql`, e.g. `V3__create_users.sql`. Versions follow the order of
+  implementation: Flyway rejects a new migration whose version is lower than one already applied.
 - Applied migrations are **never edited**; every change is a new migration.
 - Each table is introduced by the module (and week) that owns it.
 - Conventions for new tables:
@@ -22,6 +23,7 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 | Version | Description |
 |---|---|
 | V1 | `set_updated_at()` trigger function shared by tables with an `updated_at` column |
+| V2 | `spring_session`, `spring_session_attributes`: HTTP sessions (official Spring Session JDBC 4.1.1 schema, verbatim) |
 
 ## Planned tables (from the implementation plan)
 
@@ -31,11 +33,10 @@ original plan are listed in
 
 | Table | Purpose | Week |
 |---|---|---|
-| `users` | Accounts, password hashes, status, role | 2 |
-| `interests` | Catalogue of educational interests (reference data) | 2 |
-| `user_interests` | Interests selected by each user (replaces the plan's use of `user_preferences` for interests) | 2 |
-| `spring_session`, `spring_session_attributes` | HTTP sessions (Spring Session JDBC schema) | 2 |
-| `auth_throttle` | Fixed-window counters (hashed keys) for login/registration rate limiting | 2 |
+| `users` | Accounts, password hashes, status, role (V3) | 2 |
+| `interests` | Catalogue of educational interests (reference data, V4) | 2 |
+| `user_interests` | Interests selected by each user (replaces the plan's use of `user_preferences` for interests, V4) | 2 |
+| `auth_throttle` | Fixed-window counters (hashed keys) for login/registration rate limiting (V5) | 2 |
 | `user_preferences` | UI preferences (sound, reduced motion, …) | 6 |
 | `wallets` | Current virtual balance and row version (optimistic locking) | 3 |
 | `wallet_transactions` | Immutable ledger of balance changes, unique idempotency key | 3 |

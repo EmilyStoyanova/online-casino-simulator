@@ -46,6 +46,20 @@ The API is **design-first**. The contract
   `413`, `503`, …) keep their status and get the code of that status; their own message is never
   sent. `GET /api/v1/system/status` keeps its `503` with a `SystemStatus` body.
 - All input is validated, and authorization and business rules are enforced on the server.
+- Access is denied by default (Spring Security). Public operations have `security: []`; every other
+  `/api/**` path needs a session: `401 AUTHENTICATION_REQUIRED`, or `401 SESSION_EXPIRED` when the
+  session cookie refers to an ended session. An unknown `/api/**` path therefore returns `401`
+  without a session and `404` with one. Paths outside `/api/**` that are not listed as public are
+  denied (`401`/`403 ACCESS_DENIED`).
+- Every `POST`, `PUT`, `PATCH` and `DELETE` needs the CSRF token: the `XSRF-TOKEN` cookie value in the
+  `X-XSRF-TOKEN` header (`GET /api/v1/auth/csrf` issues the cookie), otherwise `403 CSRF_TOKEN_INVALID`.
+  Public paths accept every method (and `HEAD` wherever `GET` works); an unsupported method returns
+  `405 METHOD_NOT_ALLOWED` once the CSRF check has passed.
+- **Exception to Problem Details:** a request from an origin that is not in `APP_CORS_ALLOWED_ORIGINS`
+  is rejected by Spring's CORS processor before any application code, with `403`, the fixed
+  plain-text body `Invalid CORS request` and no CORS headers. The browser does not expose this
+  response to the foreign page, so a Problem Details body would have no reader; standardizing it
+  would require replacing Spring Security's CORS filter.
 
 ## Workflow for API changes
 
@@ -65,6 +79,7 @@ The API is **design-first**. The contract
 | Method | Path | Tag | Responses | Description |
 |---|---|---|---|---|
 | GET | `/api/v1/system/status` | System | `200` `SystemStatus`, `503` `SystemStatus`, `500` `ProblemDetail` | Application version and database connectivity (public) |
+| GET | `/api/v1/auth/csrf` | Authentication | `204` (`XSRF-TOKEN` cookie), `500` `ProblemDetail` | CSRF token for unsafe requests (public) |
 | GET | `/actuator/health` | Operations | `200` / `503` `HealthStatus` | Aggregated health incl. health groups |
 | GET | `/actuator/health/liveness` | Operations | `200` / `503` `HealthStatus` | Liveness probe |
 | GET | `/actuator/health/readiness` | Operations | `200` / `503` `HealthStatus` | Readiness probe |
@@ -114,12 +129,11 @@ Example validation error (`400`):
 
 These endpoints are added to the contract first, in the week they are implemented. The Week 2
 operations, schemas, error codes and security schemes are already in `openapi.yaml` (contract
-version 0.2.0) and marked `planned` (W2-02); the design rationale is in
-[`docs/plans/week-02.md`](plans/week-02.md) §5.
+version 0.2.0) and marked `planned` (W2-02) until they are implemented (`GET /api/v1/auth/csrf`
+since W2-04); the design rationale is in [`docs/plans/week-02.md`](plans/week-02.md) §5.
 
 | Method | Endpoint | Purpose | Week |
 |---|---|---|---|
-| GET | `/api/v1/auth/csrf` | Obtain the CSRF token cookie (SPA start-up) | 2 |
 | POST | `/api/v1/auth/register` | Registration with automatic sign-in | 2 |
 | POST | `/api/v1/auth/login` | Login (session cookie) | 2 |
 | POST | `/api/v1/auth/logout` | Logout | 2 |

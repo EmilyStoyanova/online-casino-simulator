@@ -23,6 +23,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.Ordered;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
@@ -75,7 +76,8 @@ class ErrorHandlingIT {
 
     @Test
     void browserRequestsAlsoGetProblemDetails() throws Exception {
-        expectProblem(send("/api/v1/system/unknown", BROWSER), ProblemCode.NOT_FOUND);
+        // Spring Security's 401 (entry point) is rendered by the same error handling.
+        expectProblem(send("/api/v1/system/unknown", BROWSER), ProblemCode.AUTHENTICATION_REQUIRED);
     }
 
     private HttpResponse<String> send(String path, String accept) throws IOException, InterruptedException {
@@ -101,7 +103,11 @@ class ErrorHandlingIT {
         return problem;
     }
 
-    /** Detected automatically as a nested test configuration; never part of other test contexts. */
+    /**
+     * Detected automatically as a nested test configuration; never part of other test contexts. The
+     * filters run before Spring Session and Spring Security, so the forwarded error dispatch to
+     * {@code /error} passes the security filter chain, where {@code /error} must be permitted.
+     */
     @TestConfiguration(proxyBeanMethods = false)
     static class FailingFilters {
 
@@ -121,6 +127,7 @@ class ErrorHandlingIT {
         private static FilterRegistrationBean<Filter> register(String path, Filter filter) {
             FilterRegistrationBean<Filter> registration = new FilterRegistrationBean<>(filter);
             registration.addUrlPatterns(path);
+            registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
             return registration;
         }
     }

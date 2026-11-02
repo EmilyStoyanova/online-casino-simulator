@@ -228,8 +228,14 @@ public final class OpenApiContract {
         if (response == null) {
             return List.of(method + " " + path + ": status " + status + " is not documented");
         }
+        Map<String, MediaType> content = orEmpty(resolve(response).getContent());
+        if (content.isEmpty()) {
+            // e.g. 204: no body is documented, so none may be sent.
+            return body == null || body.isEmpty() ? List.of()
+                    : List.of(method + " " + path + " " + status + ": no content is documented, but the body is not empty");
+        }
         String baseType = contentType == null ? "" : contentType.split(";")[0].trim().toLowerCase(Locale.ROOT);
-        MediaType mediaType = orEmpty(resolve(response).getContent()).get(baseType);
+        MediaType mediaType = content.get(baseType);
         if (mediaType == null) {
             return List.of(method + " " + path + " " + status + ": media type '" + baseType + "' is not documented");
         }

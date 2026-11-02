@@ -3,6 +3,10 @@
 spring:
   application:
     name: online-casino-simulator
+  autoconfigure:
+    # No in-memory default user with a generated (and logged) password. Accounts come from the
+    # database once AccountUserDetailsService exists (W2-08); this exclusion is removed then.
+    exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
   config:
     # `.env` uses KEY=value syntax, so it can be imported as a properties file.
     # Real OS environment variables always take precedence over these imports.
@@ -29,6 +33,12 @@ spring:
           time_zone: UTC
   flyway:
     locations: classpath:db/migration
+  session:
+    # Server-side sessions in PostgreSQL (Spring Session JDBC, ADR-0006); ended after this inactivity.
+    timeout: ${APP_SESSION_TIMEOUT:30m}
+    jdbc:
+      # Flyway owns the schema (V2__create_spring_session.sql).
+      initialize-schema: never
   # Errors are returned as RFC 9457 Problem Details by com.casino.common.exception.GlobalExceptionHandler
   # and, for errors outside the controllers (/error), by ErrorFallbackController.
 
@@ -40,6 +50,18 @@ server:
   shutdown: graceful
   error:
     include-stacktrace: never
+  # Forwarded headers (X-Forwarded-For/-Proto) are ignored, so they cannot be spoofed. Production
+  # enables `native` only together with an explicit trusted-proxy list (week-02.md §7.8).
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:none}
+  servlet:
+    session:
+      # Session cookie written by Spring Session. Production: `__Host-SESSION` and Secure.
+      # No Domain and Path=/ (Spring Session defaults), as required for the `__Host-` prefix.
+      cookie:
+        name: ${APP_SESSION_COOKIE_NAME:SESSION}
+        http-only: true
+        secure: ${APP_SESSION_COOKIE_SECURE:false}
+        same-site: ${APP_SESSION_COOKIE_SAME_SITE:lax}
 
 management:
   endpoints:
@@ -64,9 +86,15 @@ springdoc:
       - name: Implementation (generated)
         url: /v3/api-docs
     urls-primary-name: Contract (openapi.yaml)
+    # "Try it out" sends the XSRF-TOKEN cookie value as X-XSRF-TOKEN on unsafe requests.
+    csrf:
+      enabled: true
 
 app:
   # Replaced with the Maven project version at build time (resource filtering).
   version: '@project.version@'
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  security:
+    # BCrypt cost (at least 10).
+    bcrypt-strength: ${APP_SECURITY_BCRYPT_STRENGTH:12}

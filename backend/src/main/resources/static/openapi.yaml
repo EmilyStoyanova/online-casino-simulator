@@ -33,25 +33,31 @@ info:
       (`application/problem+json`, schema `ProblemDetail`) with a stable `code` and
       `Cache-Control: no-store`. Clients decide on `code`, never on `title` or `detail`.
     - The following errors can occur on every operation and are not repeated per operation:
-      unknown path `404 NOT_FOUND`, unsupported method `405 METHOD_NOT_ALLOWED`, an `Accept` header
-      that no representation matches `406 NOT_ACCEPTABLE`, an unsupported request `Content-Type`
+      unknown path `404 NOT_FOUND` (without a session, an unknown path under `/api/` returns
+      `401 AUTHENTICATION_REQUIRED`, because access is denied by default), a missing or invalid
+      CSRF token on an unsafe method `403 CSRF_TOKEN_INVALID`, unsupported method
+      `405 METHOD_NOT_ALLOWED`, an `Accept` header that no representation matches
+      `406 NOT_ACCEPTABLE`, an unsupported request `Content-Type`
       `415 UNSUPPORTED_MEDIA_TYPE`, an unreadable request `400 MALFORMED_REQUEST` and an unexpected
       failure `500 INTERNAL_ERROR`. Any other error status is kept and reported with a generic code
       (see `ProblemDetail.code`). Error responses never contain stack traces, exception messages,
-      SQL or class names.
+      SQL or class names. Only a cross-origin request from an origin that is not allowed is
+      rejected by the CORS check with a plain-text `403` (`Invalid CORS request`).
     - Timestamps are ISO-8601 in UTC (`date-time`).
     - Operations whose summary ends with "(planned)" (`x-implementation-status: planned`) are
       designed and reviewed, but not available yet.
 
-    ## Authentication (planned, Week 2)
-    - Server-side sessions: registration and login set an `HttpOnly` session cookie
-      (security scheme `sessionCookie`). There are no tokens in browser storage.
+    ## Authentication
+    - Server-side sessions: registration and login (planned, Week 2) set an `HttpOnly` session
+      cookie (security scheme `sessionCookie`). There are no tokens in browser storage.
     - CSRF protection (security scheme `csrfHeader`): every `POST`, `PUT`, `PATCH` and `DELETE`
       request, including login and registration, sends the `XSRF-TOKEN` cookie value in the
       `X-XSRF-TOKEN` header. The token is obtained with `GET /api/v1/auth/csrf` at start-up and
       again after registration, login and logout. On `403` with code `CSRF_TOKEN_INVALID` the
       client fetches a new token and retries once.
-    - Operations with `security: []` are public. All other operations require a session.
+    - Operations with `security: []` are public. All other operations require a session;
+      without one they return `401 AUTHENTICATION_REQUIRED`, or `401 SESSION_EXPIRED` when the
+      session cookie refers to a session that has ended.
   license:
     name: Proprietary — SAP mentorship project
 
@@ -63,7 +69,7 @@ tags:
   - name: System
     description: Platform status
   - name: Authentication
-    description: Registration, login, logout and CSRF token (planned, Week 2)
+    description: CSRF token; registration, login and logout (planned, Week 2)
   - name: Users
     description: Profile of the signed-in user (planned, Week 2)
   - name: Interests
@@ -111,29 +117,15 @@ paths:
                   schemaVersion: null
                 timestamp: '2026-10-29T10:15:30.123Z'
         '500':
-          description: Unexpected error; the details are only logged on the server
-          headers:
-            Cache-Control:
-              $ref: '#/components/headers/NoStore'
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetail'
-              example:
-                title: Internal Server Error
-                status: 500
-                code: INTERNAL_ERROR
-                detail: An unexpected error occurred. Please try again later.
-                instance: /api/v1/system/status
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/auth/csrf:
     get:
       tags: [Authentication]
       operationId: getCsrfToken
-      summary: Issue a CSRF token (planned)
-      x-implementation-status: planned
+      summary: Issue a CSRF token
       description: |
-        *Planned (W2-04).* Sets the `XSRF-TOKEN` cookie, which JavaScript can read. Its value is sent
+        Sets the `XSRF-TOKEN` cookie, which JavaScript can read. Its value is sent
         in the `X-XSRF-TOKEN` header with every unsafe request. Call it at start-up and again after
         registration, login and logout, because these rotate or clear the token. Public.
       security: []
@@ -147,6 +139,8 @@ paths:
                 type: string
             Cache-Control:
               $ref: '#/components/headers/NoStore'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/auth/register:
     post:
@@ -504,23 +498,26 @@ components:
       in: cookie
       name: SESSION
       description: |
-        *Planned (W2-04).* Server-side session (Spring Session JDBC). The cookie is `HttpOnly`,
-        `SameSite=Lax`, `Path=/` and has no `Domain`. In production it is named `__Host-SESSION` and
-        is `Secure`. Issued by registration and login; it ends with logout, after 30 minutes of
-        inactivity or 12 hours after sign-in. The browser sends it automatically.
+        Server-side session (Spring Session JDBC). The cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`
+        and has no `Domain`. In production it is named `__Host-SESSION` and is `Secure`. Issued by
+        registration and login (planned); it ends with logout, after 30 minutes of inactivity or
+        12 hours after sign-in (planned, W2-08). The browser sends it automatically. A request whose
+        session has ended gets `401 SESSION_EXPIRED` on protected operations.
     csrfHeader:
       type: apiKey
       in: header
       name: X-XSRF-TOKEN
       description: |
-        *Planned (W2-04).* CSRF token (Spring Security SPA pattern): the value of the `XSRF-TOKEN`
-        cookie from `GET /api/v1/auth/csrf`, sent with every `POST`, `PUT`, `PATCH` and `DELETE`.
+        CSRF token (Spring Security SPA pattern): the value of the `XSRF-TOKEN` cookie from
+        `GET /api/v1/auth/csrf`, sent with every `POST`, `PUT`, `PATCH` and `DELETE`. It is checked
+        on every unsafe request, including public ones; without it the response is
+        `403 CSRF_TOKEN_INVALID`.
 
   headers:
     NoStore:
       description: |
         Contains `no-store`, so errors and personal data are never cached. Error responses send
-        `no-store`; other responses get Spring Security's default (planned, W2-04).
+        `no-store`; other responses get Spring Security's default.
       schema:
         type: string
         examples: ['no-store', 'no-cache, no-store, max-age=0, must-revalidate']
@@ -538,6 +535,21 @@ components:
         minimum: 1
 
   responses:
+    InternalError:
+      description: Unexpected error; the details are only logged on the server
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            title: Internal Server Error
+            status: 500
+            code: INTERNAL_ERROR
+            detail: An unexpected error occurred. Please try again later.
+            instance: /api/v1/system/status
     BadRequest:
       description: |
         The request is invalid. `VALIDATION_FAILED` lists the invalid properties in `errors` (rejected

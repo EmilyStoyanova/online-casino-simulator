@@ -92,6 +92,13 @@ class OpenApiContractTest {
     }
 
     @Test
+    void responsesWithoutDocumentedContentMustHaveNoBody() {
+        assertThat(contract.validateResponse("/api/v1/auth/csrf", "GET", 204, null, "")).isEmpty();
+        assertThat(contract.validateResponse("/api/v1/auth/csrf", "GET", 204, JSON, "{}")).containsExactly(
+                "GET /api/v1/auth/csrf 204: no content is documented, but the body is not empty");
+    }
+
+    @Test
     void problemDetailsAllowExtensionMembers() {
         String problem = """
                 {"title":"Internal Server Error","status":500,"detail":"x","instance":"/api/v1/system/status",
@@ -154,8 +161,8 @@ class OpenApiContractTest {
     @Test
     void week2OperationsArePlanned() {
         assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.2.0");
+        // GET /api/v1/auth/csrf is implemented since W2-04.
         assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "GET /api/v1/auth/csrf",
                 "POST /api/v1/auth/register",
                 "POST /api/v1/auth/login",
                 "POST /api/v1/auth/logout",
