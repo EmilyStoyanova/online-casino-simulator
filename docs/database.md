@@ -24,6 +24,7 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 |---|---|
 | V1 | `set_updated_at()` trigger function shared by tables with an `updated_at` column |
 | V2 | `spring_session`, `spring_session_attributes`: HTTP sessions (official Spring Session JDBC 4.1.1 schema, verbatim) |
+| V3 | `users`: accounts (UUID id, normalised unique email, encoded password hash, `role`, `status`, 18+ confirmation, timestamps, `version`) with `set_updated_at()` trigger |
 
 ## Planned tables (from the implementation plan)
 
@@ -33,7 +34,6 @@ original plan are listed in
 
 | Table | Purpose | Week |
 |---|---|---|
-| `users` | Accounts, password hashes, status, role (V3) | 2 |
 | `interests` | Catalogue of educational interests (reference data, V4) | 2 |
 | `user_interests` | Interests selected by each user (replaces the plan's use of `user_preferences` for interests, V4) | 2 |
 | `auth_throttle` | Fixed-window counters (hashed keys) for login/registration rate limiting (V5) | 2 |
