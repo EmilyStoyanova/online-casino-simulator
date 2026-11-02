@@ -64,6 +64,8 @@ class CasinoSimulatorApplicationIT {
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.info.title").value("Online Casino Simulator API"))
-                .andExpect(jsonPath("$.paths['/api/v1/system/status']").exists());
+                .andExpect(jsonPath("$.paths['/api/v1/system/status']").exists())
+                // The /error fallback is infrastructure, not part of the API.
+                .andExpect(jsonPath("$.paths['/error']").doesNotExist());
     }
 }

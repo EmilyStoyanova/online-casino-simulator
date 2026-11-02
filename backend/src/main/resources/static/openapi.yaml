@@ -30,9 +30,15 @@ info:
     - Base path for business endpoints: `/api/v1`; administrative endpoints will use `/api/v1/admin/**`.
     - Request and response bodies are JSON.
     - Errors are returned as [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) Problem Details
-      (`application/problem+json`, schema `ProblemDetail`). This also applies to requests that do
-      not match any operation: unknown paths return `404`, unsupported methods `405`, unacceptable
-      media types `406`.
+      (`application/problem+json`, schema `ProblemDetail`) with a stable `code` and
+      `Cache-Control: no-store`. Clients decide on `code`, never on `title` or `detail`.
+    - The following errors can occur on every operation and are not repeated per operation:
+      unknown path `404 NOT_FOUND`, unsupported method `405 METHOD_NOT_ALLOWED`, an `Accept` header
+      that no representation matches `406 NOT_ACCEPTABLE`, an unsupported request `Content-Type`
+      `415 UNSUPPORTED_MEDIA_TYPE`, an unreadable request `400 MALFORMED_REQUEST` and an unexpected
+      failure `500 INTERNAL_ERROR`. Any other error status is kept and reported with a generic code
+      (see `ProblemDetail.code`). Error responses never contain stack traces, exception messages,
+      SQL or class names.
     - Timestamps are ISO-8601 in UTC (`date-time`).
     - Operations whose summary ends with "(planned)" (`x-implementation-status: planned`) are
       designed and reviewed, but not available yet.
@@ -46,7 +52,6 @@ info:
       again after registration, login and logout. On `403` with code `CSRF_TOKEN_INVALID` the
       client fetches a new token and retries once.
     - Operations with `security: []` are public. All other operations require a session.
-    - Error responses carry a stable `code` (see `ProblemDetail`) and `Cache-Control: no-store`.
   license:
     name: Proprietary — SAP mentorship project
 
@@ -106,7 +111,10 @@ paths:
                   schemaVersion: null
                 timestamp: '2026-10-29T10:15:30.123Z'
         '500':
-          description: Internal Server Error
+          description: Unexpected error; the details are only logged on the server
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           content:
             application/problem+json:
               schema:
@@ -114,6 +122,7 @@ paths:
               example:
                 title: Internal Server Error
                 status: 500
+                code: INTERNAL_ERROR
                 detail: An unexpected error occurred. Please try again later.
                 instance: /api/v1/system/status
 
@@ -509,10 +518,12 @@ components:
 
   headers:
     NoStore:
-      description: Contains `no-store`, so errors and personal data are never cached.
+      description: |
+        Contains `no-store`, so errors and personal data are never cached. Error responses send
+        `no-store`; other responses get Spring Security's default (planned, W2-04).
       schema:
         type: string
-        examples: ['no-cache, no-store, max-age=0, must-revalidate']
+        examples: ['no-store', 'no-cache, no-store, max-age=0, must-revalidate']
     SessionCookie:
       description: |
         Session cookie with a new session id, e.g. `SESSION=<id>; Path=/; HttpOnly; SameSite=Lax`
@@ -530,7 +541,8 @@ components:
     BadRequest:
       description: |
         The request is invalid. `VALIDATION_FAILED` lists the invalid properties in `errors` (rejected
-        values are never echoed); `MALFORMED_REQUEST` means the body could not be read.
+        values are never echoed); `MALFORMED_REQUEST` means the request could not be read (malformed
+        JSON, a wrong JSON type, a missing body or an invalid parameter).
       headers:
         Cache-Control:
           $ref: '#/components/headers/NoStore'
@@ -556,7 +568,7 @@ components:
                 title: Bad Request
                 status: 400
                 code: MALFORMED_REQUEST
-                detail: The request body could not be read.
+                detail: The request could not be read.
                 instance: /api/v1/auth/register
     Unauthenticated:
       description: |
@@ -778,7 +790,7 @@ components:
       type: object
       description: |
         RFC 9457 Problem Details. Additional, error-specific members may be present at the top level.
-      required: [title, status]
+      required: [title, status, code]
       properties:
         type:
           type: string
@@ -800,10 +812,31 @@ components:
           description: Request path where the problem occurred
         code:
           type: string
-          x-implementation-status: planned
           description: |
-            *Planned (W2-03).* Stable, machine-readable error code. Clients decide on this value,
-            never on `title` or `detail`.
+            Stable, machine-readable error code. Clients decide on this value, never on `title` or
+            `detail`. Every code comes with one fixed HTTP status, except the two generic fallbacks,
+            which keep the status of an error that has no code of its own:
+
+            | `code` | Status |
+            |---|---|
+            | `VALIDATION_FAILED`, `MALFORMED_REQUEST` | 400 |
+            | `AUTHENTICATION_REQUIRED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS` | 401 |
+            | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID` | 403 |
+            | `NOT_FOUND` | 404 |
+            | `METHOD_NOT_ALLOWED` | 405 |
+            | `NOT_ACCEPTABLE` | 406 |
+            | `CONFLICT`, `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION` | 409 |
+            | `CONTENT_TOO_LARGE` | 413 |
+            | `UNSUPPORTED_MEDIA_TYPE` | 415 |
+            | `TOO_MANY_ATTEMPTS` | 429 |
+            | `INTERNAL_ERROR` | 500 |
+            | `SERVICE_UNAVAILABLE` | 503 |
+            | `CLIENT_ERROR` | any other `4xx` (e.g. 410, 422) |
+            | `SERVER_ERROR` | any other `5xx` (e.g. 501, 502) |
+
+            `CONFLICT` and `SERVICE_UNAVAILABLE` are generic; operations document their specific codes.
+            New specific codes may be added in later versions, so clients treat an unknown code like
+            the generic code of its status class.
           enum:
             - VALIDATION_FAILED
             - MALFORMED_REQUEST
@@ -814,14 +847,20 @@ components:
             - CSRF_TOKEN_INVALID
             - NOT_FOUND
             - METHOD_NOT_ALLOWED
+            - NOT_ACCEPTABLE
+            - CONFLICT
             - EMAIL_ALREADY_REGISTERED
             - CONCURRENT_MODIFICATION
+            - CONTENT_TOO_LARGE
+            - UNSUPPORTED_MEDIA_TYPE
             - TOO_MANY_ATTEMPTS
             - INTERNAL_ERROR
+            - SERVICE_UNAVAILABLE
+            - CLIENT_ERROR
+            - SERVER_ERROR
         errors:
           type: array
-          x-implementation-status: planned
-          description: '*Planned (W2-03).* Invalid request properties; only present for `VALIDATION_FAILED`.'
+          description: Invalid request properties, sorted by `field`; only present for `VALIDATION_FAILED`.
           items:
             $ref: '#/components/schemas/FieldError'
       additionalProperties: true

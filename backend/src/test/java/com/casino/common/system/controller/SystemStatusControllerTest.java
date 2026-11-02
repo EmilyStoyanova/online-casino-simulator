@@ -119,7 +119,9 @@ class SystemStatusControllerTest {
         mockMvc.perform(post("/api/v1/system/status"))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
                 .andExpect(jsonPath("$.status").value(405))
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"))
                 .andExpect(jsonPath("$.instance").value("/api/v1/system/status"));
     }
 
@@ -128,7 +130,8 @@ class SystemStatusControllerTest {
         mockMvc.perform(get("/api/v1/system/unknown"))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
-                .andExpect(jsonPath("$.status").value(404));
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test
@@ -139,7 +142,9 @@ class SystemStatusControllerTest {
                 .andExpect(status().isInternalServerError())
                 .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.title").value("Internal Server Error"))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
                 .andExpect(jsonPath("$.status").value(500))
+                .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
                 .andExpect(content().string(not(containsString("secret internal detail"))))
                 .andExpect(content().string(not(containsString("IllegalStateException"))));
     }

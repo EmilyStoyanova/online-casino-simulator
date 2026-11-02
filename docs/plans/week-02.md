@@ -384,6 +384,22 @@ operations are unchanged. The admin test endpoint lives in test sources and is n
 | `CONCURRENT_MODIFICATION` | 409 | Optimistic-locking conflict |
 | `TOO_MANY_ATTEMPTS` | 429 | Throttled; `Retry-After` in seconds |
 | `INTERNAL_ERROR` | 500 | Unexpected error, generic message |
+| `NOT_ACCEPTABLE` | 406 | No representation matches `Accept` *(added in W2-03)* |
+| `CONFLICT` | 409 | Generic conflict, e.g. a framework `409` *(added in W2-03)* |
+| `CONTENT_TOO_LARGE` | 413 | Request too large *(added in W2-03)* |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | Unsupported request `Content-Type` *(added in W2-03)* |
+| `SERVICE_UNAVAILABLE` | 503 | Temporarily unavailable, e.g. a request timeout *(added in W2-03)* |
+| `CLIENT_ERROR` / `SERVER_ERROR` | other 4xx / 5xx | Generic fallbacks that keep the status *(added in W2-03)* |
+
+**Implemented in W2-03 (pending review):** `ProblemCode`, `ProblemDetailFactory`, `ApiException`,
+field errors (`FieldViolation`) and `no-store` in `GlobalExceptionHandler`; `code` is required in the
+contract and its `planned` marker is removed, as for `errors`. Every code has one fixed status except
+`CLIENT_ERROR`/`SERVER_ERROR`; the HTTP status of an error is never changed, and `ApiException`
+accepts only codes with a fixed status. The `/error` fallback
+(`common.exception.controller.ErrorFallbackController`) answers errors outside the controllers with
+the same Problem Details; a direct request to `/error` returns `404 NOT_FOUND`. **For W2-04:**
+`/error` must be permitted for all dispatcher types, and `AuthenticationException`/`AccessDeniedException`
+must not reach the `Exception` catch-all of `GlobalExceptionHandler`.
 
 ---
 

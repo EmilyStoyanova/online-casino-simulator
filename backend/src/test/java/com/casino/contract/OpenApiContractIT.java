@@ -9,10 +9,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
 import com.casino.TestcontainersConfiguration;
+import com.casino.common.exception.ProblemCode;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.core.util.Json31;
 import org.junit.jupiter.api.Test;
@@ -94,16 +96,20 @@ class OpenApiContractIT {
 
     @Test
     void requestsOutsideTheContractReturnProblemDetails() throws Exception {
-        MockHttpServletResponse notFound = perform(get("/api/v1/system/unknown"));
-        MockHttpServletResponse notAllowed = perform(post("/api/v1/system/status"));
+        // The errors that info.description documents for every operation.
+        Map<ProblemCode, MockHttpServletRequestBuilder> requests = Map.of(
+                ProblemCode.NOT_FOUND, get("/api/v1/system/unknown"),
+                ProblemCode.METHOD_NOT_ALLOWED, post("/api/v1/system/status"),
+                ProblemCode.NOT_ACCEPTABLE, get("/api/v1/system/status").accept(MediaType.APPLICATION_XML));
 
-        assertThat(notFound.getStatus()).isEqualTo(404);
-        assertThat(notAllowed.getStatus()).isEqualTo(405);
-        for (MockHttpServletResponse response : new MockHttpServletResponse[] {notFound, notAllowed}) {
+        for (Map.Entry<ProblemCode, MockHttpServletRequestBuilder> entry : requests.entrySet()) {
+            MockHttpServletResponse response = perform(entry.getValue());
+            String body = response.getContentAsString(StandardCharsets.UTF_8);
+
+            assertThat(response.getStatus()).as(body).isEqualTo(entry.getKey().status().value());
             assertThat(response.getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-            // Same ProblemDetail schema as the documented 500 response.
-            assertThat(contract.validateResponse("/api/v1/system/status", "GET", 500,
-                    response.getContentType(), response.getContentAsString(StandardCharsets.UTF_8))).isEmpty();
+            assertThat(Json31.mapper().readTree(body).path("code").asText()).isEqualTo(entry.getKey().name());
+            assertThat(contract.validateSchema("ProblemDetail", body)).as(body).isEmpty();
         }
     }
 

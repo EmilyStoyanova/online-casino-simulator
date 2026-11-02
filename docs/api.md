@@ -15,9 +15,36 @@ The API is **design-first**. The contract
 
 - Base path `/api/v1`; administrative endpoints will use `/api/v1/admin/**`.
 - JSON request and response bodies; timestamps are ISO-8601 UTC.
-- Errors are RFC 9457 Problem Details (`application/problem+json`, schema `ProblemDetail`), produced
-  centrally by `common.exception.GlobalExceptionHandler`. This includes unknown paths (`404`),
-  unsupported methods (`405`) and unexpected failures (`500`, without internal details).
+- Errors are RFC 9457 Problem Details (`application/problem+json`, schema `ProblemDetail`) with a
+  stable `code` and `Cache-Control: no-store`. They are built by `common.exception.ProblemDetailFactory`
+  and produced centrally by `GlobalExceptionHandler`; errors that never reach a controller (e.g. from
+  a servlet filter) are forwarded to `/error` and answered the same way by `ErrorFallbackController`.
+- Clients decide on `code`, never on `title` or `detail`. Every code has exactly one status, except
+  the generic fallbacks `CLIENT_ERROR` and `SERVER_ERROR`; the HTTP status of an error is never changed:
+
+  | `code` | Status | When |
+  |---|---|---|
+  | `VALIDATION_FAILED` | 400 | Bean Validation failures; `errors` lists `{field, message}` sorted by field, never the rejected value |
+  | `MALFORMED_REQUEST` | 400 | Unreadable JSON, wrong JSON types, missing body, missing or unconvertible parameter |
+  | `AUTHENTICATION_REQUIRED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS` | 401 | Authentication (Week 2, W2-04 and later) |
+  | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID` | 403 | Authorization and CSRF (W2-04 and later) |
+  | `NOT_FOUND` | 404 | Unknown path or resource |
+  | `METHOD_NOT_ALLOWED` | 405 | Unsupported method (`Allow` header) |
+  | `NOT_ACCEPTABLE` | 406 | No representation matches the `Accept` header (the problem itself is still JSON) |
+  | `CONFLICT` | 409 | Generic conflict (e.g. a framework `409`) |
+  | `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION` | 409 | Specific conflicts (W2-07, W2-10) |
+  | `CONTENT_TOO_LARGE` | 413 | Request too large |
+  | `UNSUPPORTED_MEDIA_TYPE` | 415 | Unsupported request `Content-Type` (`Accept` header lists the supported types) |
+  | `TOO_MANY_ATTEMPTS` | 429 | Throttling (W2-06) |
+  | `INTERNAL_ERROR` | 500 | Unexpected failure; generic detail, the exception is only logged |
+  | `SERVICE_UNAVAILABLE` | 503 | Temporarily unavailable (e.g. a request timeout) |
+  | `CLIENT_ERROR` | other `4xx` | Generic fallback; the status is kept (e.g. `410`, `422`) |
+  | `SERVER_ERROR` | other `5xx` | Generic fallback; the status is kept (e.g. `501`, `502`) |
+
+- Module exceptions extend `common.exception.ApiException` (a specific `ProblemCode` and a safe
+  detail; the generic fallbacks are rejected). Framework errors (`ResponseStatusException`,
+  `413`, `503`, …) keep their status and get the code of that status; their own message is never
+  sent. `GET /api/v1/system/status` keeps its `503` with a `SystemStatus` body.
 - All input is validated, and authorization and business rules are enforced on the server.
 
 ## Workflow for API changes
@@ -61,8 +88,25 @@ Example error (`POST /api/v1/system/status` → `405`):
 {
   "title": "Method Not Allowed",
   "status": 405,
-  "detail": "Method 'POST' is not supported.",
-  "instance": "/api/v1/system/status"
+  "detail": "The HTTP method is not supported by this resource.",
+  "instance": "/api/v1/system/status",
+  "code": "METHOD_NOT_ALLOWED"
+}
+```
+
+Example validation error (`400`):
+
+```json
+{
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "The request contains invalid values.",
+  "instance": "/api/v1/auth/register",
+  "code": "VALIDATION_FAILED",
+  "errors": [
+    { "field": "adultConfirmed", "message": "must be true" },
+    { "field": "password", "message": "must be at least 12 characters long" }
+  ]
 }
 ```
 

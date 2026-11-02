@@ -3,9 +3,14 @@ package com.casino.contract;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
+import com.casino.common.exception.ProblemCode;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import org.junit.jupiter.api.Test;
@@ -19,6 +24,13 @@ class OpenApiContractTest {
     private static final String VALID_UP = """
             {"application":"online-casino-simulator","version":"0.1.0","status":"UP",
              "database":{"status":"UP","schemaVersion":"1"},"timestamp":"2026-10-29T10:15:30.123Z"}""";
+
+    /** Schema body for {@link #minimalSpec}: an optional property {@code extra} that is not implemented yet. */
+    private static final String PLANNED_PROPERTY = """
+            properties:
+              extra:
+                type: string
+                x-implementation-status: planned""";
 
     private final OpenApiContract contract = OpenApiContract.load();
 
@@ -82,9 +94,26 @@ class OpenApiContractTest {
     @Test
     void problemDetailsAllowExtensionMembers() {
         String problem = """
-                {"title":"Internal Server Error","status":500,"detail":"x","instance":"/api/v1/system/status","hint":"X"}""";
+                {"title":"Internal Server Error","status":500,"detail":"x","instance":"/api/v1/system/status",
+                 "code":"INTERNAL_ERROR","hint":"X"}""";
 
         assertThat(contract.validateResponse(STATUS_PATH, "GET", 500, "application/problem+json", problem)).isEmpty();
+    }
+
+    @Test
+    void problemDetailsRequireAKnownCode() {
+        assertThat(contract.validateSchema("ProblemDetail", """
+                {"title":"Bad Request","status":400,"code":"VALIDATION_FAILED","errors":[{"field":"email","message":"m"}]}"""))
+                .isEmpty();
+        assertThat(contract.validateSchema("ProblemDetail", """
+                {"title":"Not Found","status":404}""")).containsExactly("$: missing required property 'code'");
+        // The documented codes are exactly the ProblemCode constants.
+        Set<String> codes = Arrays.stream(ProblemCode.values()).map(Enum::name).collect(Collectors.toCollection(TreeSet::new));
+        assertThat(contract.validateSchema("ProblemDetail", """
+                {"title":"I'm a teapot","status":418,"code":"TEAPOT","errors":[{"field":"email"}]}""")).containsExactly(
+                "$.code: value 'TEAPOT' is not one of " + codes,
+                "$.errors[0]: missing required property 'message'");
+        assertThat(contract.validateSchema("Problem", "{}")).containsExactly("Schema Problem is not documented in the contract");
     }
 
     @Test
@@ -166,15 +195,15 @@ class OpenApiContractTest {
     }
 
     @Test
-    void reportsPlannedPropertyThatIsAlreadyImplemented() {
-        OpenApiContract implementation = implementationWithoutPlannedElements();
-        Schema<?> code = (Schema<?>) OpenApiContract.load().spec().getComponents().getSchemas().get("ProblemDetail")
-                .getProperties().get("code");
-        code.getExtensions().remove(OpenApiContract.IMPLEMENTATION_STATUS);
-        implementation.spec().getComponents().getSchemas().get("ProblemDetail").addProperty("code", code);
+    void plannedPropertiesAreSkippedUntilImplemented() {
+        OpenApiContract planned = OpenApiContract.fromYaml(minimalSpec("", PLANNED_PROPERTY));
+        OpenApiContract notImplemented = OpenApiContract.fromYaml(minimalSpec("", ""));
+        OpenApiContract implemented = OpenApiContract.fromYaml(minimalSpec("", PLANNED_PROPERTY.replace(
+                "\n    x-implementation-status: planned", "")));
 
-        assertThat(contract.differencesTo(implementation, path -> true)).containsExactly(
-                "#/components/schemas/ProblemDetail.code: implemented, but still marked x-implementation-status: planned");
+        assertThat(planned.differencesTo(notImplemented, path -> true)).isEmpty();
+        assertThat(planned.differencesTo(implemented, path -> true)).containsExactly(
+                "#/components/schemas/Item.extra: implemented, but still marked x-implementation-status: planned");
     }
 
     @Test
@@ -185,11 +214,11 @@ class OpenApiContractTest {
 
     @Test
     void reportsPlannedPropertiesInResponses() {
-        String problem = """
-                {"title":"Internal Server Error","status":500,"instance":"/api/v1/system/status","code":"INTERNAL_ERROR"}""";
+        OpenApiContract planned = OpenApiContract.fromYaml(minimalSpec("", PLANNED_PROPERTY));
 
-        assertThat(contract.validateResponse(STATUS_PATH, "GET", 500, "application/problem+json", problem)).containsExactly(
-                "$.code: property is marked x-implementation-status: planned but present; remove the marker when implementing it");
+        assertThat(planned.validateResponse("/a", "GET", 200, JSON, "{}")).isEmpty();
+        assertThat(planned.validateResponse("/a", "GET", 200, JSON, "{\"extra\":\"x\"}")).containsExactly(
+                "$.extra: property is marked x-implementation-status: planned but present; remove the marker when implementing it");
     }
 
     @Test

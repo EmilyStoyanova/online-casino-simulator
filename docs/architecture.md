@@ -125,7 +125,7 @@ frontend/src
 |---|---|
 | Configuration | `application.yml` + environment variables; local `.env` imported via `spring.config.import` |
 | Schema management | Flyway migrations in `backend/src/main/resources/db/migration`; Hibernate `ddl-auto=validate` |
-| API errors | RFC 9457 Problem Details via `common.exception.GlobalExceptionHandler`; error codes and field errors added in Week 2 |
+| API errors | RFC 9457 Problem Details with a stable `code` (`ProblemCode`), field errors and `Cache-Control: no-store`, built by `common.exception.ProblemDetailFactory`; produced by `GlobalExceptionHandler` and, for errors outside the controllers, by the `/error` fallback (`ErrorFallbackController`). Module exceptions extend `ApiException` |
 | API contract | Design-first `openapi.yaml` (source of truth), verified by `OpenApiContractIT` |
 | API documentation | Swagger UI at `/swagger-ui.html`, showing the contract and the generated implementation view (to be disabled in production, Week 12) |
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |

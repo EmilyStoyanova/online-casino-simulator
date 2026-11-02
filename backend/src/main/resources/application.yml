@@ -29,7 +29,8 @@ spring:
           time_zone: UTC
   flyway:
     locations: classpath:db/migration
-  # Errors are returned as RFC 9457 Problem Details by com.casino.common.exception.GlobalExceptionHandler.
+  # Errors are returned as RFC 9457 Problem Details by com.casino.common.exception.GlobalExceptionHandler
+  # and, for errors outside the controllers (/error), by ErrorFallbackController.
 
 server:
   port: ${SERVER_PORT:8080}
