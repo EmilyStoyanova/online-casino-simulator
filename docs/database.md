@@ -25,6 +25,7 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 | V1 | `set_updated_at()` trigger function shared by tables with an `updated_at` column |
 | V2 | `spring_session`, `spring_session_attributes`: HTTP sessions (official Spring Session JDBC 4.1.1 schema, verbatim) |
 | V3 | `users`: accounts (UUID id, normalised unique email, encoded password hash, `role`, `status`, 18+ confirmation, timestamps, `version`) with `set_updated_at()` trigger |
+| V4 | `auth_throttle`: fixed-window counters for login/registration throttling; keys are `<scope>:<HMAC-SHA-256 hex>` with the secret `APP_SECURITY_THROTTLE_SECRET` (no raw email or IP, enforced by a `CHECK`); rows are deleted hourly a day after their window ended |
 
 ## Planned tables (from the implementation plan)
 
@@ -34,9 +35,8 @@ original plan are listed in
 
 | Table | Purpose | Week |
 |---|---|---|
-| `interests` | Catalogue of educational interests (reference data, V4) | 2 |
-| `user_interests` | Interests selected by each user (replaces the plan's use of `user_preferences` for interests, V4) | 2 |
-| `auth_throttle` | Fixed-window counters (hashed keys) for login/registration rate limiting (V5) | 2 |
+| `interests` | Catalogue of educational interests (reference data, V5) | 2 |
+| `user_interests` | Interests selected by each user (replaces the plan's use of `user_preferences` for interests, V5) | 2 |
 | `user_preferences` | UI preferences (sound, reduced motion, …) | 6 |
 | `wallets` | Current virtual balance and row version (optimistic locking) | 3 |
 | `wallet_transactions` | Immutable ledger of balance changes, unique idempotency key | 3 |
@@ -57,6 +57,33 @@ original plan are listed in
 3. An educational reward cannot be granted twice for the same eligible completion.
 4. Completed transactions are durable and traceable.
 5. Only personal data that is strictly necessary is stored.
+
+## Throttling secret
+
+`auth_throttle.throttle_key` is an HMAC-SHA-256 of the scope and the normalised email and/or client
+IP, keyed with `APP_SECURITY_THROTTLE_SECRET` (Base64, at least 32 random bytes; the backend does not
+start without a valid value). Without the secret a row cannot be linked to an email or IP address.
+
+- **Local:** generate your own value with `openssl rand -base64 32` and put it in `.env`. Tests use a
+  random secret per run and need none.
+- **Production:** a separate value, kept only in the hosting provider's secret store; never in Git,
+  logs, tickets or chat.
+
+**Effect of changing the secret.** Every existing row becomes unreachable: new attempts produce new
+keys, so all throttle counters start again at zero, once. Nothing breaks and no migration is needed.
+The orphaned rows are deleted by the hourly cleanup at most 1 h (longest window) + 1 day later.
+
+**Rotation (production):**
+1. Rotate only when needed: suspected exposure of the secret (or of a database backup together with
+   it) or a staff change with access to it. Routine rotation brings no benefit here, because the rows
+   are short-lived.
+2. Generate a new value, replace it in the secret store, and restart or redeploy **all** instances
+   together. During a rolling deploy, instances with different secrets keep separate counters, so the
+   effective limits are briefly higher.
+3. Prefer a quiet period: for up to 15 min (1 h for registration) an attacker gets a fresh attempt
+   budget.
+4. Optionally run `DELETE FROM auth_throttle;` right after the switch, instead of waiting for the
+   cleanup.
 
 ## Local database
 

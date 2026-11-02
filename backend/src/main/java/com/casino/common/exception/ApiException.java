@@ -2,6 +2,8 @@ package com.casino.common.exception;
 
 import java.util.Objects;
 
+import org.springframework.http.HttpHeaders;
+
 /**
  * Base class of all module exceptions that map to an API error, e.g. an
  * {@code EmailAlreadyRegisteredException} in the {@code user} module. The
@@ -29,5 +31,10 @@ public abstract class ApiException extends RuntimeException {
 
     public ProblemCode code() {
         return code;
+    }
+
+    /** Extra response headers of this error, e.g. {@code Retry-After} of a {@code 429}; none by default. */
+    public HttpHeaders headers() {
+        return HttpHeaders.EMPTY;
     }
 }

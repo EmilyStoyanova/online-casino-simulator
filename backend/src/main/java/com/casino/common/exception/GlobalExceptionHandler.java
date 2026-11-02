@@ -34,7 +34,8 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  * stable {@link ProblemCode}, built by {@link ProblemDetailFactory} and sent with
  * {@code Cache-Control: no-store}:
  * <ul>
- *   <li>{@link ApiException}s of the modules keep their code and detail;</li>
+ *   <li>{@link ApiException}s of the modules keep their code, detail and {@linkplain ApiException#headers
+ *       headers} (e.g. {@code Retry-After});</li>
  *   <li>validation failures become {@code VALIDATION_FAILED} with one {@link FieldViolation} per
  *       invalid property;</li>
  *   <li>the other Spring MVC exceptions (unknown path, unsupported method or media type, unreadable
@@ -58,7 +59,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     ResponseEntity<Object> handleApiException(ApiException ex, WebRequest request) {
-        return respond(ex, ProblemDetailFactory.create(ex.code(), ex.getMessage(), path(request)), new HttpHeaders(), request);
+        return respond(ex, ProblemDetailFactory.create(ex.code(), ex.getMessage(), path(request)), ex.headers(), request);
     }
 
     /** Lets Spring Security's {@code ExceptionTranslationFilter} handle them (see the class documentation). */

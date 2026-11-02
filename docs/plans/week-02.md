@@ -246,16 +246,19 @@ Week 3).
 ```
 com.casino
 ├── common                      (existing)
-│   ├── config/      CorsProperties, WebConfig, TimeConfig, OpenApiConfig
+│   ├── config/      CorsProperties, WebConfig, TimeConfig, OpenApiConfig, + SchedulingConfig
 │   └── exception/   GlobalExceptionHandler (extended), + ApiException, ProblemCode, ProblemDetailFactory
 │
 ├── auth             depends on: user (service, dto, exception), common
 │   ├── controller/  AuthController — GET /auth/csrf, POST /auth/register, /auth/login, /auth/logout
-│   ├── service/     RegistrationService, LoginService, SessionSignInService, AuthThrottleService,
+│   ├── service/     RegistrationService, LoginService, SessionSignInService, AuthThrottleService
+│   │                (+ ThrottleKeys, ThrottleKey, ThrottleScope),
 │   │                AccountUserDetailsService (Spring UserDetailsService), PasswordPolicy
-│   ├── repository/  AuthThrottleRepository (JdbcTemplate, atomic upsert)
+│   ├── repository/  AuthThrottleRepository (JdbcClient, atomic upsert), ThrottleWindow
 │   ├── dto/         RegisterRequest, LoginRequest
-│   ├── config/      SecurityConfig, SecurityProperties, AbsoluteSessionTimeoutFilter, AdminBootstrapRunner
+│   ├── config/      SecurityConfig, SecurityProperties, ThrottleProperties, ForwardedHeadersCheck,
+│   │                AbsoluteSessionTimeoutFilter,
+│   │                AdminBootstrapRunner
 │   └── exception/   InvalidCredentialsException, TooManyAttemptsException,
 │                    ProblemAuthenticationEntryPoint, ProblemAccessDeniedHandler
 │
@@ -409,15 +412,20 @@ Four Flyway migrations, following [`docs/database.md`](../database.md).
 
 **Numbered in implementation order (approved 2026-11-02):** Flyway rejects a migration whose version
 is lower than one already applied (`outOfOrder=false`). The Spring Session schema is needed first
-(W2-04), so it is **V2**; users (V3), interests (V4) and throttling (V5) follow. Revision 3 had
+(W2-04), so it is **V2**; users (V3), throttling (V4) and interests (V5) follow. Revision 3 had
 V2 users, V3 interests, V4 sessions. Every migration only adds objects; none changes existing data.
+
+**Throttling and interests swapped (approved 2026-11-02, W2-06):** the order approved first (V4
+interests, V5 throttling) no longer matched the implementation order once interests moved to W2-09:
+with V5 applied, Flyway would reject a later V4. Throttling therefore became **V4** and interests
+**V5**. Neither had been applied anywhere, so nothing else changed.
 
 | Version | File | Task |
 |---|---|---|
 | V2 | `V2__create_spring_session.sql` | W2-04 (implemented) |
 | V3 | `V3__create_users.sql` | W2-05 (implemented) |
-| V4 | `V4__create_interests.sql` | W2-09 (moved from W2-05) |
-| V5 | `V5__create_auth_throttle.sql` | W2-06 |
+| V4 | `V4__create_auth_throttle.sql` | W2-06 (implemented) |
+| V5 | `V5__create_interests.sql` | W2-09 (moved from W2-05) |
 
 ### V2 — `V2__create_spring_session.sql` *(implemented in W2-04)*
 
@@ -499,7 +507,73 @@ CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON users
 Tests: `UserAccountTest`, `UserAccountRepositoryIT`, `MigrationsIT` (defaults, NOT NULL, constraints,
 trigger, migration of a V2 database with existing data in a separate schema).
 
-### V4 — `V4__create_interests.sql`
+### V4 — `V4__create_auth_throttle.sql`
+
+```sql
+CREATE TABLE auth_throttle (
+    throttle_key      VARCHAR(90) PRIMARY KEY,  -- '<scope>:<sha-256 hex>'
+    attempt_count     INTEGER     NOT NULL,
+    window_started_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ix_auth_throttle_window_started_at ON auth_throttle (window_started_at);
+```
+
+- **Fixed window.** One row per key. An attempt either starts a new window (when the old one has
+  ended) or increments the counter. Both happen in a single atomic
+  `INSERT … ON CONFLICT … DO UPDATE` statement, which is safe for concurrent requests.
+- The key is blocked while `attempt_count >= limit` and the window has not ended.
+  `Retry-After` = end of the window − now.
+- Keys are SHA-256 hashes of the normalised email and/or IP; no raw personal data is stored.
+  *Implemented as HMAC-SHA-256 with a secret, see below.*
+- An hourly job deletes rows whose window ended more than one day ago.
+- PostgreSQL rather than memory, so limits survive restarts and work with more than one instance;
+  no new infrastructure.
+
+**Implemented in W2-06 (pending review):** as above, plus two constraints:
+`ck_auth_throttle_key_hashed CHECK (throttle_key ~ '^[A-Z][A-Z_]*:[0-9a-f]{64}$')` (only hashed keys,
+never an email or IP by mistake) and `ck_auth_throttle_attempt_count CHECK (attempt_count > 0)`.
+- `auth.repository.AuthThrottleRepository` (`JdbcClient`): `recordAttempt` (the atomic upsert,
+  `RETURNING` the window), `find`, `delete`, `deleteWindowsStartedBefore`. The current time comes from
+  the service's `Clock`, not from `now()`, so tests control when windows end. The counter stops at
+  limit + 1, so it is bounded however many attempts are made.
+- `auth.service.ThrottleKeys` builds the `ThrottleKey`s and normalises the email itself (trim,
+  lower case), so case variants and unknown emails share one counter.
+- **Keys are HMAC-SHA-256, not plain SHA-256 (security review, 2026-11-02):** a plain hash of an IPv4
+  address can be reversed by trying all 2³² addresses. The key is
+  `<scope>:<hex HMAC-SHA-256(secret, scope NUL email NUL ip)>`; the scope is part of the message, so the
+  same IP gives unrelated keys in different scopes. Same format (64 hex digits), so V4 is unchanged.
+  - Secret: `app.security.throttle.secret` = `APP_SECURITY_THROTTLE_SECRET`, Base64, at least 32 bytes
+    (`openssl rand -base64 32`). The application does not start if it is missing, not Base64 or too
+    short; the value never appears in errors, logs or `ThrottleProperties.toString()`.
+  - Tests only: `src/test/resources/config/application.yml` sets `ephemeral-secret: true` (random key
+    per application context), so no secret is stored in the repository. A configured secret always wins.
+  - Changing the secret makes every existing row unreachable: all counters start again at zero, once.
+    The orphaned rows are removed by the cleanup job. Rotation procedure: `docs/database.md`.
+- Client IP (§7.8): `auth.config.ForwardedHeadersCheck` refuses to start with
+  `server.forward-headers-strategy=framework` (trusts every client's headers) or with `native` without
+  an explicit `server.tomcat.remoteip.internal-proxies`. `ClientAddressIT` proves over real HTTP that a
+  forged `X-Forwarded-For` is ignored by default and from untrusted peers, and that behind a trusted
+  proxy the right-most untrusted entry is used.
+- `auth.service.AuthThrottleService` (scopes in `ThrottleScope`, limits in
+  `auth.config.ThrottleProperties`, `app.security.throttle.*`):
+  - `checkAllowed(keys…)`: read-only check before the password is verified (login);
+  - `recordFailure(keys…)`: counts a failed login;
+  - `reset(key)`: after a successful login;
+  - `acquire(key)`: counts and checks in one atomic step (registration: every attempt counts, exact
+    under concurrency);
+  - `deleteEndedWindows()`: `@Scheduled` hourly (`common.config.SchedulingConfig`). It deletes rows
+    whose window started more than the longest configured window + 1 day ago.
+- `auth.exception.TooManyAttemptsException` → `429 TOO_MANY_ATTEMPTS` with `Retry-After` (whole
+  seconds, rounded up, at least 1). `ApiException.headers()` lets `GlobalExceptionHandler` send it.
+- Login and registration call these methods in W2-07/W2-08; no endpoint uses them yet.
+
+Tests: `ThrottleKeyTest` (HMAC known answer, deterministic per secret, different per secret, no
+plaintext, secret validation and start-up failure), `AuthThrottleServiceTest`,
+`TooManyAttemptsExceptionTest`, `GlobalExceptionHandlerTest` (429 + `Retry-After`),
+`ForwardedHeadersCheckTest`, `AuthThrottleRepositoryIT`, `AuthThrottleServiceIT` (limits per scope,
+expiration, concurrency, cleanup, no raw data in keys), `ClientAddressIT`, `MigrationsIT`.
+
+### V5 — `V5__create_interests.sql`
 
 ```sql
 CREATE TABLE interests (
@@ -532,27 +606,6 @@ INSERT INTO interests (code, name, description, sort_order) VALUES
 The implementation plan uses `user_preferences` for interests. Interests get `user_interests`
 (many-to-many), and `user_preferences` stays reserved for UI settings in Week 6. See
 [change proposal 0001](../proposals/0001-implementation-plan-alignment.md).
-
-### V5 — `V5__create_auth_throttle.sql`
-
-```sql
-CREATE TABLE auth_throttle (
-    throttle_key      VARCHAR(90) PRIMARY KEY,  -- '<scope>:<sha-256 hex>'
-    attempt_count     INTEGER     NOT NULL,
-    window_started_at TIMESTAMPTZ NOT NULL
-);
-CREATE INDEX ix_auth_throttle_window_started_at ON auth_throttle (window_started_at);
-```
-
-- **Fixed window.** One row per key. An attempt either starts a new window (when the old one has
-  ended) or increments the counter. Both happen in a single atomic
-  `INSERT … ON CONFLICT … DO UPDATE` statement, which is safe for concurrent requests.
-- The key is blocked while `attempt_count >= limit` and the window has not ended.
-  `Retry-After` = end of the window − now.
-- Keys are SHA-256 hashes of the normalised email and/or IP; no raw personal data is stored.
-- An hourly job deletes rows whose window ended more than one day ago.
-- PostgreSQL rather than memory, so limits survive restarts and work with more than one instance;
-  no new infrastructure.
 
 ---
 
@@ -701,6 +754,7 @@ Swagger UI (development): `springdoc.swagger-ui.csrf.enabled=true`.
 - Success deletes the `LOGIN_ACCOUNT_IP` row.
 - Limits and windows are configurable (`app.security.throttle.*`). The IP limit is generous because
   of shared networks (NAT).
+- Stored keys are HMAC-SHA-256 with the required secret `APP_SECURITY_THROTTLE_SECRET` (§6, V4).
 - **Not covered (residual risk):** slow guessing against one account from many different IPs. It is
   mitigated by the password policy and BCrypt. Possible later measures are device cookies or an edge
   rate limit (§12).
@@ -714,12 +768,18 @@ Swagger UI (development): `springdoc.swagger-ui.csrf.enabled=true`.
 - **Deployment checklist (Week 12, before public access):**
   1. Set `SERVER_FORWARD_HEADERS_STRATEGY=native`, so Tomcat's `RemoteIpValve` handles
      `X-Forwarded-For`/`-Proto`.
-  2. Set `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` (and/or `…TRUSTED_PROXIES`) **explicitly** to the
-     hosting platform's proxy addresses. Spring Boot's default trusts *all private address ranges*.
+  2. Set `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` **explicitly** (a regular expression, e.g.
+     `10[.]0[.]0[.]1`) to the hosting platform's proxy addresses, plus `…TRUSTED_PROXIES` if needed.
+     Spring Boot's default trusts *all private address ranges*.
   3. Verify that the right-most untrusted `X-Forwarded-For` entry is used and that
      `request.isSecure()` is `true` (`Secure` cookies, HSTS).
   4. Add a smoke test for the cookie attributes over HTTPS.
-- No custom proxy code, validators or additional infrastructure in Week 2.
+  5. Set `APP_SECURITY_THROTTLE_SECRET` (production value, secret store only).
+- No custom proxy code or additional infrastructure in Week 2.
+- **Added in W2-06 (security review):** `auth.config.ForwardedHeadersCheck` enforces step 2 at
+  start-up (`native` without `server.tomcat.remoteip.internal-proxies` → no start) and rejects
+  `framework`, whose `ForwardedHeaderFilter` would trust the headers of every client. `ClientAddressIT`
+  covers the default, `native` from an untrusted peer and `native` behind a trusted proxy.
 
 ### 7.9 Secure error handling
 
@@ -829,7 +889,7 @@ The existing `common.system` code already complies. **Implemented in W2-01:** th
 
 | Test class | Covers |
 |---|---|
-| `MigrationsIT` | V3 (W2-05), V4 interests seeded (W2-09), V5 (W2-06): defaults, constraints, triggers, migration of existing data (V2 is checked by `CasinoSimulatorApplicationIT`) |
+| `MigrationsIT` | V3 (W2-05), V4 (W2-06), V5 interests seeded (W2-09): defaults, constraints, triggers, migration of existing data (V2 is checked by `CasinoSimulatorApplicationIT`) |
 | `RegistrationIT` | 201 + signed in + new session id; hash prefix; case-variant duplicate → 409; `REGISTER_IP` → 429; `"role":"ADMIN"` ignored |
 | `LoginLogoutIT` | login → me → logout → me = 401; session row created and deleted; disabled user → 401; identical body for unknown email / wrong password / disabled; `last_login_at` |
 | `CsrfIT` | missing/invalid token → 403 on every unsafe operation; fresh client: `GET /auth/csrf` then register works; token before login/logout rejected afterwards |
@@ -864,11 +924,11 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-02 | **Contract:** all Week 2 operations and schemas in `openapi.yaml` as `planned`, security schemes, extended `ProblemDetail`; `planned`/`security` support in `OpenApiContract` + tests. **Review gate.** | M | — |
 | W2-03 | Error model: `ApiException`, `ProblemCode`, `ProblemDetailFactory`, field errors and `no-store` in `GlobalExceptionHandler` | S | W2-02 |
 | W2-04 | Security foundation: dependencies, `SecurityConfig` (§7.1–7.2), entry point and denied handler, CORS source, Spring Session JDBC + **V2**, cookie properties, `PasswordEncoder`; **endpoint `GET /auth/csrf`** (①–⑥); adapt existing tests | L | W2-02, W2-03 |
-| W2-05 | Persistence foundation for `user`: **V3**, entity `UserAccount` (`Role`, `UserStatus`), `UserAccountRepository`, `MigrationsIT` (shared by W2-06…W2-10). *V4 and `Interest` moved to W2-09 (2026-11-02).* | M | W2-01 |
-| W2-06 | Throttling: **V5**, `AuthThrottleRepository` (atomic upsert), `AuthThrottleService`, cleanup job, unit tests | M | W2-04 |
+| W2-05 | Persistence foundation for `user`: **V3**, entity `UserAccount` (`Role`, `UserStatus`), `UserAccountRepository`, `MigrationsIT` (shared by W2-06…W2-10). *Interests migration and `Interest` moved to W2-09 (2026-11-02).* | M | W2-01 |
+| W2-06 | Throttling: **V4** (renumbered from V5, 2026-11-02), `AuthThrottleRepository` (atomic upsert), `AuthThrottleService`, cleanup job, unit tests, `AuthThrottleRepositoryIT`/`AuthThrottleServiceIT` | M | W2-04 |
 | W2-07 | **Endpoint `POST /auth/register`** (①–⑥): `RegisterRequest`, `UserProfileResponse`; `AuthController`; `RegistrationService`, `UserAccountService`, `PasswordPolicy`, `SessionSignInService`; `REGISTER_IP`; `RegistrationIT`, `CsrfIT` (part) | L | W2-04, W2-05, W2-06 |
 | W2-08 | **Endpoints `POST /auth/login` and `/auth/logout`** (①–⑥): `LoginRequest`; `AccountUserDetailsService`, `LoginService`; `AbsoluteSessionTimeoutFilter`; login limits; `LoginLogoutIT`, `CsrfIT`, `SessionLifetimeIT`, `CookieAttributesIT`, `ThrottleIT` | L | W2-07 |
-| W2-09 | **Endpoint `GET /interests`** (①–⑥): **V4** (moved from W2-05), entity `Interest`, `InterestRepository`, `InterestResponse`, `InterestController`, `InterestService` | M | W2-04, W2-05 |
+| W2-09 | **Endpoint `GET /interests`** (①–⑥): **V5** (moved from W2-05, renumbered from V4), entity `Interest`, `InterestRepository`, `InterestResponse`, `InterestController`, `InterestService` | M | W2-04, W2-05 |
 | W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT` | M | W2-08, W2-09 |
 | W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT` | M | W2-08, W2-10 |
 | W2-12 | **Should:** password denylist (only with a verified licence; otherwise record as deferred) | S | W2-07 |

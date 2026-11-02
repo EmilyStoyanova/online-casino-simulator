@@ -98,3 +98,20 @@ app:
   security:
     # BCrypt cost (at least 10).
     bcrypt-strength: ${APP_SECURITY_BCRYPT_STRENGTH:12}
+    # Fixed-window limits of login and registration throttling (week-02.md §7.7). The IP limit is
+    # generous because of shared networks (NAT). Ended windows are deleted hourly.
+    throttle:
+      # HMAC key of the stored throttle keys (Base64, at least 32 bytes). Required: the application does
+      # not start without it. Never committed; production sets it in the hosting provider's secret store.
+      secret: ${APP_SECURITY_THROTTLE_SECRET:}
+      # Tests only (src/test/resources/config/application.yml): random secret when none is configured.
+      ephemeral-secret: false
+      login-account-ip:
+        max-attempts: 5
+        window: 15m
+      login-ip:
+        max-attempts: 50
+        window: 15m
+      register-ip:
+        max-attempts: 10
+        window: 1h

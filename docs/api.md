@@ -35,7 +35,7 @@ The API is **design-first**. The contract
   | `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION` | 409 | Specific conflicts (W2-07, W2-10) |
   | `CONTENT_TOO_LARGE` | 413 | Request too large |
   | `UNSUPPORTED_MEDIA_TYPE` | 415 | Unsupported request `Content-Type` (`Accept` header lists the supported types) |
-  | `TOO_MANY_ATTEMPTS` | 429 | Throttling (W2-06) |
+  | `TOO_MANY_ATTEMPTS` | 429 | Login/registration throttling; `Retry-After` = whole seconds until the window ends (W2-06; used by login and registration from W2-07/W2-08) |
   | `INTERNAL_ERROR` | 500 | Unexpected failure; generic detail, the exception is only logged |
   | `SERVICE_UNAVAILABLE` | 503 | Temporarily unavailable (e.g. a request timeout) |
   | `CLIENT_ERROR` | other `4xx` | Generic fallback; the status is kept (e.g. `410`, `422`) |

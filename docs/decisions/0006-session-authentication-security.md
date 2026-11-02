@@ -42,10 +42,14 @@ It should rely on Spring Security and Spring Session wherever they already solve
    - IP: 50 failures per 15 min;
    - registration attempts per IP: 10 per hour.
 
+   Stored keys are HMAC-SHA-256 of the normalised email and/or IP with the required secret
+   `APP_SECURITY_THROTTLE_SECRET` (no start without a valid one; rotation in `docs/database.md`).
+
    There is no account lockout, and the responses are identical for unknown accounts.
 8. **Client IP:** `request.getRemoteAddr()` only. Forwarded headers are ignored by default
    (`forward-headers-strategy=none`). Production enables `native` only together with an explicit
-   trusted-proxy list, following a deployment checklist (Week 12).
+   trusted-proxy list, following a deployment checklist (Week 12); the application refuses to start
+   with `native` but no explicit `server.tomcat.remoteip.internal-proxies`, or with `framework`.
 9. **Errors:** RFC 9457 Problem Details with stable codes for every error (including Spring Security
    401/403), no internal details, `Cache-Control: no-store`.
 

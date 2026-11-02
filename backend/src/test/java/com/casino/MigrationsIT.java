@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import javax.sql.DataSource;
@@ -20,7 +21,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * The Flyway schema in PostgreSQL itself (independent of JPA): defaults, required columns, constraints
- * and triggers of {@code users} (V3), and that the migrations apply to a database with existing data.
+ * and triggers of {@code users} (V3) and {@code auth_throttle} (V4), and that the migrations apply to a
+ * database with existing data.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -30,6 +32,8 @@ class MigrationsIT {
     private static final String INSERT = """
             INSERT INTO users (email, password_hash, display_name, adult_confirmed_at, role, status)
             VALUES (?, ?, ?, ?, ?, ?)""";
+    private static final String THROTTLE_INSERT =
+            "INSERT INTO auth_throttle (throttle_key, attempt_count, window_started_at) VALUES (?, ?, ?)";
     private static final String COMPAT_SCHEMA = "migration_compat";
 
     @Autowired
@@ -39,8 +43,9 @@ class MigrationsIT {
     private DataSource dataSource;
 
     @AfterEach
-    void deleteAccounts() {
+    void deleteRows() {
         jdbcTemplate.update("DELETE FROM users");
+        jdbcTemplate.update("DELETE FROM auth_throttle");
     }
 
     @Test
@@ -102,6 +107,26 @@ class MigrationsIT {
     }
 
     @Test
+    void throttleCountersAcceptOnlyHashedKeysAndPositiveCounts() {
+        String key = "LOGIN_ACCOUNT_IP:" + "0123456789abcdef".repeat(4);
+        jdbcTemplate.update(THROTTLE_INSERT, key, 1, ts(Instant.now()));
+
+        assertViolates("auth_throttle_pkey", THROTTLE_INSERT, key, 2, ts(Instant.now()));
+        assertViolates("\"attempt_count\"", THROTTLE_INSERT, "LOGIN_IP:" + "a".repeat(64), null, ts(Instant.now()));
+        assertViolates("\"window_started_at\"", THROTTLE_INSERT, "LOGIN_IP:" + "a".repeat(64), 1, null);
+        assertViolates("ck_auth_throttle_attempt_count", THROTTLE_INSERT, "LOGIN_IP:" + "a".repeat(64), 0, ts(Instant.now()));
+        // Raw personal data or malformed keys cannot be stored by mistake.
+        for (String rawKey : List.of("LOGIN_ACCOUNT_IP:alice@example.com|203.0.113.7", "LOGIN_IP:203.0.113.7",
+                "login_ip:" + "a".repeat(64), "LOGIN_IP:" + "A".repeat(64), "LOGIN_IP:" + "a".repeat(63), "a".repeat(64))) {
+            assertViolates("ck_auth_throttle_key_hashed", THROTTLE_INSERT, rawKey, 1, ts(Instant.now()));
+        }
+        assertViolates("character varying(90)", THROTTLE_INSERT, "X".repeat(26) + ":" + "a".repeat(64), 1, ts(Instant.now()));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM auth_throttle", Integer.class)).isOne();
+        assertThat(jdbcTemplate.queryForList("SELECT indexname FROM pg_indexes WHERE tablename = 'auth_throttle'", String.class))
+                .containsExactlyInAnyOrder("auth_throttle_pkey", "ix_auth_throttle_window_started_at");
+    }
+
+    @Test
     void migrationsApplyToADatabaseWithExistingData() {
         // A separate schema at V2 (the state of databases before W2-05), with a stored session.
         Flyway atV2 = flyway("2");
@@ -118,12 +143,15 @@ class MigrationsIT {
             assertThat(latest.info().applied()).filteredOn(info -> info.getVersion() != null)
                     .allMatch(info -> info.getState().isApplied() && !info.getState().isFailed())
                     .extracting(info -> info.getVersion().getVersion())
-                    .containsExactly("1", "2", "3");
-            // Existing data is untouched, and the new table is there.
+                    .containsExactly("1", "2", "3", "4");
+            // Existing data is untouched, and the new tables are there.
             assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM " + COMPAT_SCHEMA + ".spring_session", Integer.class))
                     .isOne();
-            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM " + COMPAT_SCHEMA + ".users", Integer.class))
-                    .isZero();
+            for (String table : List.of("users", "auth_throttle")) {
+                assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM " + COMPAT_SCHEMA + "." + table, Integer.class))
+                        .as(table)
+                        .isZero();
+            }
         } finally {
             jdbcTemplate.execute("DROP SCHEMA IF EXISTS " + COMPAT_SCHEMA + " CASCADE");
         }

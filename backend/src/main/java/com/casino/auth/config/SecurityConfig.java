@@ -29,7 +29,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  * {@code application.yml}.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(SecurityProperties.class)
+@EnableConfigurationProperties({SecurityProperties.class, ThrottleProperties.class})
 public class SecurityConfig {
 
     private static final String BCRYPT = "bcrypt";

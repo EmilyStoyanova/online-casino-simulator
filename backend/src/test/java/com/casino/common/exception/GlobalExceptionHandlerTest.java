@@ -10,8 +10,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 
+import com.casino.auth.exception.TooManyAttemptsException;
 import com.casino.contract.OpenApiContract;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -119,6 +121,15 @@ class GlobalExceptionHandlerTest {
     void apiExceptionsKeepTheirCodeAndDetail() throws Exception {
         expectProblem(get("/test/errors/missing-resource"), ProblemCode.NOT_FOUND)
                 .andExpect(jsonPath("$.detail").value("The game round does not exist."));
+    }
+
+    @Test
+    void throttledAttemptsAreTooManyAttemptsWithRetryAfter() throws Exception {
+        // As documented by components/responses/TooManyAttempts: Retry-After in whole seconds, rounded up.
+        expectProblem(get("/test/errors/throttled"), ProblemCode.TOO_MANY_ATTEMPTS)
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "90"))
+                .andExpect(jsonPath("$.title").value("Too Many Requests"))
+                .andExpect(jsonPath("$.detail").value("Too many attempts. Try again later."));
     }
 
     @Test
@@ -245,6 +256,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/missing-resource")
         void missingResource() {
             throw new GameRoundNotFoundException();
+        }
+
+        @GetMapping("/throttled")
+        void throttled() {
+            throw new TooManyAttemptsException(Duration.ofMillis(89_500));
         }
 
         @GetMapping("/failure")
