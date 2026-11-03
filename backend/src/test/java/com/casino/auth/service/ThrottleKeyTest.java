@@ -122,6 +122,10 @@ class ThrottleKeyTest {
         assertThatIllegalStateException().isThrownBy(() -> new ThrottleKeys(properties(tooShort, false)))
                 .withMessageStartingWith("Invalid throttling secret: only 31 bytes")
                 .withMessageNotContaining(tooShort);
+        // Quotes in `.env` are kept literally by the properties import.
+        assertThatIllegalStateException().isThrownBy(() -> new ThrottleKeys(properties("\"" + SECRET + "\"", false)))
+                .withMessageStartingWith("Invalid throttling secret: enclosed in quotes")
+                .withMessageNotContaining(SECRET);
         // Even if tests allow an ephemeral secret, a configured but invalid one is an error.
         assertThatIllegalStateException().isThrownBy(() -> new ThrottleKeys(properties(tooShort, true)));
     }
@@ -143,8 +147,10 @@ class ThrottleKeyTest {
                         "app.security.throttle.login-ip.max-attempts=50", "app.security.throttle.login-ip.window=15m",
                         "app.security.throttle.register-ip.max-attempts=10", "app.security.throttle.register-ip.window=1h");
 
-        runner.run(context -> assertThat(context).hasFailed().getFailure().rootCause()
-                .hasMessageStartingWith("Missing throttling secret"));
+        // Explicitly empty, so an APP_SECURITY_THROTTLE_SECRET of the machine running the test does not interfere.
+        runner.withPropertyValues("app.security.throttle.secret=")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageStartingWith("Missing throttling secret"));
         runner.withPropertyValues("app.security.throttle.secret=" + randomSecret(16))
                 .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
                         .hasMessageStartingWith("Invalid throttling secret"));

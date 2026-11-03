@@ -80,6 +80,7 @@ The API is **design-first**. The contract
 |---|---|---|---|---|
 | GET | `/api/v1/system/status` | System | `200` `SystemStatus`, `503` `SystemStatus`, `500` `ProblemDetail` | Application version and database connectivity (public) |
 | GET | `/api/v1/auth/csrf` | Authentication | `204` (`XSRF-TOKEN` cookie), `500` `ProblemDetail` | CSRF token for unsafe requests (public) |
+| POST | `/api/v1/auth/register` | Authentication | `201` `UserProfile` (+ session cookie), `400`, `403`, `409`, `429`, `500` `ProblemDetail` | Creates a `PLAYER` account and signs it in (public, CSRF token required) |
 | GET | `/actuator/health` | Operations | `200` / `503` `HealthStatus` | Aggregated health incl. health groups |
 | GET | `/actuator/health/liveness` | Operations | `200` / `503` `HealthStatus` | Liveness probe |
 | GET | `/actuator/health/readiness` | Operations | `200` / `503` `HealthStatus` | Readiness probe |
@@ -96,6 +97,31 @@ Example `GET /api/v1/system/status` → `200`:
   "timestamp": "2026-10-29T10:15:30.123Z"
 }
 ```
+
+### Registration (`POST /api/v1/auth/register`)
+
+```json
+{ "email": "alice@example.com", "password": "correct-horse-battery", "displayName": "Alice", "adultConfirmed": true }
+```
+
+- `201` with `UserProfile` (`id`, `email`, `displayName`, `role` = `PLAYER`, `interests` = `[]`,
+  `adultConfirmedAt` from the server clock, `createdAt`). The user is signed in: a new session id
+  in the session cookie, and the CSRF token is cleared, so the client calls `GET /api/v1/auth/csrf`
+  again.
+- Validation (`400 VALIDATION_FAILED`, every invalid property in one response): `email` trimmed,
+  well-formed, ASCII, ≤ 254 characters; `password` 12 characters to 72 UTF-8 bytes, not equal to
+  the email or display name (ignoring case); `displayName` trimmed, 3–30 characters, no control
+  characters; `adultConfirmed` must be `true`. Rejected values are never echoed.
+- The email is lower-cased before the duplicate check and storage; an existing email (also a case
+  variant, also a concurrent request) → `409 EMAIL_ALREADY_REGISTERED`, without a session.
+- Other properties (`role`, `status`, `id`, …) are ignored. The password is stored only as a BCrypt
+  hash and never logged or returned.
+- At most 10 attempts per client IP and hour → `429 TOO_MANY_ATTEMPTS` with `Retry-After`. Every
+  request that passes the CSRF check counts (`201`, `400`, `409`); the limit is checked before the
+  body, so the order is `403` → `429` → `400` → `409`. The client IP is the TCP peer; forwarded
+  headers are ignored unless a trusted proxy is configured.
+- The registration response deletes the `XSRF-TOKEN` cookie; the client calls `GET /api/v1/auth/csrf`
+  before its next unsafe request.
 
 Example error (`POST /api/v1/system/status` → `405`):
 

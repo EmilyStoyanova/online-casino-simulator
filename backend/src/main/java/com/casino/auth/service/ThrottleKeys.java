@@ -5,13 +5,13 @@ import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HexFormat;
-import java.util.Locale;
 import java.util.Objects;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import com.casino.auth.config.ThrottleProperties;
+import com.casino.user.service.UserAccountService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
  * not start without a valid one. Only test configurations may set {@code ephemeral-secret} to use a
  * random key per start instead.
  *
- * <p>The email is normalised here (trimmed, lower case) and not only by the account service: case
+ * <p>The email is normalised as stored ({@link UserAccountService#normalizeEmail}) before hashing: case
  * variants of the same email, and unknown emails, must share one counter.
  */
 @Component
@@ -49,7 +49,7 @@ public class ThrottleKeys {
 
     /** Failed logins for {@code email} from {@code clientIp}. */
     public ThrottleKey loginAccountIp(String email, String clientIp) {
-        return key(ThrottleScope.LOGIN_ACCOUNT_IP, normalizeEmail(email), requireIp(clientIp));
+        return key(ThrottleScope.LOGIN_ACCOUNT_IP, UserAccountService.normalizeEmail(email), requireIp(clientIp));
     }
 
     /** Failed logins from {@code clientIp}. */
@@ -86,6 +86,10 @@ public class ThrottleKeys {
     private static byte[] secretBytes(ThrottleProperties properties) {
         String configured = properties.secret();
         if (configured != null && !configured.isBlank()) {
+            if (configured.strip().matches("([\"']).*\\1")) {
+                // `.env` is imported as a properties file, which keeps quotes as part of the value.
+                throw new IllegalStateException("Invalid throttling secret: enclosed in quotes; remove them. " + SECRET_HINT);
+            }
             byte[] bytes;
             try {
                 bytes = Base64.getDecoder().decode(configured.strip());
@@ -105,10 +109,6 @@ public class ThrottleKeys {
             return bytes;
         }
         throw new IllegalStateException("Missing throttling secret. " + SECRET_HINT);
-    }
-
-    private static String normalizeEmail(String email) {
-        return Objects.requireNonNull(email, "email").strip().toLowerCase(Locale.ROOT);
     }
 
     private static String requireIp(String clientIp) {

@@ -15,6 +15,12 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.context.DelegatingSecurityContextRepository;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
 import org.springframework.security.web.savedrequest.NullRequestCache;
 import org.springframework.web.servlet.HandlerExceptionResolver;
@@ -36,14 +42,16 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http,
-                                            @Qualifier("handlerExceptionResolver") HandlerExceptionResolver exceptionResolver)
+                                            @Qualifier("handlerExceptionResolver") HandlerExceptionResolver exceptionResolver,
+                                            CsrfTokenRepository csrfTokenRepository,
+                                            SecurityContextRepository securityContextRepository)
             throws Exception {
         // Public paths are permitted for every method: the rules decide who may call a path, Spring MVC
         // which methods it supports. So HEAD works wherever GET does, and an unsupported method answers
         // 405 instead of 401. Unsafe methods still need a CSRF token first.
         http.authorizeHttpRequests(requests -> requests
                         // Public operations of openapi.yaml (`security: []`).
-                        .requestMatchers("/api/v1/system/status", "/api/v1/auth/csrf").permitAll()
+                        .requestMatchers("/api/v1/system/status", "/api/v1/auth/csrf", "/api/v1/auth/register").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
                         // API documentation (development; disabled in production in Week 12).
                         .requestMatchers("/openapi.yaml", "/swagger-ui.html", "/swagger-ui/**",
@@ -53,7 +61,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 // XSRF-TOKEN cookie (readable by JavaScript) + X-XSRF-TOKEN header on every unsafe method.
-                .csrf(csrf -> csrf.spa())
+                // The repository is the same as spa()'s, shared with SessionSignInService (token rotation).
+                .csrf(csrf -> csrf.spa().csrfTokenRepository(csrfTokenRepository))
+                // Shared with SessionSignInService, which stores the context of a newly signed-in user.
+                .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 // Uses the CorsConfigurationSource bean (common.config.WebConfig).
                 .cors(Customizer.withDefaults())
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -67,6 +78,19 @@ public class SecurityConfig {
                 // Spring Security's default headers (nosniff, DENY framing, no-store, HSTS on HTTPS) + no referrer.
                 .headers(headers -> headers.referrerPolicy(referrer -> referrer.policy(ReferrerPolicy.NO_REFERRER)));
         return http.build();
+    }
+
+    /** The {@code XSRF-TOKEN} cookie, readable by JavaScript ({@code csrf.spa()}'s repository). */
+    @Bean
+    CsrfTokenRepository csrfTokenRepository() {
+        return CookieCsrfTokenRepository.withHttpOnlyFalse();
+    }
+
+    /** Spring Security's default: the request (for this request) and the HTTP session (Spring Session). */
+    @Bean
+    SecurityContextRepository securityContextRepository() {
+        return new DelegatingSecurityContextRepository(new RequestAttributeSecurityContextRepository(),
+                new HttpSessionSecurityContextRepository());
     }
 
     /** BCrypt with the configured cost; hashes are stored as {@code {bcrypt}$2a$12$…}. */

@@ -1,7 +1,6 @@
 package com.casino.contract;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -15,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
+import com.casino.RealCsrfToken;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -27,6 +27,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -45,6 +46,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 @Import(TestcontainersConfiguration.class)
 class OpenApiContractIT {
 
+    private static final String REGISTER = "/api/v1/auth/register";
+
     private final OpenApiContract contract = OpenApiContract.load();
 
     @LocalServerPort
@@ -52,6 +55,9 @@ class OpenApiContractIT {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void implementationMatchesContractForAllApiPaths() throws Exception {
@@ -68,6 +74,7 @@ class OpenApiContractIT {
         assertThat(contract.implementedOperations()).containsExactlyInAnyOrder(
                 "GET /api/v1/system/status",
                 "GET /api/v1/auth/csrf",
+                "POST /api/v1/auth/register",
                 "GET /actuator/health",
                 "GET /actuator/health/liveness",
                 "GET /actuator/health/readiness",
@@ -75,7 +82,6 @@ class OpenApiContractIT {
         // Planned operations cannot be verified at runtime (validateResponse rejects them). When one is
         // implemented, its marker is removed and it moves to the list above. Empty at the end of Week 2.
         assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "POST /api/v1/auth/register",
                 "POST /api/v1/auth/login",
                 "POST /api/v1/auth/logout",
                 "GET /api/v1/users/me",
@@ -97,6 +103,34 @@ class OpenApiContractIT {
     }
 
     @Test
+    void registrationRespondsAccordingToContract() throws Exception {
+        String valid = """
+                {"email":"contract@example.com","password":"correct-horse-battery","displayName":"Contract",\
+                "adultConfirmed":true}""";
+        RealCsrfToken csrf = RealCsrfToken.fetch(mockMvc);
+        try {
+            assertConformsToContract(REGISTER, "POST", register(valid, "192.0.2.10").with(csrf), 201);
+            assertConformsToContract(REGISTER, "POST", register("""
+                    {"email":"not-an-email","password":"short","displayName":"C","adultConfirmed":false}""", "192.0.2.10")
+                    .with(csrf), 400);
+            assertConformsToContract(REGISTER, "POST", register("{\"email\":", "192.0.2.10").with(csrf), 400);
+            assertConformsToContract(REGISTER, "POST", register(valid, "192.0.2.10"), 403);
+            assertConformsToContract(REGISTER, "POST", register(valid, "192.0.2.10").with(csrf), 409);
+            // 10 attempts per IP and hour: the 4 above (201, 400, 400, 409; the 403 is not counted) and
+            // 6 more duplicates, then 429.
+            for (int i = 0; i < 6; i++) {
+                assertThat(perform(register(valid, "192.0.2.10").with(csrf)).getStatus()).isEqualTo(409);
+            }
+            MockHttpServletResponse throttled =
+                    assertConformsToContract(REGISTER, "POST", register(valid, "192.0.2.10").with(csrf), 429);
+            assertThat(throttled.getHeader(HttpHeaders.RETRY_AFTER)).matches("[1-9][0-9]*");
+        } finally {
+            jdbcTemplate.update("DELETE FROM users");
+            jdbcTemplate.update("DELETE FROM auth_throttle");
+        }
+    }
+
+    @Test
     void actuatorEndpointsRespondAccordingToContract() throws Exception {
         for (String path : new String[] {"/actuator/health", "/actuator/health/liveness",
                 "/actuator/health/readiness", "/actuator/info"}) {
@@ -107,11 +141,12 @@ class OpenApiContractIT {
     @Test
     void requestsOutsideTheContractReturnProblemDetails() throws Exception {
         // The errors that info.description documents for every operation.
+        RealCsrfToken csrf = RealCsrfToken.fetch(mockMvc);
         Map<ProblemCode, MockHttpServletRequestBuilder> requests = Map.of(
                 ProblemCode.AUTHENTICATION_REQUIRED, get("/api/v1/system/unknown"),
                 ProblemCode.NOT_FOUND, get("/api/v1/system/unknown").with(user("player")),
                 ProblemCode.CSRF_TOKEN_INVALID, post("/api/v1/system/status"),
-                ProblemCode.METHOD_NOT_ALLOWED, post("/api/v1/system/status").with(csrf()),
+                ProblemCode.METHOD_NOT_ALLOWED, post("/api/v1/system/status").with(csrf),
                 ProblemCode.NOT_ACCEPTABLE, get("/api/v1/system/status").accept(MediaType.APPLICATION_XML));
 
         for (Map.Entry<ProblemCode, MockHttpServletRequestBuilder> entry : requests.entrySet()) {
@@ -146,14 +181,28 @@ class OpenApiContractIT {
 
     private MockHttpServletResponse assertConformsToContract(String path, MockHttpServletRequestBuilder request,
                                                              int expectedStatus) throws Exception {
-        MockHttpServletResponse response = perform(request);
+        return assertConformsToContract(path, "GET", request, expectedStatus);
+    }
 
-        assertThat(response.getStatus()).as("%s status", path).isEqualTo(expectedStatus);
-        assertThat(contract.validateResponse(path, "GET", response.getStatus(),
-                response.getHeader(HttpHeaders.CONTENT_TYPE), response.getContentAsString(StandardCharsets.UTF_8)))
-                .as("%s response vs contract", path)
+    private MockHttpServletResponse assertConformsToContract(String path, String method, MockHttpServletRequestBuilder request,
+                                                             int expectedStatus) throws Exception {
+        MockHttpServletResponse response = perform(request);
+        String body = response.getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(response.getStatus()).as("%s %s status: %s", method, path, body).isEqualTo(expectedStatus);
+        assertThat(contract.validateResponse(path, method, response.getStatus(), response.getHeader(HttpHeaders.CONTENT_TYPE), body))
+                .as("%s %s %d response vs contract", method, path, expectedStatus)
                 .isEmpty();
         return response;
+    }
+
+    /** A registration from {@code clientIp}, so the throttle counter belongs to this test only. */
+    private static MockHttpServletRequestBuilder register(String body, String clientIp) {
+        return post(REGISTER).contentType(MediaType.APPLICATION_JSON).content(body)
+                .with(request -> {
+                    request.setRemoteAddr(clientIp);
+                    return request;
+                });
     }
 
     private MockHttpServletResponse perform(MockHttpServletRequestBuilder request) throws Exception {

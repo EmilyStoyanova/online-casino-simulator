@@ -12,8 +12,11 @@ import com.casino.user.entity.UserAccount;
 import com.casino.user.entity.UserStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,6 +25,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 /** {@link UserAccountRepository} against PostgreSQL (Testcontainers) with the Flyway schema (V3). */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
+@ExtendWith(OutputCaptureExtension.class)
 class UserAccountRepositoryIT {
 
     private static final String PASSWORD = "correct-horse-battery";
@@ -75,21 +79,26 @@ class UserAccountRepositoryIT {
     }
 
     @Test
-    void emailIsUnique() {
+    void emailIsUnique(CapturedOutput output) {
         repository.saveAndFlush(account("alice@example.com"));
 
         assertThatThrownBy(() -> repository.saveAndFlush(account("alice@example.com")))
                 .isInstanceOf(DataIntegrityViolationException.class)
-                .hasMessageContaining("uq_users_email");
+                .hasMessageContaining("uq_users_email")
+                // Without PostgreSQL's detail "Key (email)=(…)".
+                .rootCause().message().contains("uq_users_email").doesNotContain("alice@example.com");
         assertThat(repository.count()).isOne();
+        assertThat(output.getAll()).doesNotContain("alice@example.com");
     }
 
     @Test
-    void emailMustBeNormalisedByTheCaller() {
+    void emailMustBeNormalisedByTheCaller(CapturedOutput output) {
         // Not lower-cased: rejected, so a case variant can never become a second account.
         assertThatThrownBy(() -> repository.saveAndFlush(account("Alice@Example.com")))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("ck_users_email_normalized");
+        // PostgreSQL's "Failing row contains (…)" would show the email and the password hash.
+        assertThat(output.getAll()).doesNotContain("Alice@Example.com", "{bcrypt}");
         // The lookup is exact; normalisation happens before it.
         repository.saveAndFlush(account("alice@example.com"));
         assertThat(repository.findByEmail("ALICE@example.com")).isEmpty();

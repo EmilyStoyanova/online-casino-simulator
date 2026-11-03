@@ -11,4 +11,7 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, UUID> 
 
     /** @param email normalised email (trimmed, lower-cased), as stored */
     Optional<UserAccount> findByEmail(String email);
+
+    /** @param email normalised email (trimmed, lower-cased), as stored */
+    boolean existsByEmail(String email);
 }

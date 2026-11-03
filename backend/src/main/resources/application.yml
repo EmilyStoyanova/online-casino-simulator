@@ -21,6 +21,11 @@ spring:
       maximum-pool-size: 10
       # Fail fast (default is 30 s) so requests do not hang when the database is unreachable.
       connection-timeout: 5000
+      data-source-properties:
+        # PostgreSQL error details repeat row values ("Key (email)=(…)", "Failing row contains (…)",
+        # including password hashes); keep them out of exception messages and logs. The constraint
+        # name stays in the message.
+        logServerErrorDetail: false
   jpa:
     # Never keep a DB connection open while rendering the HTTP response.
     open-in-view: false

@@ -48,7 +48,7 @@ info:
       designed and reviewed, but not available yet.
 
     ## Authentication
-    - Server-side sessions: registration and login (planned, Week 2) set an `HttpOnly` session
+    - Server-side sessions: registration and login (login planned, Week 2) set an `HttpOnly` session
       cookie (security scheme `sessionCookie`). There are no tokens in browser storage.
     - CSRF protection (security scheme `csrfHeader`): every `POST`, `PUT`, `PATCH` and `DELETE`
       request, including login and registration, sends the `XSRF-TOKEN` cookie value in the
@@ -69,7 +69,7 @@ tags:
   - name: System
     description: Platform status
   - name: Authentication
-    description: CSRF token; registration, login and logout (planned, Week 2)
+    description: CSRF token and registration; login and logout (planned, Week 2)
   - name: Users
     description: Profile of the signed-in user (planned, Week 2)
   - name: Interests
@@ -146,17 +146,19 @@ paths:
     post:
       tags: [Authentication]
       operationId: register
-      summary: Register a player account and sign in (planned)
-      x-implementation-status: planned
+      summary: Register a player account and sign in
       description: |
-        *Planned (W2-07).* Creates a `PLAYER` account and signs the new user in: a new session id is
-        issued and the CSRF token is rotated, so the client fetches a new one with
-        `GET /api/v1/auth/csrf`. The email is trimmed and lower-cased before it is checked and stored.
-        `adultConfirmed` must be `true`; the confirmation time is taken from the server clock.
-        Properties that are not in `RegisterRequest` (for example `role`) are ignored.
+        Creates a `PLAYER` account and signs the new user in: a new session id is issued and the
+        CSRF token is rotated, so the client fetches a new one with `GET /api/v1/auth/csrf`. The
+        email is trimmed and lower-cased before it is checked and stored. `adultConfirmed` must be
+        `true`; the confirmation time is taken from the server clock. Properties that are not in
+        `RegisterRequest` (for example `role`) are ignored. All invalid properties are reported
+        together in one `400 VALIDATION_FAILED`.
 
-        Public, but requires a CSRF token. At most 10 registration attempts per client IP and hour,
-        including attempts that end in `409`.
+        Public, but requires a CSRF token. At most 10 registration attempts per client IP and hour:
+        every request that passes the CSRF check counts, whatever its outcome (`201`, `400`, `409`).
+        The limit is checked before the body is read, so a throttled client gets `429` even for an
+        invalid request.
       security:
         - csrfHeader: []
       requestBody:
@@ -209,6 +211,8 @@ paths:
                 instance: /api/v1/auth/register
         '429':
           $ref: '#/components/responses/TooManyAttempts'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/auth/login:
     post:
@@ -500,7 +504,7 @@ components:
       description: |
         Server-side session (Spring Session JDBC). The cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`
         and has no `Domain`. In production it is named `__Host-SESSION` and is `Secure`. Issued by
-        registration and login (planned); it ends with logout, after 30 minutes of inactivity or
+        registration and login (login planned); it ends with logout, after 30 minutes of inactivity or
         12 hours after sign-in (planned, W2-08). The browser sends it automatically. A request whose
         session has ended gets `401 SESSION_EXPIRED` on protected operations.
     csrfHeader:
@@ -690,7 +694,9 @@ components:
           type: string
           format: email
           maxLength: 254
-          description: Trimmed and lower-cased by the server before it is checked and stored.
+          description: |
+            Trimmed and lower-cased by the server before it is checked and stored. Only ASCII
+            characters are accepted.
           examples: [alice@example.com]
         password:
           type: string
@@ -699,12 +705,13 @@ components:
           writeOnly: true
           description: |
             At least 12 characters and at most 72 bytes in UTF-8 (longer passwords are rejected,
-            never truncated). Must not equal the email or the display name. Stored only as a BCrypt
-            hash.
+            never truncated). Must not equal the email or the display name (ignoring case). Stored
+            only as a BCrypt hash.
         displayName:
           type: string
           minLength: 3
           maxLength: 30
+          description: Trimmed by the server before it is checked and stored; no control characters.
           examples: [Alice]
         adultConfirmed:
           type: boolean

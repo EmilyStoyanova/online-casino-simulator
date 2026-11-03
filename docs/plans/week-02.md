@@ -139,6 +139,53 @@ Week 3).
 | AC-1.8 | More than 10 registration attempts per client IP per hour, including attempts that end in `409`, → `429 TOO_MANY_ATTEMPTS` with `Retry-After`. |
 | AC-1.9 | Without a valid CSRF token → `403 CSRF_TOKEN_INVALID`. |
 
+**Implemented in W2-07 (pending review):** automatic sign-in kept as approved (P1; confirmed
+2026-11-03, although the W2-07 task text excluded "authenticated user sessions"; login and logout
+stay in W2-08).
+- `auth.controller.AuthController.register` → `auth.service.RegistrationService` (`acquire` of
+  `REGISTER_IP` first, then BCrypt, then `user.service.UserAccountService.createAccount`) →
+  `auth.service.SessionSignInService` (`ChangeSessionIdAuthenticationStrategy` +
+  `CsrfAuthenticationStrategy`, context saved in the session). The CSRF token repository and the
+  `SecurityContextRepository` are beans in `SecurityConfig`, shared by the filter chain and
+  `SessionSignInService`. Only `/api/v1/auth/register` was added to the `permitAll` rules.
+- **Password policy as a Bean Validation constraint** (`auth.dto.PasswordPolicy` on `RegisterRequest`,
+  `PasswordPolicyValidator`) instead of a service: all field errors arrive in one `400`. Characters are
+  counted as code points; the comparisons with email and display name ignore case.
+- **Additional input rules** (contract updated): email ASCII only (Java and PostgreSQL lower-case some
+  other characters differently, which would violate `ck_users_email_normalized`); display name
+  trimmed, without control characters.
+- `UserAccountService.normalizeEmail` is the single normalisation (also used by `ThrottleKeys`).
+  Duplicates: `existsByEmail`, and a concurrent insert that violates `uq_users_email` is mapped to
+  `409` (Hibernate's constraint name), never `500`. Publishes `UserRegistered` (no listener until
+  Week 3).
+- `user.dto.UserRole` (schema `UserRole`) so that `auth` does not depend on `user.entity.Role` (R3).
+- **Every attempt counts (AC-1.8, review 2026-11-03):** `auth.controller.RegistrationAttemptInterceptor`
+  (registered by `auth.config.AuthWebConfig`) calls `RegistrationService.countAttempt` (atomic
+  `acquire`) before Spring MVC reads and validates the body. So `201`, `400` (also unreadable JSON)
+  and `409` count, and a throttled client gets `429` even for an invalid body. The interceptor runs
+  after the security filter chain: CSRF failures (`403`) are not counted, so a foreign page cannot use
+  up its visitor's limit. Order: `403` → `429` → `400` → `409`. The first W2-07 version did not count
+  `400`s, which the approved criteria do not allow.
+- **CSRF after sign-in:** the response deletes the `XSRF-TOKEN` cookie and sets no new one; the SPA
+  calls `GET /auth/csrf` and gets a new value (tested over real HTTP with a cookie store). The tokens
+  are stateless double-submit values (ADR-0006, `csrf.spa()`): the server compares cookie and header
+  and keeps no token, so the old value is not invalidated on the server. A client that still sends
+  it in both places is accepted (tested). A foreign site can neither read the cookie nor set the
+  header. **For W2-08:** the `CsrfIT` case "token before login/logout rejected afterwards" cannot hold
+  with this design. Either the expectation changes to "the response deletes the cookie", or tokens
+  become session-bound (`HttpSessionCsrfTokenRepository`), which would change ADR-0006 point 4 and
+  needs approval.
+- **Log hygiene:** `spring.datasource.hikari.data-source-properties.logServerErrorDetail=false`.
+  PostgreSQL's error details (`Key (email)=(…)`, `Failing row contains (…)` with the password hash)
+  were logged by Hibernate on constraint violations.
+- Tests: `RegisterRequestValidationTest` (incl. the policy), `UserAccountServiceTest`,
+  `RegistrationServiceTest`, `SessionSignInServiceTest`, `RegistrationIT` (13 cases: sign-in and
+  session contents, normalisation, duplicates and a concurrent race, all validation rules, ignored
+  properties, CSRF, token rotation, session-id rotation, throttling, logs), `OpenApiContractIT`
+  (201/400/403/409/429), `UserAccountRepositoryIT` (no row values in logs). ITs use a real token from
+  `GET /auth/csrf` (`RealCsrfToken`): spring-security-test's `csrf()` replaces the repository of the
+  shared `CsrfFilter` for the rest of the cached context.
+
 ### FR-2 Login
 
 | ID | Acceptance criterion |
@@ -643,7 +690,7 @@ CorsFilter → SessionRepositoryFilter (Spring Session) → SecurityContextHolde
 | everything else | `denyAll()` |
 
 **Implemented in W2-04 (pending review):** `auth.config.SecurityConfig` with the rules above for the
-operations that exist. The `permitAll` rules for register, login, logout and interests are added
+operations that exist. The `permitAll` rules for register (added in W2-07), login, logout and interests are added
 with those endpoints (W2-07…W2-09), the `/admin/**` rule in W2-11; until then these paths are covered
 by `/api/**` → `401`. Details:
 - Public paths are permitted for **every method** (the table above lists the documented `GET`s):
@@ -926,7 +973,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-04 | Security foundation: dependencies, `SecurityConfig` (§7.1–7.2), entry point and denied handler, CORS source, Spring Session JDBC + **V2**, cookie properties, `PasswordEncoder`; **endpoint `GET /auth/csrf`** (①–⑥); adapt existing tests | L | W2-02, W2-03 |
 | W2-05 | Persistence foundation for `user`: **V3**, entity `UserAccount` (`Role`, `UserStatus`), `UserAccountRepository`, `MigrationsIT` (shared by W2-06…W2-10). *Interests migration and `Interest` moved to W2-09 (2026-11-02).* | M | W2-01 |
 | W2-06 | Throttling: **V4** (renumbered from V5, 2026-11-02), `AuthThrottleRepository` (atomic upsert), `AuthThrottleService`, cleanup job, unit tests, `AuthThrottleRepositoryIT`/`AuthThrottleServiceIT` | M | W2-04 |
-| W2-07 | **Endpoint `POST /auth/register`** (①–⑥): `RegisterRequest`, `UserProfileResponse`; `AuthController`; `RegistrationService`, `UserAccountService`, `PasswordPolicy`, `SessionSignInService`; `REGISTER_IP`; `RegistrationIT`, `CsrfIT` (part) | L | W2-04, W2-05, W2-06 |
+| W2-07 | **Endpoint `POST /auth/register`** (①–⑥): `RegisterRequest`, `UserProfileResponse`; `AuthController`; `RegistrationService`, `UserAccountService`, `PasswordPolicy`, `SessionSignInService`; `REGISTER_IP`; `RegistrationIT`, `CsrfIT` (part). *Implemented 2026-11-03 (pending review); the registration CSRF cases are in `RegistrationIT`, `CsrfIT` for every operation follows in W2-08.* | L | W2-04, W2-05, W2-06 |
 | W2-08 | **Endpoints `POST /auth/login` and `/auth/logout`** (①–⑥): `LoginRequest`; `AccountUserDetailsService`, `LoginService`; `AbsoluteSessionTimeoutFilter`; login limits; `LoginLogoutIT`, `CsrfIT`, `SessionLifetimeIT`, `CookieAttributesIT`, `ThrottleIT` | L | W2-07 |
 | W2-09 | **Endpoint `GET /interests`** (①–⑥): **V5** (moved from W2-05, renumbered from V4), entity `Interest`, `InterestRepository`, `InterestResponse`, `InterestController`, `InterestService` | M | W2-04, W2-05 |
 | W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT` | M | W2-08, W2-09 |

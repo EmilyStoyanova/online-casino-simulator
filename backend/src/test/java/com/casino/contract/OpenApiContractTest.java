@@ -161,9 +161,8 @@ class OpenApiContractTest {
     @Test
     void week2OperationsArePlanned() {
         assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.2.0");
-        // GET /api/v1/auth/csrf is implemented since W2-04.
+        // GET /api/v1/auth/csrf is implemented since W2-04, POST /api/v1/auth/register since W2-07.
         assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "POST /api/v1/auth/register",
                 "POST /api/v1/auth/login",
                 "POST /api/v1/auth/logout",
                 "GET /api/v1/users/me",
