@@ -293,6 +293,20 @@ stay in W2-08).
 | AC-8.2 | 0–8 distinct interests per user; unknown or inactive codes → `400 VALIDATION_FAILED`. |
 | AC-8.3 | Saving replaces the whole selection. |
 
+**Implemented in W2-09 (pending review):** AC-8.1.
+- **V5** exactly as in §6 (`interests` with the 8 seeded entries, `user_interests`). The selection is
+  not mapped or used yet: AC-8.2/AC-8.3 and the `interests` of `UserProfile` follow in W2-10.
+- `user.entity.Interest` (read-only, `@Immutable`: the catalogue is maintained by migrations),
+  `InterestRepository` (active only, ordered by `sort_order`, then `code`, so the order is stable even
+  for equal orders), `InterestService`, `InterestResponse` (schema `Interest`: `code`, `name`,
+  `description`), `InterestController`.
+- `GET /api/v1/interests` is `permitAll` (§7.2): the same response with, without or with an ended
+  session, and no session is created. Unsafe methods: `403 CSRF_TOKEN_INVALID`, then `405`.
+- Contract: `planned` marker removed, `500` added (as on every operation).
+- Tests: `InterestServiceTest`, `MigrationsIT` (seed, constraints of both tables, cascade and
+  restrict, upgrade from V4 with an existing account, session and counter), `InterestIT`,
+  `OpenApiContractIT`, `WebSecurityIT`, `CasinoSimulatorApplicationIT` (schema version 5).
+
 ### FR-9 Roles & authorization
 
 | ID | Acceptance criterion |
@@ -513,7 +527,7 @@ with V5 applied, Flyway would reject a later V4. Throttling therefore became **V
 | V2 | `V2__create_spring_session.sql` | W2-04 (implemented) |
 | V3 | `V3__create_users.sql` | W2-05 (implemented) |
 | V4 | `V4__create_auth_throttle.sql` | W2-06 (implemented) |
-| V5 | `V5__create_interests.sql` | W2-09 (moved from W2-05) |
+| V5 | `V5__create_interests.sql` | W2-09 (moved from W2-05; implemented) |
 
 ### V2 — `V2__create_spring_session.sql` *(implemented in W2-04)*
 
@@ -661,7 +675,7 @@ plaintext, secret validation and start-up failure), `AuthThrottleServiceTest`,
 `ForwardedHeadersCheckTest`, `AuthThrottleRepositoryIT`, `AuthThrottleServiceIT` (limits per scope,
 expiration, concurrency, cleanup, no raw data in keys), `ClientAddressIT`, `MigrationsIT`.
 
-### V5 — `V5__create_interests.sql`
+### V5 — `V5__create_interests.sql` *(implemented in W2-09)*
 
 ```sql
 CREATE TABLE interests (
@@ -731,9 +745,9 @@ CorsFilter → SessionRepositoryFilter (Spring Session) → SecurityContextHolde
 | everything else | `denyAll()` |
 
 **Implemented in W2-04 (pending review):** `auth.config.SecurityConfig` with the rules above for the
-operations that exist. The `permitAll` rules for register (added in W2-07), login, logout and interests are added
-with those endpoints (W2-07…W2-09), the `/admin/**` rule in W2-11; until then these paths are covered
-by `/api/**` → `401`. Details:
+operations that exist. The `permitAll` rules for register (W2-07), login and logout (W2-08) and
+interests (W2-09) were added with those endpoints; the `/admin/**` rule follows in W2-11, until then
+that path is covered by `/api/**` → `401`. Details:
 - Public paths are permitted for **every method** (the table above lists the documented `GET`s):
   `HEAD` works wherever `GET` does, and an unsupported method answers `405` instead of `401`
   (unsafe methods need a CSRF token first).
@@ -1017,7 +1031,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-06 | Throttling: **V4** (renumbered from V5, 2026-11-02), `AuthThrottleRepository` (atomic upsert), `AuthThrottleService`, cleanup job, unit tests, `AuthThrottleRepositoryIT`/`AuthThrottleServiceIT` | M | W2-04 |
 | W2-07 | **Endpoint `POST /auth/register`** (①–⑥): `RegisterRequest`, `UserProfileResponse`; `AuthController`; `RegistrationService`, `UserAccountService`, `PasswordPolicy`, `SessionSignInService`; `REGISTER_IP`; `RegistrationIT`, `CsrfIT` (part). *Implemented 2026-11-03 (pending review); the registration CSRF cases are in `RegistrationIT`, `CsrfIT` for every operation follows in W2-08.* | L | W2-04, W2-05, W2-06 |
 | W2-08 | **Endpoints `POST /auth/login` and `/auth/logout`** (①–⑥): `LoginRequest`; `AccountUserDetailsService`, `LoginService`; `AbsoluteSessionTimeoutFilter`; login limits; `LoginLogoutIT`, `CsrfIT`, `SessionLifetimeIT`, `SessionRestartIT`, `CookieAttributesIT`, `ThrottleIT`. *Implemented 2026-11-03 (pending review), see the note after FR-3.* | L | W2-07 |
-| W2-09 | **Endpoint `GET /interests`** (①–⑥): **V5** (moved from W2-05, renumbered from V4), entity `Interest`, `InterestRepository`, `InterestResponse`, `InterestController`, `InterestService` | M | W2-04, W2-05 |
+| W2-09 | **Endpoint `GET /interests`** (①–⑥): **V5** (moved from W2-05, renumbered from V4), entity `Interest`, `InterestRepository`, `InterestResponse`, `InterestController`, `InterestService`. *Implemented 2026-11-03 (pending review), see the note after FR-8.* | M | W2-04, W2-05 |
 | W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT` | M | W2-08, W2-09 |
 | W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT` | M | W2-08, W2-10 |
 | W2-12 | **Should:** password denylist (only with a verified licence; otherwise record as deferred) | S | W2-07 |

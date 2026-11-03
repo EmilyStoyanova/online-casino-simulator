@@ -74,7 +74,7 @@ class WebSecurityIT {
 
     @Test
     void publicEndpointsNeedNoSession() throws Exception {
-        for (String path : List.of("/api/v1/system/status", "/actuator/health", "/actuator/health/liveness",
+        for (String path : List.of("/api/v1/system/status", "/api/v1/interests", "/actuator/health", "/actuator/health/liveness",
                 "/actuator/health/readiness", "/actuator/info", "/openapi.yaml", "/v3/api-docs",
                 "/v3/api-docs/swagger-config", "/swagger-ui/index.html")) {
             assertThat(perform(mockMvc, get(path)).getStatus()).as("GET %s", path).isEqualTo(200);

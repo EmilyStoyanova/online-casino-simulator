@@ -84,6 +84,7 @@ class OpenApiContractIT {
                 "POST /api/v1/auth/register",
                 "POST /api/v1/auth/login",
                 "POST /api/v1/auth/logout",
+                "GET /api/v1/interests",
                 "GET /actuator/health",
                 "GET /actuator/health/liveness",
                 "GET /actuator/health/readiness",
@@ -92,8 +93,14 @@ class OpenApiContractIT {
         // implemented, its marker is removed and it moves to the list above. Empty at the end of Week 2.
         assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
                 "GET /api/v1/users/me",
-                "PATCH /api/v1/users/me",
-                "GET /api/v1/interests");
+                "PATCH /api/v1/users/me");
+    }
+
+    @Test
+    void interestsRespondAccordingToContract() throws Exception {
+        // Public: the same documented response without and with a signed-in user.
+        assertConformsToContract("/api/v1/interests", get("/api/v1/interests"), 200);
+        assertConformsToContract("/api/v1/interests", get("/api/v1/interests").with(user("player")), 200);
     }
 
     @Test

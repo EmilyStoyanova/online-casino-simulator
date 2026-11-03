@@ -73,7 +73,7 @@ tags:
   - name: Users
     description: Profile of the signed-in user (planned, Week 2)
   - name: Interests
-    description: Catalog of educational interests (planned, Week 2)
+    description: Catalog of educational interests
   - name: Operations
     description: Infrastructure health probes provided by Spring Boot Actuator
 
@@ -385,11 +385,10 @@ paths:
     get:
       tags: [Interests]
       operationId: listInterests
-      summary: List the educational interests (planned)
-      x-implementation-status: planned
+      summary: List the educational interests
       description: |
-        *Planned (W2-09).* Active interests in display order. Users choose 0–8 of them in their
-        profile. Public.
+        Active interests in display order (the order is stable; codes never change). Users choose
+        0–8 of them in their profile. Public: works with and without a session, and creates none.
       security: []
       responses:
         '200':
@@ -407,6 +406,8 @@ paths:
                 - code: MATHEMATICS
                   name: Mathematics of games
                   description: Expected value, house edge and variance
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /actuator/health:
     get:

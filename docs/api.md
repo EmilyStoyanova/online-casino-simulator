@@ -83,6 +83,7 @@ The API is **design-first**. The contract
 | POST | `/api/v1/auth/register` | Authentication | `201` `UserProfile` (+ session cookie), `400`, `403`, `409`, `429`, `500` `ProblemDetail` | Creates a `PLAYER` account and signs it in (public, CSRF token required) |
 | POST | `/api/v1/auth/login` | Authentication | `200` `UserProfile` (+ session cookie), `400`, `401`, `403`, `429`, `500` `ProblemDetail` | Signs in (public, CSRF token required) |
 | POST | `/api/v1/auth/logout` | Authentication | `204`, `403`, `500` `ProblemDetail` | Ends the session (public, CSRF token required) |
+| GET | `/api/v1/interests` | Interests | `200` `Interest[]`, `500` `ProblemDetail` | Active educational interests in display order (public) |
 | GET | `/actuator/health` | Operations | `200` / `503` `HealthStatus` | Aggregated health incl. health groups |
 | GET | `/actuator/health/liveness` | Operations | `200` / `503` `HealthStatus` | Liveness probe |
 | GET | `/actuator/health/readiness` | Operations | `200` / `503` `HealthStatus` | Readiness probe |
@@ -147,6 +148,21 @@ Example `GET /api/v1/system/status` → `200`:
 - CSRF tokens are stateless double-submit values: deleting the cookie makes the browser forget the
   previous token, but the server does not revoke it (ADR-0006, known limitations).
 
+### Interests (`GET /api/v1/interests`)
+
+```json
+[
+  { "code": "PROBABILITY", "name": "Probability & odds", "description": "How likely outcomes are and how odds are expressed" },
+  { "code": "MATHEMATICS", "name": "Mathematics of games", "description": "Expected value, house edge and variance" }
+]
+```
+
+- `200` with the active interests of the catalogue (8 seeded by migration V5), ordered by their
+  display order, then by code; the order and the codes are stable.
+- Public: the same response without a session, with one, or with an ended one; no session is
+  created. Only `code`, `name` and `description` are returned.
+- Users select 0–8 of these codes in their profile (`PATCH /api/v1/users/me`, planned for W2-10).
+
 Example error (`POST /api/v1/system/status` → `405`):
 
 ```json
@@ -179,14 +195,13 @@ Example validation error (`400`):
 
 These endpoints are added to the contract first, in the week they are implemented. The Week 2
 operations, schemas, error codes and security schemes are already in `openapi.yaml` (contract
-version 0.2.0) and marked `planned` (W2-02) until they are implemented (`GET /api/v1/auth/csrf`, register, login and logout
-since W2-04, W2-07 and W2-08); the design rationale is in [`docs/plans/week-02.md`](plans/week-02.md) §5.
+version 0.2.0) and marked `planned` (W2-02) until they are implemented (`GET /api/v1/auth/csrf`, register, login, logout and
+interests since W2-04, W2-07, W2-08 and W2-09); the design rationale is in [`docs/plans/week-02.md`](plans/week-02.md) §5.
 
 | Method | Endpoint | Purpose | Week |
 |---|---|---|---|
 | GET | `/api/v1/users/me` | Current user profile | 2 |
 | PATCH | `/api/v1/users/me` | Update profile / interests | 2 |
-| GET | `/api/v1/interests` | Interest catalogue | 2 |
 | GET | `/api/v1/wallet` | Current virtual balance | 3 |
 | GET | `/api/v1/wallet/transactions` | Transaction history | 3 |
 | POST | `/api/v1/games/roulette/spins` | Place bets and play a round (idempotency key) | 4 |

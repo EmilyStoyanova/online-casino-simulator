@@ -26,6 +26,7 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 | V2 | `spring_session`, `spring_session_attributes`: HTTP sessions (official Spring Session JDBC 4.1.1 schema, verbatim) |
 | V3 | `users`: accounts (UUID id, normalised unique email, encoded password hash, `role`, `status`, 18+ confirmation, timestamps, `version`) with `set_updated_at()` trigger |
 | V4 | `auth_throttle`: fixed-window counters for login/registration throttling; keys are `<scope>:<HMAC-SHA-256 hex>` with the secret `APP_SECURITY_THROTTLE_SECRET` (no raw email or IP, enforced by a `CHECK`); rows are deleted hourly a day after their window ended |
+| V5 | `interests`: catalogue of educational interests (stable upper-case `code` as key, `sort_order`, `active`), seeded with 8 fixed entries; `user_interests`: each user's selection, replacing the plan's use of `user_preferences` for interests (primary key `(user_id, interest_code)`, cascade on user deletion, interests referenced by users cannot be deleted, only deactivated) |
 
 ## Planned tables (from the implementation plan)
 
@@ -35,8 +36,6 @@ original plan are listed in
 
 | Table | Purpose | Week |
 |---|---|---|
-| `interests` | Catalogue of educational interests (reference data, V5) | 2 |
-| `user_interests` | Interests selected by each user (replaces the plan's use of `user_preferences` for interests, V5) | 2 |
 | `user_preferences` | UI preferences (sound, reduced motion, …) | 6 |
 | `wallets` | Current virtual balance and row version (optimistic locking) | 3 |
 | `wallet_transactions` | Immutable ledger of balance changes, unique idempotency key | 3 |

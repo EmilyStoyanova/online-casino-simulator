@@ -161,11 +161,11 @@ class OpenApiContractTest {
     @Test
     void week2OperationsArePlanned() {
         assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.2.0");
-        // Implemented: GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08).
+        // Implemented: GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08),
+        // GET /api/v1/interests (W2-09).
         assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
                 "GET /api/v1/users/me",
-                "PATCH /api/v1/users/me",
-                "GET /api/v1/interests");
+                "PATCH /api/v1/users/me");
         assertThat(contract.implementedOperations()).contains("GET " + STATUS_PATH).doesNotContainAnyElementsOf(
                 contract.plannedOperations());
     }
@@ -191,11 +191,11 @@ class OpenApiContractTest {
     @Test
     void reportsPlannedOperationThatIsAlreadyImplemented() {
         OpenApiContract implementation = OpenApiContract.load();
-        implementation.spec().getPaths().get("/api/v1/interests").getGet().getExtensions()
+        implementation.spec().getPaths().get("/api/v1/users/me").getGet().getExtensions()
                 .remove(OpenApiContract.IMPLEMENTATION_STATUS);
 
         assertThat(contract.differencesTo(implementation, path -> true)).containsExactly(
-                "GET /api/v1/interests: implemented, but still marked x-implementation-status: planned");
+                "GET /api/v1/users/me: implemented, but still marked x-implementation-status: planned");
     }
 
     @Test
@@ -212,8 +212,8 @@ class OpenApiContractTest {
 
     @Test
     void plannedOperationsCannotBeValidatedAsImplemented() {
-        assertThat(contract.validateResponse("/api/v1/interests", "GET", 200, JSON, "[]")).containsExactly(
-                "GET /api/v1/interests is marked x-implementation-status: planned; remove the marker when implementing it");
+        assertThat(contract.validateResponse("/api/v1/users/me", "GET", 200, JSON, "{}")).containsExactly(
+                "GET /api/v1/users/me is marked x-implementation-status: planned; remove the marker when implementing it");
     }
 
     @Test

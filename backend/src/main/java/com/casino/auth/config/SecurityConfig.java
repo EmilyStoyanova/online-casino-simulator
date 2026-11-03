@@ -60,7 +60,7 @@ public class SecurityConfig {
         http.authorizeHttpRequests(requests -> requests
                         // Public operations of openapi.yaml (`security: []`).
                         .requestMatchers("/api/v1/system/status", "/api/v1/auth/csrf", "/api/v1/auth/register",
-                                "/api/v1/auth/login", "/api/v1/auth/logout").permitAll()
+                                "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/interests").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
                         // API documentation (development; disabled in production in Week 12).
                         .requestMatchers("/openapi.yaml", "/swagger-ui.html", "/swagger-ui/**",
