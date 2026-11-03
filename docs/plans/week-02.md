@@ -171,7 +171,7 @@ stay in W2-08).
   are stateless double-submit values (ADR-0006, `csrf.spa()`): the server compares cookie and header
   and keeps no token, so the old value is not invalidated on the server. A client that still sends
   it in both places is accepted (tested). A foreign site can neither read the cookie nor set the
-  header. **For W2-08:** the `CsrfIT` case "token before login/logout rejected afterwards" cannot hold
+  header. **For W2-08 (resolved there: AC-4.4 revised):** the `CsrfIT` case "token before login/logout rejected afterwards" cannot hold
   with this design. Either the expectation changes to "the response deletes the cookie", or tokens
   become session-bound (`HttpSessionCsrfTokenRepository`), which would change ADR-0006 point 4 and
   needs approval.
@@ -203,6 +203,47 @@ stay in W2-08).
 | AC-3.2 | The old session cookie → `401` afterwards. |
 | AC-3.3 | Requires a CSRF token. Without a session it still returns `204` (idempotent). |
 
+**Implemented in W2-08 (pending review):**
+- **Login:** `AuthController.login` → `auth.service.LoginService` → `SessionSignInService.signIn`.
+  1. `LoginService` normalises the email (`UserAccountService.normalizeEmail`).
+  2. `AuthThrottleService.checkAllowed(LOGIN_ACCOUNT_IP, LOGIN_IP)` runs before the password is
+     verified.
+  3. `AuthenticationManager` (`auth.config.AuthenticationConfig`: `DaoAuthenticationProvider` +
+     `AccountUserDetailsService` + the BCrypt encoder) verifies the password.
+  4. Every `AuthenticationException` → `recordFailure` of both keys + `401 INVALID_CREDENTIALS`
+     (`auth.exception.InvalidCredentialsException`).
+  5. On success: `reset(LOGIN_ACCOUNT_IP)` and `UserAccountService.recordLogin` (`last_login_at`).
+- **Credentials:** `AccountUserDetailsService` loads `user.dto.UserCredentials` (R8: `user` and `auth`
+  only); the `User`'s username is the user id. **Account status is checked after the password**
+  (`setPreAuthenticationChecks` no-op, `AccountStatusUserDetailsChecker` as post-check), so a
+  disabled account is not recognisable by a faster answer; unknown emails get Spring's dummy hash.
+  Passwords over 72 UTF-8 bytes fail without hashing (BCrypt would reject or truncate them);
+  `InternalAuthenticationServiceException` (e.g. database down) → `500`, not a counted failure.
+- **`last_login_at`:** written with a JPQL update that does not increment `version`, so concurrent
+  logins of one user cannot fail with an optimistic-locking conflict.
+- **Logout:** `SessionSignInService.signOut`: `CsrfLogoutHandler` (deletes `XSRF-TOKEN`) +
+  `SecurityContextLogoutHandler` (invalidates the session; Spring Session deletes the row and
+  expires the cookie). Idempotent; creates no session. `/login` and `/logout` were added to the
+  `permitAll` rules (CSRF still enforced).
+- **Absolute lifetime (AC-5.3):** `SessionSignInService` stores `AUTHENTICATED_AT` (application
+  `Clock`); `auth.config.AbsoluteSessionTimeoutFilter` (before `SecurityContextHolderFilter`) ends an
+  older session (`app.security.session.absolute-timeout`, `APP_SESSION_ABSOLUTE_TIMEOUT`, 12 h). A
+  signed-in session without the attribute is treated as expired. Since Spring Session does not
+  reliably report an id that was invalidated during the same request, the filter marks the request
+  (`ProblemAuthenticationEntryPoint.SESSION_ENDED`), so the answer is `401 SESSION_EXPIRED`. The
+  30-minute inactivity timeout is Spring Session's (unchanged).
+- **CSRF:** AC-4.4 revised to the stateless double-submit mechanism (no server-side revocation of the
+  previous value; see ADR-0006 limitations).
+- `UserDetailsServiceAutoConfiguration` **stays excluded** (deviation from the plan): without it, web
+  test slices created the in-memory user and logged its generated password.
+- Tests: `LoginServiceTest`, `AccountUserDetailsServiceTest`, `AbsoluteSessionTimeoutFilterTest`,
+  `SessionSignInServiceTest`, `UserAccountServiceTest`, `LoginLogoutIT`, `ThrottleIT`,
+  `SessionLifetimeIT`, `CsrfIT`, `OpenApiContractIT` (200/400/401/403/429, 204/403).
+  `CookieAttributesIT` is covered by `WebSecurityIT` and `LoginLogoutIT`. AC-2.3 (survives a
+  restart) is verified by `SessionRestartIT`: a second application instance against the same
+  database accepts the original cookie, keeps the original `AUTHENTICATED_AT`, and ends the session
+  12 h after the original sign-in.
+
 ### FR-4 CSRF
 
 | ID | Acceptance criterion |
@@ -210,7 +251,7 @@ stay in W2-08).
 | AC-4.1 | `GET /api/v1/auth/csrf` (public) → `204` and sets the `XSRF-TOKEN` cookie; `Cache-Control: no-store`. |
 | AC-4.2 | Every `POST/PUT/PATCH/DELETE` requires `X-XSRF-TOKEN`, including login and registration (prevents login CSRF). |
 | AC-4.3 | The SPA fetches a token before its first unsafe request and again after registration, login and logout. A fresh browser can register on the first attempt. |
-| AC-4.4 | The token from before login/registration/logout is rejected afterwards (`403`). |
+| AC-4.4 | *Revised in W2-08:* registration, login and logout delete the `XSRF-TOKEN` cookie in their response, so the browser drops the previous token and the SPA must fetch a new one. The tokens are stateless double-submit values (`csrf.spa()`, ADR-0006): the server keeps no token and does **not** revoke the previous value; a request that presents the same value in cookie and header is accepted. A foreign page can neither read the cookie nor set the header. (Originally: "The token from before login/registration/logout is rejected afterwards (`403`)", which this mechanism cannot provide.) |
 | AC-4.5 | On `403 CSRF_TOKEN_INVALID` the client refreshes the token and retries **once**. |
 
 ### FR-5 Sessions and cookies
@@ -707,7 +748,7 @@ by `/api/**` → `401`. Details:
 - `csrf.spa()` (Spring Security 7) renders the `XSRF-TOKEN` cookie on every response; `GET /auth/csrf`
   guarantees it explicitly (contract, SPA start-up).
 - Spring Boot's in-memory default user (`UserDetailsServiceAutoConfiguration`, generated and logged
-  password) is excluded until `AccountUserDetailsService` exists (W2-08).
+  password) stays excluded (W2-08): accounts come from `AccountUserDetailsService`, and contexts without it (web test slices) would otherwise create the user and log its password.
 - Spring Boot applies `server.servlet.session.cookie.*` to the Spring Session cookie only with the
   embedded server, so `WebSecurityIT` runs with `RANDOM_PORT`.
 
@@ -782,8 +823,8 @@ following applies:
 |---|---|---|
 | Start-up | `GET /auth/csrf` → `204` + `XSRF-TOKEN` cookie | `ensureCsrfToken()` (single-flight) before the first unsafe request |
 | Unsafe request | `CsrfFilter` compares `X-XSRF-TOKEN` with the cookie | reads the cookie, sends the header |
-| After register/login | `CsrfAuthenticationStrategy` rotates the token | calls `ensureCsrfToken({ refresh: true })` |
-| After logout | `CsrfLogoutHandler` clears the token | calls `ensureCsrfToken({ refresh: true })` |
+| After register/login | `CsrfAuthenticationStrategy` deletes the `XSRF-TOKEN` cookie (no new token in the same response) | calls `ensureCsrfToken({ refresh: true })` |
+| After logout | `CsrfLogoutHandler` deletes the `XSRF-TOKEN` cookie | calls `ensureCsrfToken({ refresh: true })` |
 | `403 CSRF_TOKEN_INVALID` | — | refreshes and retries once |
 
 Swagger UI (development): `springdoc.swagger-ui.csrf.enabled=true`.
@@ -939,9 +980,10 @@ The existing `common.system` code already complies. **Implemented in W2-01:** th
 | `MigrationsIT` | V3 (W2-05), V4 (W2-06), V5 interests seeded (W2-09): defaults, constraints, triggers, migration of existing data (V2 is checked by `CasinoSimulatorApplicationIT`) |
 | `RegistrationIT` | 201 + signed in + new session id; hash prefix; case-variant duplicate → 409; `REGISTER_IP` → 429; `"role":"ADMIN"` ignored |
 | `LoginLogoutIT` | login → me → logout → me = 401; session row created and deleted; disabled user → 401; identical body for unknown email / wrong password / disabled; `last_login_at` |
-| `CsrfIT` | missing/invalid token → 403 on every unsafe operation; fresh client: `GET /auth/csrf` then register works; token before login/logout rejected afterwards |
+| `CsrfIT` | missing/invalid token and cookie without header → 403 on every unsafe operation (register, login, logout, a planned protected one); login and logout delete the cookie and a new token works; the previous token is not revoked on the server (documented, AC-4.4 revised). Registration flow: `RegistrationIT` |
 | `SessionLifetimeIT` | idle timeout (short test value) → `SESSION_EXPIRED`; absolute lifetime (fixed `Clock`) → `SESSION_EXPIRED`; session store contains no password hash |
-| `CookieAttributesIT` | session cookie `HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain`; with production properties: `__Host-SESSION` + `Secure` |
+| `SessionRestartIT` | AC-2.3: a second application instance against the same database accepts the original session cookie; `AUTHENTICATED_AT` unchanged, so the 12 h lifetime still counts from the original sign-in |
+| `CookieAttributesIT` | *Covered by `WebSecurityIT` (production properties: `__Host-SESSION` + `Secure`) and `LoginLogoutIT`/`RegistrationIT` (`HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain` on the cookie of a real sign-in); no separate class.* |
 | `ThrottleIT` | account + IP limit → 429 + `Retry-After`; other IP for the same account still works; IP limit; forged `X-Forwarded-For` ignored; parallel failures counted exactly |
 | `ProfileIT` | profile and interests end to end; optimistic locking → 409; `"role":"ADMIN"` ignored |
 | `AdminAuthorizationIT` | test-only admin endpoint: 401 / 403 / 200; bootstrap admin can log in |
@@ -974,7 +1016,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-05 | Persistence foundation for `user`: **V3**, entity `UserAccount` (`Role`, `UserStatus`), `UserAccountRepository`, `MigrationsIT` (shared by W2-06…W2-10). *Interests migration and `Interest` moved to W2-09 (2026-11-02).* | M | W2-01 |
 | W2-06 | Throttling: **V4** (renumbered from V5, 2026-11-02), `AuthThrottleRepository` (atomic upsert), `AuthThrottleService`, cleanup job, unit tests, `AuthThrottleRepositoryIT`/`AuthThrottleServiceIT` | M | W2-04 |
 | W2-07 | **Endpoint `POST /auth/register`** (①–⑥): `RegisterRequest`, `UserProfileResponse`; `AuthController`; `RegistrationService`, `UserAccountService`, `PasswordPolicy`, `SessionSignInService`; `REGISTER_IP`; `RegistrationIT`, `CsrfIT` (part). *Implemented 2026-11-03 (pending review); the registration CSRF cases are in `RegistrationIT`, `CsrfIT` for every operation follows in W2-08.* | L | W2-04, W2-05, W2-06 |
-| W2-08 | **Endpoints `POST /auth/login` and `/auth/logout`** (①–⑥): `LoginRequest`; `AccountUserDetailsService`, `LoginService`; `AbsoluteSessionTimeoutFilter`; login limits; `LoginLogoutIT`, `CsrfIT`, `SessionLifetimeIT`, `CookieAttributesIT`, `ThrottleIT` | L | W2-07 |
+| W2-08 | **Endpoints `POST /auth/login` and `/auth/logout`** (①–⑥): `LoginRequest`; `AccountUserDetailsService`, `LoginService`; `AbsoluteSessionTimeoutFilter`; login limits; `LoginLogoutIT`, `CsrfIT`, `SessionLifetimeIT`, `SessionRestartIT`, `CookieAttributesIT`, `ThrottleIT`. *Implemented 2026-11-03 (pending review), see the note after FR-3.* | L | W2-07 |
 | W2-09 | **Endpoint `GET /interests`** (①–⑥): **V5** (moved from W2-05, renumbered from V4), entity `Interest`, `InterestRepository`, `InterestResponse`, `InterestController`, `InterestService` | M | W2-04, W2-05 |
 | W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT` | M | W2-08, W2-09 |
 | W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT` | M | W2-08, W2-10 |
@@ -1059,7 +1101,7 @@ New dependencies: `spring-boot-starter-security`, `spring-boot-starter-session-j
 | S5 | Enumeration via registration (409) | Accepted (P2); `REGISTER_IP` limit | `RegistrationIT` |
 | S6 | Session fixation | Session id changed on register/login | `RegistrationIT`, `LoginLogoutIT` |
 | S7 | Session theft via XSS | `HttpOnly`, React escaping, no `dangerouslySetInnerHTML`; CSP in Week 12 | review, `CookieAttributesIT` |
-| S8 | CSRF incl. login CSRF and forced logout | Token on all unsafe methods, rotation, `SameSite=Lax`, strict CORS | `CsrfIT` |
+| S8 | CSRF incl. login CSRF and forced logout | Token on all unsafe methods, cookie deleted on sign-in/out (AC-4.4), `SameSite=Lax`, strict CORS | `CsrfIT` |
 | S9 | Privilege escalation / mass assignment | DTOs without `role`/`email`; bootstrap never promotes | `RegistrationIT`, `ProfileIT` |
 | S10 | Sessions outliving a disable/role change | **Limitation:** ≤ 30 min idle / ≤ 12 h; no such feature in Week 2; mandatory revocation in Week 10; manual runbook | §7.5, Week 10 test |
 | S11 | Password hash in session or logs | Credentials erased by Spring; no body logging | `SessionLifetimeIT`, review |

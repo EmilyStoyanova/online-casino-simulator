@@ -81,6 +81,8 @@ The API is **design-first**. The contract
 | GET | `/api/v1/system/status` | System | `200` `SystemStatus`, `503` `SystemStatus`, `500` `ProblemDetail` | Application version and database connectivity (public) |
 | GET | `/api/v1/auth/csrf` | Authentication | `204` (`XSRF-TOKEN` cookie), `500` `ProblemDetail` | CSRF token for unsafe requests (public) |
 | POST | `/api/v1/auth/register` | Authentication | `201` `UserProfile` (+ session cookie), `400`, `403`, `409`, `429`, `500` `ProblemDetail` | Creates a `PLAYER` account and signs it in (public, CSRF token required) |
+| POST | `/api/v1/auth/login` | Authentication | `200` `UserProfile` (+ session cookie), `400`, `401`, `403`, `429`, `500` `ProblemDetail` | Signs in (public, CSRF token required) |
+| POST | `/api/v1/auth/logout` | Authentication | `204`, `403`, `500` `ProblemDetail` | Ends the session (public, CSRF token required) |
 | GET | `/actuator/health` | Operations | `200` / `503` `HealthStatus` | Aggregated health incl. health groups |
 | GET | `/actuator/health/liveness` | Operations | `200` / `503` `HealthStatus` | Liveness probe |
 | GET | `/actuator/health/readiness` | Operations | `200` / `503` `HealthStatus` | Readiness probe |
@@ -123,6 +125,28 @@ Example `GET /api/v1/system/status` → `200`:
 - The registration response deletes the `XSRF-TOKEN` cookie; the client calls `GET /api/v1/auth/csrf`
   before its next unsafe request.
 
+### Login and logout (`POST /api/v1/auth/login`, `POST /api/v1/auth/logout`)
+
+```json
+{ "email": "alice@example.com", "password": "correct-horse-battery" }
+```
+
+- Login `200` with `UserProfile`; a new session id in the session cookie, `XSRF-TOKEN` deleted.
+  `400 VALIDATION_FAILED` only for a missing email or password (or an email over 254 characters).
+- Every failed login (unknown email, wrong password, disabled account) is the same
+  `401 INVALID_CREDENTIALS`. Failed logins are limited to 5 per account and client IP and 50 per
+  client IP within 15 minutes → `429 TOO_MANY_ATTEMPTS` with `Retry-After`, checked before the
+  password and identical for unknown accounts. No account lockout; a success resets the account and
+  IP counter.
+- Logout `204`: the session is deleted, the session cookie expires, `XSRF-TOKEN` is deleted. The old
+  session cookie then gets `401 SESSION_EXPIRED`. Also `204` without a session. Requires the CSRF
+  token, like login.
+- A session ends after 30 minutes of inactivity or 12 hours after sign-in
+  (`APP_SESSION_TIMEOUT`, `APP_SESSION_ABSOLUTE_TIMEOUT`); a protected operation then answers
+  `401 SESSION_EXPIRED`.
+- CSRF tokens are stateless double-submit values: deleting the cookie makes the browser forget the
+  previous token, but the server does not revoke it (ADR-0006, known limitations).
+
 Example error (`POST /api/v1/system/status` → `405`):
 
 ```json
@@ -155,14 +179,11 @@ Example validation error (`400`):
 
 These endpoints are added to the contract first, in the week they are implemented. The Week 2
 operations, schemas, error codes and security schemes are already in `openapi.yaml` (contract
-version 0.2.0) and marked `planned` (W2-02) until they are implemented (`GET /api/v1/auth/csrf`
-since W2-04); the design rationale is in [`docs/plans/week-02.md`](plans/week-02.md) §5.
+version 0.2.0) and marked `planned` (W2-02) until they are implemented (`GET /api/v1/auth/csrf`, register, login and logout
+since W2-04, W2-07 and W2-08); the design rationale is in [`docs/plans/week-02.md`](plans/week-02.md) §5.
 
 | Method | Endpoint | Purpose | Week |
 |---|---|---|---|
-| POST | `/api/v1/auth/register` | Registration with automatic sign-in | 2 |
-| POST | `/api/v1/auth/login` | Login (session cookie) | 2 |
-| POST | `/api/v1/auth/logout` | Logout | 2 |
 | GET | `/api/v1/users/me` | Current user profile | 2 |
 | PATCH | `/api/v1/users/me` | Update profile / interests | 2 |
 | GET | `/api/v1/interests` | Interest catalogue | 2 |

@@ -28,9 +28,11 @@ It should rely on Spring Security and Spring Session wherever they already solve
    72 UTF-8 bytes maximum (never truncated), not equal to the email or display name. A
    common-password denylist is added once its source and licence are verified.
 4. **CSRF:** `csrf.spa()` (`XSRF-TOKEN` cookie + `X-XSRF-TOKEN` header) on all unsafe methods,
-   including login and registration. The token is rotated on sign-in and cleared on logout by
-   Spring. The SPA fetches a fresh token via `GET /api/v1/auth/csrf` at start-up and after these
-   operations, and retries once on a CSRF error.
+   including login and registration. The token is a stateless double-submit value
+   (`CookieCsrfTokenRepository`): the server compares cookie and header and stores nothing. Sign-in
+   and logout delete the `XSRF-TOKEN` cookie (Spring's `CsrfAuthenticationStrategy` and
+   `CsrfLogoutHandler`). The SPA fetches a fresh token via `GET /api/v1/auth/csrf` at start-up and
+   after these operations, and retries once on a CSRF error.
 5. **Cookies:** the session cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`, with no `Domain`. In
    production it is named `__Host-SESSION` and is `Secure`. All attributes come from configuration
    and are verified by an integration test with production-like properties.
@@ -64,6 +66,14 @@ It should rely on Spring Security and Spring Session wherever they already solve
   BCrypt cost.
 - **The CSRF cookie uses no `__Host-` prefix.** This is acceptable for same-site routing without
   shared subdomains.
+- **The previous CSRF token is not revoked on the server** (clarified in W2-08). Deleting the
+  `XSRF-TOKEN` cookie on sign-in and logout only makes the browser forget it. A request that still
+  presents the old value in both cookie and header is accepted, because the token is not bound to a
+  session. This does not help a foreign site, which can neither read the cookie nor set the header.
+  It matters only for an attacker who can already write cookies for the domain (a sibling
+  subdomain, see the previous point) or run script on the page (XSS, which defeats any CSRF token).
+  Binding tokens to the session (`HttpSessionCsrfTokenRepository`) would remove it at the cost of a
+  session for every anonymous visitor; revisit together with the `__Host-` prefix (deferred table).
 
 ## Deferred (with trigger)
 
@@ -72,7 +82,7 @@ It should rely on Spring Security and Spring Session wherever they already solve
 | Automatic session revocation on disable/role/password change | Week 10 (mandatory) |
 | Device cookies (OWASP) against account-targeted slow-down | Evidence of distributed attacks on accounts |
 | Per-request check of role/status | Only if Week 10 revocation proves insufficient |
-| `__Host-` CSRF cookie | Routing with shared subdomains (option B) |
+| `__Host-` CSRF cookie, or session-bound CSRF tokens | Routing with shared subdomains (option B) |
 | Edge rate limiting | Week 12 deployment review |
 
 ## Alternatives considered

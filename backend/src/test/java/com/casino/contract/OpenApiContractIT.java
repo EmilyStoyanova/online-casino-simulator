@@ -19,6 +19,7 @@ import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.core.util.Json31;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,6 +30,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
@@ -47,6 +49,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 class OpenApiContractIT {
 
     private static final String REGISTER = "/api/v1/auth/register";
+    private static final String LOGIN = "/api/v1/auth/login";
+    private static final String LOGOUT = "/api/v1/auth/logout";
 
     private final OpenApiContract contract = OpenApiContract.load();
 
@@ -58,6 +62,9 @@ class OpenApiContractIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @Test
     void implementationMatchesContractForAllApiPaths() throws Exception {
@@ -75,6 +82,8 @@ class OpenApiContractIT {
                 "GET /api/v1/system/status",
                 "GET /api/v1/auth/csrf",
                 "POST /api/v1/auth/register",
+                "POST /api/v1/auth/login",
+                "POST /api/v1/auth/logout",
                 "GET /actuator/health",
                 "GET /actuator/health/liveness",
                 "GET /actuator/health/readiness",
@@ -82,8 +91,6 @@ class OpenApiContractIT {
         // Planned operations cannot be verified at runtime (validateResponse rejects them). When one is
         // implemented, its marker is removed and it moves to the list above. Empty at the end of Week 2.
         assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "POST /api/v1/auth/login",
-                "POST /api/v1/auth/logout",
                 "GET /api/v1/users/me",
                 "PATCH /api/v1/users/me",
                 "GET /api/v1/interests");
@@ -125,6 +132,37 @@ class OpenApiContractIT {
                     assertConformsToContract(REGISTER, "POST", register(valid, "192.0.2.10").with(csrf), 429);
             assertThat(throttled.getHeader(HttpHeaders.RETRY_AFTER)).matches("[1-9][0-9]*");
         } finally {
+            jdbcTemplate.update("DELETE FROM users");
+            jdbcTemplate.update("DELETE FROM auth_throttle");
+        }
+    }
+
+    @Test
+    void loginAndLogoutRespondAccordingToContract() throws Exception {
+        String password = "correct-horse-battery";
+        jdbcTemplate.update("""
+                INSERT INTO users (email, password_hash, display_name, adult_confirmed_at)
+                VALUES ('login@example.com', ?, 'Login', now())""", passwordEncoder.encode(password));
+        String valid = "{\"email\":\"login@example.com\",\"password\":\"" + password + "\"}";
+        String wrong = "{\"email\":\"login@example.com\",\"password\":\"wrong-password-123\"}";
+        RealCsrfToken csrf = RealCsrfToken.fetch(mockMvc);
+        try {
+            MockHttpServletResponse signedIn = assertConformsToContract(LOGIN, "POST", jsonPost(LOGIN, valid, "192.0.2.20").with(csrf), 200);
+            Cookie session = new Cookie("SESSION", signedIn.getCookie("SESSION").getValue());
+            assertConformsToContract(LOGIN, "POST", jsonPost(LOGIN, "{\"email\":\"\",\"password\":\"\"}", "192.0.2.20").with(csrf), 400);
+            assertConformsToContract(LOGIN, "POST", jsonPost(LOGIN, "{\"email\":", "192.0.2.20").with(csrf), 400);
+            assertConformsToContract(LOGIN, "POST", jsonPost(LOGIN, valid, "192.0.2.20"), 403);
+            // 5 failed logins of the account from one IP, then 429.
+            for (int i = 0; i < 5; i++) {
+                assertConformsToContract(LOGIN, "POST", jsonPost(LOGIN, wrong, "192.0.2.20").with(csrf), 401);
+            }
+            MockHttpServletResponse throttled = assertConformsToContract(LOGIN, "POST", jsonPost(LOGIN, valid, "192.0.2.20").with(csrf), 429);
+            assertThat(throttled.getHeader(HttpHeaders.RETRY_AFTER)).matches("[1-9][0-9]*");
+
+            assertConformsToContract(LOGOUT, "POST", post(LOGOUT).cookie(session), 403);
+            assertConformsToContract(LOGOUT, "POST", post(LOGOUT).cookie(session).with(csrf), 204);
+        } finally {
+            jdbcTemplate.update("DELETE FROM spring_session");
             jdbcTemplate.update("DELETE FROM users");
             jdbcTemplate.update("DELETE FROM auth_throttle");
         }
@@ -198,7 +236,12 @@ class OpenApiContractIT {
 
     /** A registration from {@code clientIp}, so the throttle counter belongs to this test only. */
     private static MockHttpServletRequestBuilder register(String body, String clientIp) {
-        return post(REGISTER).contentType(MediaType.APPLICATION_JSON).content(body)
+        return jsonPost(REGISTER, body, clientIp);
+    }
+
+    /** A JSON {@code POST} from {@code clientIp}, so the throttle counters belong to this test only. */
+    private static MockHttpServletRequestBuilder jsonPost(String path, String body, String clientIp) {
+        return post(path).contentType(MediaType.APPLICATION_JSON).content(body)
                 .with(request -> {
                     request.setRemoteAddr(clientIp);
                     return request;

@@ -4,8 +4,9 @@ spring:
   application:
     name: online-casino-simulator
   autoconfigure:
-    # No in-memory default user with a generated (and logged) password. Accounts come from the
-    # database once AccountUserDetailsService exists (W2-08); this exclusion is removed then.
+    # Accounts come only from the database (AccountUserDetailsService). Spring Boot's in-memory default
+    # user (with a generated password that is logged) is never wanted, also not in contexts without
+    # that service, such as web test slices.
     exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
   config:
     # `.env` uses KEY=value syntax, so it can be imported as a properties file.
@@ -103,6 +104,9 @@ app:
   security:
     # BCrypt cost (at least 10).
     bcrypt-strength: ${APP_SECURITY_BCRYPT_STRENGTH:12}
+    session:
+      # Maximum lifetime of a signed-in session, however active (AbsoluteSessionTimeoutFilter).
+      absolute-timeout: ${APP_SESSION_ABSOLUTE_TIMEOUT:12h}
     # Fixed-window limits of login and registration throttling (week-02.md §7.7). The IP limit is
     # generous because of shared networks (NAT). Ended windows are deleted hourly.
     throttle:

@@ -14,9 +14,11 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.casino.user.dto.NewAccount;
+import com.casino.user.dto.UserCredentials;
 import com.casino.user.dto.UserProfileResponse;
 import com.casino.user.dto.UserRegistered;
 import com.casino.user.dto.UserRole;
@@ -102,6 +104,36 @@ class UserAccountServiceTest {
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> service.createAccount(new NewAccount("alice@example.com", HASH, "Alice", false)));
         verifyNoInteractions(repository, events);
+    }
+
+    @Test
+    void findsTheCredentialsByTheNormalisedEmail() {
+        UserAccount active = saved(new UserAccount("alice@example.com", HASH, "Alice", NOW));
+        when(repository.findByEmail("alice@example.com")).thenReturn(Optional.of(active));
+
+        assertThat(service.findCredentials("  ALICE@example.com ")).contains(new UserCredentials(ID, HASH, UserRole.PLAYER, true));
+        assertThat(service.findCredentials("nobody@example.com")).isEmpty();
+    }
+
+    @Test
+    void aDisabledAccountHasInactiveCredentials() {
+        UserAccount disabled = saved(new UserAccount("bob@example.com", HASH, "Bob", NOW));
+        ReflectionTestUtils.setField(disabled, "status", UserStatus.DISABLED);
+        when(repository.findByEmail("bob@example.com")).thenReturn(Optional.of(disabled));
+
+        assertThat(service.findCredentials("bob@example.com")).hasValueSatisfying(credentials -> assertThat(credentials.active()).isFalse());
+    }
+
+    @Test
+    void recordsTheLoginTimeAndReturnsTheProfile() {
+        UserAccount account = saved(new UserAccount("alice@example.com", HASH, "Alice", NOW));
+        when(repository.findById(ID)).thenReturn(Optional.of(account));
+
+        UserProfileResponse profile = service.recordLogin(ID);
+
+        verify(repository).updateLastLoginAt(ID, Instant.parse("2026-11-03T09:15:00.123456Z"));
+        assertThat(profile.id()).isEqualTo(ID);
+        assertThat(profile.email()).isEqualTo("alice@example.com");
     }
 
     @Test

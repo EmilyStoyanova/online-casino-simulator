@@ -1,6 +1,8 @@
 package com.casino.auth.controller;
 
+import com.casino.auth.dto.LoginRequest;
 import com.casino.auth.dto.RegisterRequest;
+import com.casino.auth.service.LoginService;
 import com.casino.auth.service.RegistrationService;
 import com.casino.auth.service.SessionSignInService;
 import com.casino.user.dto.UserProfileResponse;
@@ -24,7 +26,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Implements the {@code Authentication} tag of {@code openapi.yaml} (login and logout follow). */
+/** Implements the {@code Authentication} tag of {@code openapi.yaml}. */
 @RestController
 @RequestMapping("/api/v1/auth")
 @Tag(name = "Authentication")
@@ -34,10 +36,13 @@ class AuthController {
     private static final String PROBLEM_DETAIL = "#/components/schemas/ProblemDetail";
 
     private final RegistrationService registrationService;
+    private final LoginService loginService;
     private final SessionSignInService sessionSignInService;
 
-    AuthController(RegistrationService registrationService, SessionSignInService sessionSignInService) {
+    AuthController(RegistrationService registrationService, LoginService loginService,
+                   SessionSignInService sessionSignInService) {
         this.registrationService = registrationService;
+        this.loginService = loginService;
         this.sessionSignInService = sessionSignInService;
     }
 
@@ -73,5 +78,37 @@ class AuthController {
         UserProfileResponse profile = registrationService.register(request);
         sessionSignInService.signIn(profile.id(), profile.role(), httpRequest, httpResponse);
         return profile;
+    }
+
+    /** Verifies the credentials (throttled per account + IP and per IP), then signs the user in. */
+    @PostMapping(path = "/login", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(operationId = "login", summary = "Sign in", security = @SecurityRequirement(name = "csrfHeader"))
+    @ApiResponse(responseCode = "200", description = "Signed in")
+    @ApiResponse(responseCode = "400", description = "Invalid request",
+            content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(ref = PROBLEM_DETAIL)))
+    @ApiResponse(responseCode = "401", description = "Sign-in failed",
+            content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(ref = PROBLEM_DETAIL)))
+    @ApiResponse(responseCode = "403", description = "Missing or invalid CSRF token",
+            content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(ref = PROBLEM_DETAIL)))
+    @ApiResponse(responseCode = "429", description = "Too many failed logins",
+            content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(ref = PROBLEM_DETAIL)))
+    UserProfileResponse login(@Valid @RequestBody LoginRequest request,
+                              @Parameter(hidden = true) HttpServletRequest httpRequest,
+                              @Parameter(hidden = true) HttpServletResponse httpResponse) {
+        UserProfileResponse profile = loginService.login(request, httpRequest.getRemoteAddr());
+        sessionSignInService.signIn(profile.id(), profile.role(), httpRequest, httpResponse);
+        return profile;
+    }
+
+    /** Ends the session, if there is one, and deletes the session and CSRF cookies. */
+    @PostMapping("/logout")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(operationId = "logout", summary = "Sign out", security = @SecurityRequirement(name = "csrfHeader"))
+    @ApiResponse(responseCode = "204", description = "Signed out (or no session existed)")
+    @ApiResponse(responseCode = "403", description = "Missing or invalid CSRF token",
+            content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(ref = PROBLEM_DETAIL)))
+    void logout(@Parameter(hidden = true) HttpServletRequest httpRequest,
+                @Parameter(hidden = true) HttpServletResponse httpResponse) {
+        sessionSignInService.signOut(httpRequest, httpResponse);
     }
 }

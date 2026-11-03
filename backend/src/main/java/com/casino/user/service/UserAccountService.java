@@ -6,12 +6,16 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 
 import com.casino.user.dto.NewAccount;
+import com.casino.user.dto.UserCredentials;
 import com.casino.user.dto.UserProfileResponse;
 import com.casino.user.dto.UserRegistered;
 import com.casino.user.dto.UserRole;
 import com.casino.user.entity.UserAccount;
+import com.casino.user.entity.UserStatus;
 import com.casino.user.exception.EmailAlreadyRegisteredException;
 import com.casino.user.repository.UserAccountRepository;
 import org.hibernate.exception.ConstraintViolationException;
@@ -21,7 +25,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * User accounts: creation (registration) and the normalisation of email addresses.
+ * User accounts: creation (registration), credentials and last login (login), and the normalisation
+ * of email addresses.
  *
  * <p>The email is normalised here, once for every caller: trimmed and lower-cased, as the database
  * requires ({@code ck_users_email_normalized}), so case variants can never become a second account.
@@ -80,9 +85,35 @@ public class UserAccountService {
         return profile(saved);
     }
 
+    /**
+     * The credentials of the account with this email, for login. The email is normalised first.
+     *
+     * @return empty if no account has this email
+     */
+    @Transactional(readOnly = true)
+    public Optional<UserCredentials> findCredentials(String email) {
+        return repository.findByEmail(normalizeEmail(email)).map(account -> new UserCredentials(account.getId(),
+                account.getPasswordHash(), role(account), account.getStatus() == UserStatus.ACTIVE));
+    }
+
+    /**
+     * Records a successful login ({@code last_login_at}, server clock) and returns the profile.
+     *
+     * @throws IllegalStateException if the account no longer exists
+     */
+    @Transactional
+    public UserProfileResponse recordLogin(UUID userId) {
+        repository.updateLastLoginAt(userId, clock.instant().truncatedTo(ChronoUnit.MICROS));
+        return profile(repository.findById(userId).orElseThrow(() -> new IllegalStateException("The account no longer exists")));
+    }
+
+    private static UserRole role(UserAccount account) {
+        return UserRole.valueOf(account.getRole().name());
+    }
+
     private static UserProfileResponse profile(UserAccount account) {
         return new UserProfileResponse(account.getId(), account.getEmail(), account.getDisplayName(),
-                UserRole.valueOf(account.getRole().name()), List.of(), account.getAdultConfirmedAt(), account.getCreatedAt());
+                role(account), List.of(), account.getAdultConfirmedAt(), account.getCreatedAt());
     }
 
     private static boolean violates(DataIntegrityViolationException ex, String constraint) {

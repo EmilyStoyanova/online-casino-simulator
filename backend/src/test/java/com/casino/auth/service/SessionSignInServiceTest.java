@@ -2,6 +2,9 @@ package com.casino.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import com.casino.user.dto.UserRole;
@@ -23,8 +26,11 @@ class SessionSignInServiceTest {
 
     private static final UUID USER_ID = UUID.fromString("0b8f0c2e-5f3a-4c55-9d8e-2f6c1a7e9b10");
 
+    private static final Instant NOW = Instant.parse("2026-11-03T10:00:00Z");
+
     private final CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
-    private final SessionSignInService service = new SessionSignInService(csrfTokens, new HttpSessionSecurityContextRepository());
+    private final SessionSignInService service = new SessionSignInService(csrfTokens, new HttpSessionSecurityContextRepository(),
+            Clock.fixed(NOW, ZoneOffset.UTC));
 
     @AfterEach
     void clearContext() {
@@ -54,6 +60,34 @@ class SessionSignInServiceTest {
         assertThat(authentication.getCredentials()).isNull();
         assertThat(((User) authentication.getPrincipal()).getPassword()).isNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isSameAs(authentication);
+        // For the absolute session lifetime.
+        assertThat(request.getSession(false).getAttribute(SessionSignInService.AUTHENTICATED_AT)).isEqualTo(NOW);
+    }
+
+    @Test
+    void signOutInvalidatesTheSessionAndClearsTheContextAndCsrfToken() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/logout");
+        service.signIn(USER_ID, UserRole.PLAYER, request, new MockHttpServletResponse());
+        MockHttpSession session = (MockHttpSession) request.getSession(false);
+        request.setCookies(new Cookie("XSRF-TOKEN", "token"));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        service.signOut(request, response);
+
+        assertThat(session.isInvalid()).isTrue();
+        assertThat(request.getSession(false)).isNull();
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        assertThat(response.getCookie("XSRF-TOKEN")).isNotNull()
+                .satisfies(cookie -> assertThat(cookie.getMaxAge()).isZero());
+    }
+
+    @Test
+    void signOutWithoutASessionCreatesNone() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/logout");
+
+        service.signOut(request, new MockHttpServletResponse());
+
+        assertThat(request.getSession(false)).isNull();
     }
 
     @Test

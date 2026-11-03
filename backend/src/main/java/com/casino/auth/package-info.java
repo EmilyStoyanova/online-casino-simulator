@@ -6,6 +6,6 @@
  * <p>Status: security foundation (filter chain, sessions, CSRF, JSON 401/403, password encoder) since
  * W2-04; login and registration throttling ({@code AuthThrottleService}, migration V4) since W2-06;
  * registration with automatic sign-in ({@code POST /api/v1/auth/register}) since W2-07;
- * login and logout follow in Week 2.
+ * login, logout and the 12 h absolute session lifetime since W2-08.
  */
 package com.casino.auth;

@@ -48,7 +48,7 @@ info:
       designed and reviewed, but not available yet.
 
     ## Authentication
-    - Server-side sessions: registration and login (login planned, Week 2) set an `HttpOnly` session
+    - Server-side sessions: registration and login set an `HttpOnly` session
       cookie (security scheme `sessionCookie`). There are no tokens in browser storage.
     - CSRF protection (security scheme `csrfHeader`): every `POST`, `PUT`, `PATCH` and `DELETE`
       request, including login and registration, sends the `XSRF-TOKEN` cookie value in the
@@ -69,7 +69,7 @@ tags:
   - name: System
     description: Platform status
   - name: Authentication
-    description: CSRF token and registration; login and logout (planned, Week 2)
+    description: CSRF token, registration, login and logout
   - name: Users
     description: Profile of the signed-in user (planned, Week 2)
   - name: Interests
@@ -127,7 +127,7 @@ paths:
       description: |
         Sets the `XSRF-TOKEN` cookie, which JavaScript can read. Its value is sent
         in the `X-XSRF-TOKEN` header with every unsafe request. Call it at start-up and again after
-        registration, login and logout, because these rotate or clear the token. Public.
+        registration, login and logout, because these delete the `XSRF-TOKEN` cookie. Public.
       security: []
       responses:
         '204':
@@ -149,7 +149,7 @@ paths:
       summary: Register a player account and sign in
       description: |
         Creates a `PLAYER` account and signs the new user in: a new session id is issued and the
-        CSRF token is rotated, so the client fetches a new one with `GET /api/v1/auth/csrf`. The
+        `XSRF-TOKEN` cookie is deleted, so the client fetches a new token with `GET /api/v1/auth/csrf`. The
         email is trimmed and lower-cased before it is checked and stored. `adultConfirmed` must be
         `true`; the confirmation time is taken from the server clock. Properties that are not in
         `RegisterRequest` (for example `role`) are ignored. All invalid properties are reported
@@ -218,17 +218,19 @@ paths:
     post:
       tags: [Authentication]
       operationId: login
-      summary: Sign in (planned)
-      x-implementation-status: planned
+      summary: Sign in
       description: |
-        *Planned (W2-08).* Signs the user in with email and password. On success a new session id is
-        issued (session-fixation protection) and the CSRF token is rotated, so the client fetches a
-        new one with `GET /api/v1/auth/csrf`.
+        Signs the user in with email and password. The email is trimmed and lower-cased. On success
+        a new session id is issued (session-fixation protection) and the `XSRF-TOKEN` cookie is
+        deleted, so the client fetches a new token with `GET /api/v1/auth/csrf`. The session ends
+        after 30 minutes of inactivity or 12 hours after sign-in.
 
         Every failure (unknown email, wrong password, disabled account) returns the same `401` with
-        code `INVALID_CREDENTIALS`. Repeated failures are throttled per account and client IP
-        (5 per 15 minutes) and per client IP (50 per 15 minutes) with `429`; accounts are never
-        locked. Public, but requires a CSRF token.
+        code `INVALID_CREDENTIALS`. Failed logins are throttled per account and client IP
+        (5 per 15 minutes) and per client IP (50 per 15 minutes) with `429`; the limit is checked
+        before the password, and the response is the same for existing and unknown accounts.
+        Accounts are never locked; a successful login resets the account and IP counter. Public, but
+        requires a CSRF token.
       security:
         - csrfHeader: []
       requestBody:
@@ -271,17 +273,19 @@ paths:
           $ref: '#/components/responses/CsrfTokenInvalid'
         '429':
           $ref: '#/components/responses/TooManyAttempts'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/auth/logout:
     post:
       tags: [Authentication]
       operationId: logout
-      summary: Sign out (planned)
-      x-implementation-status: planned
+      summary: Sign out
       description: |
-        *Planned (W2-08).* Ends the session: the stored session is deleted, the session cookie
-        expires and the CSRF token is cleared, so the client fetches a new one with
-        `GET /api/v1/auth/csrf`. Also returns `204` without a session (idempotent). Requires a CSRF
+        Ends the session: the stored session is deleted, the session cookie expires and the
+        `XSRF-TOKEN` cookie is deleted, so the client fetches a new token with
+        `GET /api/v1/auth/csrf`. The old session cookie is rejected afterwards
+        (`401 SESSION_EXPIRED`). Also returns `204` without a session (idempotent). Requires a CSRF
         token.
       security:
         - csrfHeader: []
@@ -295,6 +299,8 @@ paths:
                 type: string
         '403':
           $ref: '#/components/responses/CsrfTokenInvalid'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/users/me:
     get:
@@ -504,8 +510,8 @@ components:
       description: |
         Server-side session (Spring Session JDBC). The cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`
         and has no `Domain`. In production it is named `__Host-SESSION` and is `Secure`. Issued by
-        registration and login (login planned); it ends with logout, after 30 minutes of inactivity or
-        12 hours after sign-in (planned, W2-08). The browser sends it automatically. A request whose
+        registration and login; it ends with logout, after 30 minutes of inactivity or
+        12 hours after sign-in. The browser sends it automatically. A request whose
         session has ended gets `401 SESSION_EXPIRED` on protected operations.
     csrfHeader:
       type: apiKey
