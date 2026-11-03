@@ -335,6 +335,30 @@ stay in W2-08).
 | AC-11.4 | Registration requires the 18+ checkbox and shows the "virtual coins have no monetary value" notice. |
 | AC-11.5 | `401 SESSION_EXPIRED` clears the auth state and shows the login page with an explanation. |
 
+**Early frontend authentication slice (2026-11-03, pending review), brought forward from W2-13/W2-14**
+so that registration and login can be used in the browser before W2-10. Done:
+- W2-13 parts: `react-router` 8.5.0 (decision A7, declarative `BrowserRouter`); `apiClient`
+  (`apiPost`, CSRF header on unsafe methods, token fetched when missing, one retry on
+  `403 CSRF_TOKEN_INVALID`, Problem Details and `Retry-After` in `ApiError`, `onSessionExpired`);
+  `csrf.ts`; `types/` `auth.ts`, `user.ts`, `problem.ts`; `authApi.ts` (a new token is fetched after
+  register, login and logout); `AuthProvider`/`useAuth`.
+- W2-14 parts: `RegisterPage`, `LoginPage`, header user menu, account panel on the home page;
+  `components/form` (`TextField`, `PasswordField`, `CheckboxField`, `FormAlert`).
+- AC-11.1 for register and login, AC-11.3, AC-11.4, AC-11.5 (mechanism; no current request can
+  return `SESSION_EXPIRED`, because every implemented operation is public).
+- Tests (Vitest + RTL, `fetch` stubbed with the real contract shapes): `csrf.test.ts`,
+  `apiClient.test.ts`, `authApi.test.ts`, `RegisterForm.test.tsx`, `LoginForm.test.tsx`,
+  `AuthProvider.test.tsx`.
+
+**Deviation until W2-10:** without `GET /users/me`, the state starts as `unknown` after every page
+load (§8 expects "anonymous" on `401`); the UI says the status could not be confirmed and offers
+both sign-in and sign-out. Reliable session restoration requires `GET /users/me`.
+
+**Remaining for W2-13/W2-14 (not duplicated there):** start-up check with `GET /users/me`
+(`unknown` → `authenticated`/`anonymous`), `RequireAuth` with the internal-redirect check (AC-11.2,
+`RequireAuth.test.tsx`), `userApi.ts`, `ProfilePage` with `ProfileForm` and `InterestPicker`
+(`ProfileForm.test.tsx`), and the manual walkthrough.
+
 ### FR-12 Architecture
 
 | ID | Acceptance criterion |
@@ -922,7 +946,8 @@ src/
 └── types/     auth.ts, user.ts, problem.ts — mirror openapi.yaml
 ```
 
-- Auth state from `GET /users/me` at start-up (`401` = anonymous, not an error).
+- Auth state from `GET /users/me` at start-up (`401` = anonymous, not an error). Until W2-10 the
+  state starts as `unknown` (early slice, see the note after FR-11).
 - `401 SESSION_EXPIRED` → clear the state, go to `/login` with a message.
 - Redirect after login only to internal paths (starts with `/`, not `//`).
 - Accessible forms: labels, `aria-invalid`, `aria-describedby`, focus on the first error.
@@ -1035,8 +1060,8 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT` | M | W2-08, W2-09 |
 | W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT` | M | W2-08, W2-10 |
 | W2-12 | **Should:** password denylist (only with a verified licence; otherwise record as deferred) | S | W2-07 |
-| W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth` | L | W2-02 (parallel with mocks) |
-| W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
+| W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` and the `/users/me` start-up check done early (2026-11-03), see the note after FR-11.* | L | W2-02 (parallel with mocks) |
+| W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile and InterestPicker remain.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
 | W2-15 | Docs & config: `api.md`, `database.md` (revocation runbook), `architecture.md`, README, `.env.example` | S | W2-04…W2-14 |
 | W2-16 | Verification: all suites, manual walkthrough, CI green, pull request | M | all |
 

@@ -111,7 +111,9 @@ npm run dev
 
 The Vite dev server proxies `/api/*` to the backend, so no CORS configuration is needed locally.
 The home page shows a **Platform status** card that proves the browser → frontend → backend →
-database chain works.
+database chain works. **Create account** (`/register`) and **Sign in** (`/login`) use the real
+backend endpoints; the signed-in user is shown in the header and on the home page. After a page
+reload the sign-in status is shown as unknown until `GET /api/v1/users/me` exists (W2-10).
 
 ### Useful URLs
 

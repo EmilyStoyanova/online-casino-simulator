@@ -111,13 +111,24 @@ frontend/src
 ```
 
 - `services/apiClient.ts` is the only place that calls `fetch`. It sends credentials (session
-  cookies from Week 2), maps failures to a typed `ApiError` and supports request cancellation.
+  cookies), maps failures to a typed `ApiError` carrying the Problem Details body (`code`, field
+  `errors`, `Retry-After`) and supports request cancellation. Unsafe methods send the CSRF token
+  (`XSRF-TOKEN` cookie, read by `services/csrf.ts`) in `X-XSRF-TOKEN`, fetching it from
+  `GET /api/v1/auth/csrf` when missing, and retry once on `403 CSRF_TOKEN_INVALID`.
+- Routing: React Router 8 (declarative `BrowserRouter`); pages `/`, `/login`, `/register`.
+- Authentication state (`features/auth/AuthProvider`) lives in memory only: the `UserProfile` of
+  the last registration or login in this page. Nothing about the user, the password or the session
+  is written to browser storage; the session id stays in the `HttpOnly` cookie. After a page load
+  the state is *unknown* until `GET /api/v1/users/me` (W2-10) can confirm it. Any
+  `401 SESSION_EXPIRED` clears the state and opens the login page.
 - Development: the Vite dev server proxies `/api` to the backend (same origin, no CORS).
 - Production (decided in Week 12): the preferred setup keeps the API on the **same site** as the
   frontend, through a reverse proxy for `/api/*`. Session cookies then stay first-party, because
   browsers block third-party cookies. As a fallback, `VITE_API_BASE_URL` points to a backend on a
   shared custom domain, and that backend allows the frontend origin via `APP_CORS_ALLOWED_ORIGINS`.
-  See `docs/plans/week-02.md` §7.11.
+  See `docs/plans/week-02.md` §7.11. In that fallback the SPA cannot read the API host's
+  `XSRF-TOKEN` cookie unless the cookie is shared with the frontend host; this is part of the
+  Week 12 decision.
 
 ## 5. Cross-cutting concerns
 

@@ -1,3 +1,4 @@
+import { AccountPanel } from '../features/auth/AccountPanel'
 import { SystemStatusCard } from '../features/system-status/SystemStatusCard'
 
 export function HomePage() {
@@ -12,7 +13,10 @@ export function HomePage() {
           tools — powered entirely by virtual coins.
         </p>
       </div>
-      <SystemStatusCard />
+      <div className="grid w-full max-w-4xl items-start justify-items-center gap-6 md:grid-cols-2">
+        <AccountPanel />
+        <SystemStatusCard />
+      </div>
     </div>
   )
 }
