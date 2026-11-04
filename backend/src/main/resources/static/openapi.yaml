@@ -727,8 +727,9 @@ components:
           writeOnly: true
           description: |
             At least 12 characters and at most 72 bytes in UTF-8 (longer passwords are rejected,
-            never truncated). Must not equal the email or the display name (ignoring case). Stored
-            only as a BCrypt hash.
+            never truncated). Must not equal the email or the display name (ignoring case) and must
+            not be a commonly used password (server-side denylist, ignoring case). Stored only as a
+            BCrypt hash.
         displayName:
           type: string
           minLength: 3

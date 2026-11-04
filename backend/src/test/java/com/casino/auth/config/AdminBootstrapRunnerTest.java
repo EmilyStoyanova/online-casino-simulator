@@ -68,6 +68,9 @@ class AdminBootstrapRunnerTest {
                 .satisfies(ex -> assertThat(ex.getMessage()).doesNotContain("not-an-email", "short"));
         assertThatIllegalStateException().isThrownBy(() -> runner(EMAIL, "Administrator").run(null))
                 .withMessageContaining("password must not equal the display name");
+        assertThatIllegalStateException().isThrownBy(() -> runner(EMAIL, "Password1234").run(null))
+                .withMessage("The bootstrap administrator is invalid: password must not be a commonly used password")
+                .satisfies(ex -> assertThat(ex.getMessage()).doesNotContain("Password1234"));
         verifyNoInteractions(accounts, passwordEncoder);
     }
 

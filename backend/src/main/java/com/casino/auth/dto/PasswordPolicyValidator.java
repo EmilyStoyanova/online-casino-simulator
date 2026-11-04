@@ -27,6 +27,9 @@ public class PasswordPolicyValidator implements ConstraintValidator<PasswordPoli
         if (password.getBytes(StandardCharsets.UTF_8).length > MAX_UTF8_BYTES) {
             valid = reject(context, "must be at most " + MAX_UTF8_BYTES + " bytes long in UTF-8");
         }
+        if (CommonPasswords.contains(password)) {
+            valid = reject(context, "must not be a commonly used password");
+        }
         if (matches(password, request.email())) {
             valid = reject(context, "must not equal the email");
         }

@@ -16,6 +16,7 @@ import jakarta.validation.Payload;
  *   <li>at least {@value PasswordPolicyValidator#MIN_CHARACTERS} characters (Unicode code points);</li>
  *   <li>at most {@value PasswordPolicyValidator#MAX_UTF8_BYTES} bytes in UTF-8, BCrypt's limit; longer
  *       passwords are rejected, never truncated;</li>
+ *   <li>not a commonly used password ({@link CommonPasswords}), ignoring case and surrounding whitespace;</li>
  *   <li>not equal to the email or the display name, ignoring case and surrounding whitespace.</li>
  * </ul>
  */

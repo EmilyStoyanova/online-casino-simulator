@@ -41,7 +41,7 @@ class RegisterRequestValidationTest {
     void passwordLengthIsCountedInCharactersAndUtf8Bytes() {
         assertThat(errors(request("a@example.com", "a".repeat(11), "Alice", true)))
                 .containsExactly("password: must be at least 12 characters long");
-        assertThat(errors(request("a@example.com", "a".repeat(12), "Alice", true))).isEmpty();
+        assertThat(errors(request("a@example.com", "x7Kq-vN2r-Pz", "Alice", true))).isEmpty();
         // 12 emoji are 24 UTF-16 units but 12 characters, and 48 bytes.
         assertThat(errors(request("a@example.com", "😀".repeat(11), "Alice", true)))
                 .containsExactly("password: must be at least 12 characters long");
@@ -66,6 +66,21 @@ class RegisterRequestValidationTest {
         // Several broken rules are reported together.
         assertThat(errors(request("abc@example.com", "abc", "abc", true))).containsExactlyInAnyOrder(
                 "password: must be at least 12 characters long", "password: must not equal the display name");
+    }
+
+    @Test
+    void commonPasswordsAreRejectedIgnoringCaseAndSurroundingWhitespace() {
+        for (String common : List.of("password1234", "Password1234", "1QAZ2WSX3EDC", "  qwertyuiopasdfghjkl\t")) {
+            assertThat(errors(request("alice@example.com", common, "Alice", true))).as(common)
+                    .containsExactly("password: must not be a commonly used password");
+        }
+        // Reported together with the other rules.
+        assertThat(errors(request("iloveyou1234@example.com", "iloveyou1234@example.com", "Alice", true)))
+                .containsExactly("password: must not equal the email");
+        assertThat(errors(request("alice@example.com", "iloveyou1234", "iLoveYou1234", true))).containsExactlyInAnyOrder(
+                "password: must not be a commonly used password", "password: must not equal the display name");
+        // A variation that is not in the list is accepted.
+        assertThat(errors(request("alice@example.com", "password1234-casino-zebra", "Alice", true))).isEmpty();
     }
 
     @Test

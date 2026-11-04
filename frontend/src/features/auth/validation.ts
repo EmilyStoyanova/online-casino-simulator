@@ -1,7 +1,8 @@
 /**
  * Client-side checks that mirror the backend rules (`RegisterRequest`, `LoginRequest` in `openapi.yaml`)
  * for immediate feedback. The server stays authoritative: it validates again and its field errors are
- * shown the same way.
+ * shown the same way. The common-password denylist is checked only by the server (the list is not
+ * shipped to the browser).
  */
 export type FieldErrors = Partial<Record<string, string>>
 

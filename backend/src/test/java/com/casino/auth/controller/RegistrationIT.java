@@ -210,6 +210,8 @@ class RegistrationIT {
                 // AC-1.5
                 new Case(body("alice@example.com", "short-pass1", "Alice", true), "password: must be at least 12 characters long"),
                 new Case(body("alice@example.com", "ä".repeat(37), "Alice", true), "password: must be at most 72 bytes long in UTF-8"),
+                // W2-12
+                new Case(body("alice@example.com", "Password1234", "Alice", true), "password: must not be a commonly used password"),
                 new Case(body("alice@example.com", "ALICE@example.com", "Alice", true), "password: must not equal the email"),
                 new Case(body("alice@example.com", "Alice Wonderland", "alice wonderland", true),
                         "password: must not equal the display name"));
@@ -225,7 +227,7 @@ class RegistrationIT {
             // All errors in one response, sorted by field.
             assertThat(errors).as(invalid.body()).containsExactly(invalid.errors());
             // Rejected values are never echoed.
-            assertThat(content(response)).doesNotContain(PASSWORD, "short-pass1", "not-an-email", "Wonderland");
+            assertThat(content(response)).doesNotContain(PASSWORD, "short-pass1", "Password1234", "not-an-email", "Wonderland");
         }
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM users", Integer.class)).isZero();
         // Unreadable JSON
@@ -265,7 +267,7 @@ class RegistrationIT {
     @Test
     void passwordsAtTheLimitsAreAccepted() throws Exception {
         // 12 characters; 72 bytes in UTF-8 (36 × 2-byte "ä"); 12 characters of 4 bytes each (48 bytes).
-        List<String> passwords = List.of("a".repeat(12), "ä".repeat(36), "😀".repeat(12));
+        List<String> passwords = List.of("x7Kq-vN2r-Pz", "ä".repeat(36), "😀".repeat(12));
         for (int i = 0; i < passwords.size(); i++) {
             MockHttpServletResponse response = perform(register(body("user" + i + "@example.com", passwords.get(i), "User " + i, true),
                     "192.0.2.5"));

@@ -25,8 +25,10 @@ It should rely on Spring Security and Spring Session wherever they already solve
    (`ChangeSessionIdAuthenticationStrategy`). Generic `401 INVALID_CREDENTIALS` for every login
    failure, and disabled accounts cannot log in.
 3. **Passwords:** `DelegatingPasswordEncoder` with BCrypt cost 12. Policy: 12 characters minimum,
-   72 UTF-8 bytes maximum (never truncated), not equal to the email or display name. A
-   common-password denylist is added once its source and licence are verified.
+   72 UTF-8 bytes maximum (never truncated), not equal to the email or display name, and not on
+   the common-password denylist (W2-12: passwords that occur more than once in Mark Burnett's
+   public-domain ten million password dataset, copy from SecLists under MIT; source and licence in
+   `backend/src/main/resources/auth/common-passwords-NOTICE.md`).
 4. **CSRF:** `csrf.spa()` (`XSRF-TOKEN` cookie + `X-XSRF-TOKEN` header) on all unsafe methods,
    including login and registration. The token is a stateless double-submit value
    (`CookieCsrfTokenRepository`): the server compares cookie and header and stores nothing. Sign-in

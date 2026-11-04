@@ -122,6 +122,29 @@ describe('Registration', () => {
     expect(screen.queryByText('Must not contain control characters.')).not.toBeInTheDocument()
   })
 
+  it('shows the rejection of a commonly used password, which only the server checks', async () => {
+    const api = backend(() =>
+      problemResponse(400, 'VALIDATION_FAILED', {
+        errors: [{ field: 'password', message: 'must not be a commonly used password' }],
+      }),
+    )
+    renderApp('/register')
+    expect(screen.getByLabelText('Password')).toHaveAccessibleDescription(
+      expect.stringContaining('not a commonly used password'),
+    )
+
+    const user = await fillIn({ password: 'Password1234' })
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+
+    // The list stays on the server, so the request is sent and its field error is shown.
+    expect(api.requestsTo(REGISTER)).toHaveLength(1)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Please correct the highlighted fields.')
+    expect(screen.getByLabelText('Password')).toHaveAccessibleDescription(
+      expect.stringContaining('Must not be a commonly used password.'),
+    )
+    expect(screen.getByLabelText('Password')).toHaveFocus()
+  })
+
   it('reports an email that is already registered and links to sign in', async () => {
     backend(() => problemResponse(409, 'EMAIL_ALREADY_REGISTERED'))
     renderApp('/register')

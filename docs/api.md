@@ -119,7 +119,10 @@ Example `GET /api/v1/system/status` → `200`:
   again.
 - Validation (`400 VALIDATION_FAILED`, every invalid property in one response): `email` trimmed,
   well-formed, ASCII, ≤ 254 characters; `password` 12 characters to 72 UTF-8 bytes, not equal to
-  the email or display name (ignoring case); `displayName` trimmed, 3–30 characters, no control
+  the email or display name (ignoring case), not a commonly used password (`must not be a commonly
+  used password`; 15,535-entry denylist from a public-domain dataset, ignoring case and surrounding
+  whitespace, see `backend/src/main/resources/auth/common-passwords-NOTICE.md`); `displayName`
+  trimmed, 3–30 characters, no control
   characters; `adultConfirmed` must be `true`. Rejected values are never echoed.
 - The email is lower-cased before the duplicate check and storage; an existing email (also a case
   variant, also a concurrent request) → `409 EMAIL_ALREADY_REGISTERED`, without a session.

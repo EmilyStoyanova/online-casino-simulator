@@ -77,7 +77,7 @@ export function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
         id="register-password"
         label="Password"
         autoComplete="new-password"
-        hint={`At least ${PASSWORD_MIN_CHARACTERS} characters (at most ${PASSWORD_MAX_UTF8_BYTES} bytes), different from your email and display name. A passphrase of a few words works well.`}
+        hint={`At least ${PASSWORD_MIN_CHARACTERS} characters (at most ${PASSWORD_MAX_UTF8_BYTES} bytes), different from your email and display name, and not a commonly used password. A passphrase of a few words works well.`}
         value={password}
         onChange={(event) => {
           setPassword(event.target.value)

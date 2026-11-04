@@ -878,6 +878,31 @@ note after FR-9). Details:
 - **Should:** common-password denylist, only after its source and licence are verified (W2-12).
   Otherwise it is deferred and recorded as a residual risk.
 
+**Implemented in W2-12 (2026-11-04, pending review):** O3 resolved, the source and licence were verified.
+- **Source:** Mark Burnett's "Ten Million Passwords" dataset (2015), which its author released "to
+  the public domain". The copy is `xato-net-10-million-passwords-dup.txt` from SecLists (MIT): the
+  755,995 passwords that occur more than once. Candidates that were rejected: Django's list and
+  Royce Williams' Pwned Passwords top 20k, because neither the gist nor the Django ticket states a
+  licence for the plaintext list; the HIBP range API, because it is a runtime dependency on an
+  external service, which this task does not include.
+- **Derived list** `backend/src/main/resources/auth/common-passwords.txt`: trimmed and lower-cased;
+  only 12–72 printable ASCII characters, because other entries could never pass the remaining rules.
+  15,535 entries (218 KB). `common-passwords-NOTICE.md` next to it holds the source, both
+  hashes, the MIT notice (also packaged in the jar) and the shell pipeline that reproduces the file
+  byte for byte.
+- **Check:** `auth.dto.CommonPasswords` loads the list into an unmodifiable set on first use. A
+  missing or empty list fails, so the policy is never silently weakened. `PasswordPolicyValidator`
+  reports `password: must not be a commonly used password` as one more field error in the same
+  `400`, comparing like the other rules (case and surrounding whitespace ignored). The bootstrap
+  administrator is validated with the same rules, so a common `APP_BOOTSTRAP_ADMIN_PASSWORD` stops
+  the start-up without naming the value. Login is unchanged: existing accounts can still sign in.
+- **Frontend:** the list is not shipped to the browser, so the server stays authoritative. The
+  password hint mentions the rule, and the server's field error is shown next to the field.
+- Tests: `CommonPasswordsTest` (bundled list and notice, every entry within the policy limits,
+  lookups), `RegisterRequestValidationTest` (rejection ignoring case and whitespace, combined with
+  other rules), `RegistrationIT` (`400` case, value not echoed), `AdminBootstrapRunnerTest`,
+  `RegisterForm.test.tsx`. Test passwords that are now on the list (`"a".repeat(12)`) were replaced.
+
 ### 7.4 Sessions and cookies
 
 | | Development | Production | Property / env var |
@@ -1077,7 +1102,7 @@ The existing `common.system` code already complies. **Implemented in W2-01:** th
 |---|---|
 | `UserAccountServiceTest` | email normalisation, duplicate → exception, hash stored, 18+ timestamp from `Clock`, `UserRegistered` published |
 | `UserProfileServiceTest` | partial update, interest replacement, unknown/inactive codes |
-| `PasswordPolicyTest` | 12 chars, 72 bytes incl. multi-byte characters, equals email/display name; denylist (Should) |
+| `PasswordPolicyTest` | 12 chars, 72 bytes incl. multi-byte characters, equals email/display name; denylist (Should). *Implemented as `RegisterRequestValidationTest` and `CommonPasswordsTest`.* |
 | `AuthThrottleServiceTest` | limits per scope, window reset, `Retry-After`, reset on success (fixed `Clock`) |
 | `AbsoluteSessionTimeoutFilterTest` | within/over the lifetime, missing attribute |
 | `AdminBootstrapRunnerTest` | disabled without env, creates once, idempotent, never promotes, no password in logs |
@@ -1138,7 +1163,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-09 | **Endpoint `GET /interests`** (①–⑥): **V5** (moved from W2-05, renumbered from V4), entity `Interest`, `InterestRepository`, `InterestResponse`, `InterestController`, `InterestService`. *Implemented 2026-11-03 (pending review), see the note after FR-8.* | M | W2-04, W2-05 |
 | W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT`. *Implemented 2026-11-04 (pending review) with the frontend session restoration, see the notes after FR-8 and FR-11.* | M | W2-08, W2-09 |
 | W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT`. *Implemented 2026-11-04 (pending review), see the note after FR-9.* | M | W2-08, W2-10 |
-| W2-12 | **Should:** password denylist (only with a verified licence; otherwise record as deferred) | S | W2-07 |
+| W2-12 | **Should:** password denylist (only with a verified licence; otherwise record as deferred). *Implemented 2026-11-04 (pending review) with a public-domain source, see the note in §7.3.* | S | W2-07 |
 | W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` done early (2026-11-03); the `/users/me` start-up check with W2-10 (2026-11-04), see the note after FR-11.* | L | W2-02 (parallel with mocks) |
 | W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile and InterestPicker remain.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
 | W2-15 | Docs & config: `api.md`, `database.md` (revocation runbook), `architecture.md`, README, `.env.example` | S | W2-04…W2-14 |
@@ -1214,7 +1239,7 @@ New dependencies: `spring-boot-starter-security`, `spring-boot-starter-session-j
 |---|---|---|---|
 | S1 | Password guessing / credential stuffing | Account + IP and IP limits, BCrypt 12, password policy | `ThrottleIT` |
 | S2 | Lockout abuse | No account lockout; limits keyed on account + IP | `ThrottleIT` (other IP succeeds) |
-| S3 | Distributed slow guessing of one account | **Residual:** password policy + BCrypt; device cookies / edge limits later | documented |
+| S3 | Distributed slow guessing of one account | **Residual:** password policy (incl. common-password denylist, W2-12) + BCrypt; device cookies / edge limits later | documented, `RegistrationIT` |
 | S4 | Enumeration via login | Identical 401 and timing; identical throttling | `LoginLogoutIT` |
 | S5 | Enumeration via registration (409) | Accepted (P2); `REGISTER_IP` limit | `RegistrationIT` |
 | S6 | Session fixation | Session id changed on register/login | `RegistrationIT`, `LoginLogoutIT` |
@@ -1253,6 +1278,6 @@ New dependencies: `spring-boot-starter-security`, `spring-boot-starter-session-j
 |---|---|---|
 | O1 | Accept the revocation limitation for Week 2 (§7.5) with mandatory revocation in Week 10 | Yes |
 | O2 | Throttle limits (5 / 15 min per account + IP, 50 / 15 min per IP, 10 / h registrations) | Yes, configurable |
-| O3 | Denylist source and licence | Verify in W2-12, otherwise defer |
+| O3 | Denylist source and licence | Verify in W2-12, otherwise defer. *Resolved 2026-11-04: public-domain dataset (Mark Burnett), SecLists copy under MIT (§7.3).* |
 | O4 | Production routing A or B | A; ADR-0007 in Week 12 |
 | O5 | Approve ADR-0006 | After this review |
