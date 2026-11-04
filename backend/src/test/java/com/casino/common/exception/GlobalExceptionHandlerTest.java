@@ -124,6 +124,23 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void validationErrorsOfServicesListTheirPropertiesLikeBeanValidation() throws Exception {
+        expectProblem(get("/test/errors/unknown-reference"), ProblemCode.VALIDATION_FAILED)
+                .andExpect(jsonPath("$.detail").value("The request contains invalid values."))
+                .andExpect(jsonPath("$.errors.length()").value(2))
+                .andExpect(jsonPath("$.errors[0].field").value("items[0]"))
+                .andExpect(jsonPath("$.errors[1].field").value("items[2]"))
+                .andExpect(jsonPath("$.errors[1].message").value("must be a known item"));
+    }
+
+    @Test
+    void validationErrorsNeedAViolation() {
+        assertThatThrownBy(() -> new UnknownItemException(List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("A validation failure needs at least one violation");
+    }
+
+    @Test
     void throttledAttemptsAreTooManyAttemptsWithRetryAfter() throws Exception {
         // As documented by components/responses/TooManyAttempts: Retry-After in whole seconds, rounded up.
         expectProblem(get("/test/errors/throttled"), ProblemCode.TOO_MANY_ATTEMPTS)
@@ -239,9 +256,22 @@ class GlobalExceptionHandlerTest {
         }
     }
 
+    static class UnknownItemException extends ApiException {
+        UnknownItemException(List<FieldViolation> violations) {
+            super(violations);
+        }
+    }
+
     @RestController
     @RequestMapping("/test/errors")
     static class ProbeController {
+
+        @GetMapping("/unknown-reference")
+        void unknownReference() {
+            // Sorted by field in the response.
+            throw new UnknownItemException(List.of(new FieldViolation("items[2]", "must be a known item"),
+                    new FieldViolation("items[0]", "must be a known item")));
+        }
 
         @PostMapping("/body")
         String body(@Valid @RequestBody ProbeRequest request) {

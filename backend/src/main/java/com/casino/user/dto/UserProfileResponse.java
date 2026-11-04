@@ -13,7 +13,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *
  * <p>Contract: {@code UserProfile} schema in {@code openapi.yaml}.
  *
- * @param interests codes of the selected interests; empty until interests exist (W2-10)
+ * @param interests codes of the selected active interests, in catalogue order
  */
 @Schema(name = "UserProfile")
 public record UserProfileResponse(

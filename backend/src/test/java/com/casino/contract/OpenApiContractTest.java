@@ -32,6 +32,9 @@ class OpenApiContractTest {
                 type: string
                 x-implementation-status: planned""";
 
+    /** Operation extension for {@link #minimalSpec}: {@code GET /a} is not implemented yet. */
+    private static final String PLANNED_OPERATION = "x-implementation-status: planned";
+
     private final OpenApiContract contract = OpenApiContract.load();
 
     @Test
@@ -159,15 +162,14 @@ class OpenApiContractTest {
     // ------------------------------------------------------------------ planned elements
 
     @Test
-    void week2OperationsArePlanned() {
+    void everyWeek2OperationIsImplemented() {
         assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.2.0");
-        // Implemented: GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08),
-        // GET /api/v1/interests (W2-09).
-        assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "GET /api/v1/users/me",
+        // GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08),
+        // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10). The planned marker stays
+        // available for later weeks; the tests below use a minimal specification for it.
+        assertThat(contract.plannedOperations()).isEmpty();
+        assertThat(contract.implementedOperations()).contains("GET " + STATUS_PATH, "GET /api/v1/users/me",
                 "PATCH /api/v1/users/me");
-        assertThat(contract.implementedOperations()).contains("GET " + STATUS_PATH).doesNotContainAnyElementsOf(
-                contract.plannedOperations());
     }
 
     @Test
@@ -185,17 +187,21 @@ class OpenApiContractTest {
 
     @Test
     void plannedElementsThatAreNotImplementedAreSkipped() {
-        assertThat(contract.differencesTo(implementationWithoutPlannedElements(), path -> true)).isEmpty();
+        String yaml = minimalSpec(PLANNED_OPERATION, PLANNED_PROPERTY);
+        OpenApiContract planned = OpenApiContract.fromYaml(yaml);
+
+        assertThat(planned.plannedOperations()).containsExactly("GET /a");
+        assertThat(planned.implementedOperations()).isEmpty();
+        assertThat(planned.differencesTo(withoutPlannedElements(yaml), path -> true)).isEmpty();
     }
 
     @Test
     void reportsPlannedOperationThatIsAlreadyImplemented() {
-        OpenApiContract implementation = OpenApiContract.load();
-        implementation.spec().getPaths().get("/api/v1/users/me").getGet().getExtensions()
-                .remove(OpenApiContract.IMPLEMENTATION_STATUS);
+        OpenApiContract planned = OpenApiContract.fromYaml(minimalSpec(PLANNED_OPERATION, ""));
+        OpenApiContract implementation = OpenApiContract.fromYaml(minimalSpec("", ""));
 
-        assertThat(contract.differencesTo(implementation, path -> true)).containsExactly(
-                "GET /api/v1/users/me: implemented, but still marked x-implementation-status: planned");
+        assertThat(planned.differencesTo(implementation, path -> true)).containsExactly(
+                "GET /a: implemented, but still marked x-implementation-status: planned");
     }
 
     @Test
@@ -212,8 +218,10 @@ class OpenApiContractTest {
 
     @Test
     void plannedOperationsCannotBeValidatedAsImplemented() {
-        assertThat(contract.validateResponse("/api/v1/users/me", "GET", 200, JSON, "{}")).containsExactly(
-                "GET /api/v1/users/me is marked x-implementation-status: planned; remove the marker when implementing it");
+        OpenApiContract planned = OpenApiContract.fromYaml(minimalSpec(PLANNED_OPERATION, ""));
+
+        assertThat(planned.validateResponse("/a", "GET", 200, JSON, "{}")).containsExactly(
+                "GET /a is marked x-implementation-status: planned; remove the marker when implementing it");
     }
 
     @Test
@@ -252,9 +260,9 @@ class OpenApiContractTest {
                 "GET /a 200 application/json: schema reference differs (contract: Item, implementation: null)");
     }
 
-    /** The contract as springdoc would generate it while no planned element is implemented. */
-    private static OpenApiContract implementationWithoutPlannedElements() {
-        OpenApiContract implementation = OpenApiContract.load();
+    /** The specification {@code yaml} as springdoc would generate it while no planned element is implemented. */
+    private static OpenApiContract withoutPlannedElements(String yaml) {
+        OpenApiContract implementation = OpenApiContract.fromYaml(yaml);
         implementation.spec().getPaths().values().forEach(item -> item.readOperationsMap().forEach((method, operation) -> {
             if (isPlanned(operation.getExtensions())) {
                 item.operation(method, null);

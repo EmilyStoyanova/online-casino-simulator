@@ -84,6 +84,21 @@ The orphaned rows are deleted by the hourly cleanup at most 1 h (longest window)
 4. Optionally run `DELETE FROM auth_throttle;` right after the switch, instead of waiting for the
    cleanup.
 
+## Profile data (W2-10)
+
+- `PATCH /api/v1/users/me` changes only `users.display_name` and the user's rows in
+  `user_interests`, in one transaction. The primary key prevents duplicate selections; the limit of
+  8 and the rejection of unknown or inactive codes are checked by the application. Interests that
+  stay selected keep their row (`created_at`).
+- Every profile change increments `users.version` (optimistic locking), also a change of the
+  interests only. `last_login_at` is set without a new version, so logins never conflict with a
+  profile update; updates write only the changed columns, so neither overwrites the other.
+- To withdraw an interest, set `interests.active = false` (a migration). Users who selected it no
+  longer see it in their profile; their row is removed at their next change of the selection.
+- Manual changes of `users` in the database bypass these rules. After deleting an account or
+  changing its role, status or password by hand, also delete its sessions:
+  `DELETE FROM spring_session WHERE principal_name = '<user id>';` (`docs/plans/week-02.md` §7.5).
+
 ## Local database
 
 ```bash

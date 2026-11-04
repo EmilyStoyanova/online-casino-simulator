@@ -76,7 +76,7 @@ class CsrfIT {
                 () -> json(post("/api/v1/auth/login"), LOGIN_BODY),
                 // No forced logout.
                 () -> post("/api/v1/auth/logout").cookie(session),
-                // Planned and protected operations: CSRF is checked before anything else.
+                // Protected operations: CSRF is checked before anything else.
                 () -> json(patch("/api/v1/users/me"), "{\"displayName\":\"Mallory\"}").cookie(session),
                 () -> post("/api/v1/system/status"));
 

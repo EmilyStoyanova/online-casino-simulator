@@ -3,6 +3,7 @@ package com.casino.contract;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import java.net.URI;
@@ -51,6 +52,7 @@ class OpenApiContractIT {
     private static final String REGISTER = "/api/v1/auth/register";
     private static final String LOGIN = "/api/v1/auth/login";
     private static final String LOGOUT = "/api/v1/auth/logout";
+    private static final String PROFILE = "/api/v1/users/me";
 
     private final OpenApiContract contract = OpenApiContract.load();
 
@@ -85,15 +87,45 @@ class OpenApiContractIT {
                 "POST /api/v1/auth/login",
                 "POST /api/v1/auth/logout",
                 "GET /api/v1/interests",
+                "GET /api/v1/users/me",
+                "PATCH /api/v1/users/me",
                 "GET /actuator/health",
                 "GET /actuator/health/liveness",
                 "GET /actuator/health/readiness",
                 "GET /actuator/info");
         // Planned operations cannot be verified at runtime (validateResponse rejects them). When one is
-        // implemented, its marker is removed and it moves to the list above. Empty at the end of Week 2.
-        assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "GET /api/v1/users/me",
-                "PATCH /api/v1/users/me");
+        // implemented, its marker is removed and it moves to the list above. Empty since W2-10.
+        assertThat(contract.plannedOperations()).isEmpty();
+    }
+
+    @Test
+    void profileRespondsAccordingToContract() throws Exception {
+        jdbcTemplate.update("""
+                INSERT INTO users (email, password_hash, display_name, adult_confirmed_at)
+                VALUES ('profile@example.com', ?, 'Profile', now())""", passwordEncoder.encode("correct-horse-battery"));
+        RealCsrfToken csrf = RealCsrfToken.fetch(mockMvc);
+        try {
+            Cookie session = new Cookie("SESSION", perform(jsonPost(LOGIN,
+                    "{\"email\":\"profile@example.com\",\"password\":\"correct-horse-battery\"}", "192.0.2.40").with(csrf))
+                    .getCookie("SESSION").getValue());
+
+            assertConformsToContract(PROFILE, get(PROFILE), 401);
+            assertConformsToContract(PROFILE, get(PROFILE).cookie(session), 200);
+            assertConformsToContract(PROFILE, "PATCH", profilePatch("{\"displayName\":\"Profile B.\"}").cookie(session), 403);
+            assertConformsToContract(PROFILE, "PATCH", profilePatch("{\"displayName\":\"Profile B.\"}").with(csrf), 401);
+            assertConformsToContract(PROFILE, "PATCH", profilePatch("""
+                    {"displayName":"Profile B.","interests":["STATISTICS","PROBABILITY"]}""").cookie(session).with(csrf), 200);
+            assertConformsToContract(PROFILE, "PATCH", profilePatch("{\"interests\":[\"ASTROLOGY\"]}").cookie(session).with(csrf), 400);
+            assertConformsToContract(PROFILE, "PATCH", profilePatch("{\"displayName\":").cookie(session).with(csrf), 400);
+            // 409 CONCURRENT_MODIFICATION: UserProfileControllerTest (contract) and UserProfileServiceIT (detection).
+
+            assertThat(perform(post(LOGOUT).cookie(session).with(csrf)).getStatus()).isEqualTo(204);
+            assertConformsToContract(PROFILE, get(PROFILE).cookie(session), 401);
+        } finally {
+            jdbcTemplate.update("DELETE FROM spring_session");
+            jdbcTemplate.update("DELETE FROM users");
+            jdbcTemplate.update("DELETE FROM auth_throttle");
+        }
     }
 
     @Test
@@ -239,6 +271,10 @@ class OpenApiContractIT {
                 .as("%s %s %d response vs contract", method, path, expectedStatus)
                 .isEmpty();
         return response;
+    }
+
+    private static MockHttpServletRequestBuilder profilePatch(String body) {
+        return patch(PROFILE).contentType(MediaType.APPLICATION_JSON).content(body);
     }
 
     /** A registration from {@code clientIp}, so the throttle counter belongs to this test only. */

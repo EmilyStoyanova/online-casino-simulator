@@ -71,7 +71,7 @@ tags:
   - name: Authentication
     description: CSRF token, registration, login and logout
   - name: Users
-    description: Profile of the signed-in user (planned, Week 2)
+    description: Profile of the signed-in user
   - name: Interests
     description: Catalog of educational interests
   - name: Operations
@@ -306,11 +306,11 @@ paths:
     get:
       tags: [Users]
       operationId: getCurrentUser
-      summary: Get the signed-in user's profile (planned)
-      x-implementation-status: planned
+      summary: Get the signed-in user's profile
       description: |
-        *Planned (W2-10).* Returns the profile of the user who owns the session. The SPA also uses it
-        at start-up to find out whether a user is signed in (`401` means anonymous).
+        Returns the profile of the user who owns the session; the user is identified only by the
+        session, never by a request value. The SPA also calls it at start-up to find out whether a
+        user is signed in (`401` means anonymous). Does not extend the session's 12-hour lifetime.
       security:
         - sessionCookie: []
       responses:
@@ -330,16 +330,24 @@ paths:
                 createdAt: '2026-11-02T09:15:00Z'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
     patch:
       tags: [Users]
       operationId: updateCurrentUser
-      summary: Update the signed-in user's profile (planned)
-      x-implementation-status: planned
+      summary: Update the signed-in user's profile
       description: |
-        *Planned (W2-10).* Partial update of the display name and/or interests. Omitted properties are
-        left unchanged; `interests` replaces the whole selection. Email, role, status and the 18+
-        confirmation cannot be changed: such properties are ignored. Requires a session and a CSRF
-        token.
+        Partial update of the signed-in user's display name and/or interests. Omitted properties are
+        left unchanged, and so are properties sent as `null`; `{}` changes nothing.
+        `interests` replaces the whole selection: 0–8 distinct codes of active interests
+        (`GET /api/v1/interests`); an unknown or inactive code is reported as `VALIDATION_FAILED`
+        for its position, e.g. `interests[2]`. Email, role, status and the 18+ confirmation cannot
+        be changed: such properties are ignored. All changes are saved together or not at all.
+        Requires a session and a CSRF token.
+
+        A request that overlaps with another change of the same profile fails with
+        `409 CONCURRENT_MODIFICATION` instead of overwriting it; the client reloads the profile and
+        tries again. Requests that do not overlap are applied in order (the last one wins).
       security:
         - sessionCookie: []
           csrfHeader: []
@@ -380,6 +388,8 @@ paths:
                 code: CONCURRENT_MODIFICATION
                 detail: The profile was changed by another request. Reload it and try again.
                 instance: /api/v1/users/me
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/v1/interests:
     get:
@@ -741,16 +751,21 @@ components:
     UpdateProfileRequest:
       type: object
       description: |
-        Partial profile update. Omitted properties are left unchanged. Properties not listed here
-        (for example `email` or `role`) are ignored.
+        Partial profile update. Omitted properties and properties sent as `null` are left
+        unchanged; `null` never clears a value. Properties not listed here (for example `email` or
+        `role`) are ignored.
       properties:
         displayName:
           type: string
           minLength: 3
           maxLength: 30
+          description: Trimmed by the server before it is checked and stored; no control characters.
+          examples: [Alice B.]
         interests:
           type: array
-          description: The complete new selection (replaces the current one). Unknown or inactive codes are rejected.
+          description: |
+            The complete new selection (replaces the current one; `[]` removes all). Codes of active
+            interests only; unknown or inactive codes are rejected.
           maxItems: 8
           uniqueItems: true
           items:
@@ -775,7 +790,10 @@ components:
           $ref: '#/components/schemas/UserRole'
         interests:
           type: array
-          description: Codes of the selected interests (see `GET /api/v1/interests`)
+          description: |
+            Codes of the selected interests in catalogue order (see `GET /api/v1/interests`). Only
+            active interests are listed: a selected interest that is deactivated later disappears
+            from the profile and is removed at the next change of the selection.
           items:
             type: string
             pattern: '^[A-Z][A-Z0-9_]*$'

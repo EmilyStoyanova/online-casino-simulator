@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
-import { primaryButton, secondaryButton } from '../../components/buttonStyles'
+import { ghostButton, primaryButton, secondaryButton } from '../../components/buttonStyles'
 import type { UserProfile } from '../../types/user'
 import { useAuth } from './useAuth'
 import { useSignOut } from './useSignOut'
@@ -53,20 +53,33 @@ function SignedIn({ user }: { user: UserProfile }) {
   )
 }
 
+function Checking() {
+  return (
+    <p className="flex items-center gap-2 text-sm text-zinc-400">
+      <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-emerald-400/70" />
+      Checking your sign-in status…
+    </p>
+  )
+}
+
 function Unknown() {
+  const { checkSession } = useAuth()
   const { signOut, pending, error } = useSignOut()
 
   return (
     <>
       <p className="text-sm leading-relaxed text-zinc-300">
-        Your sign-in status could not be confirmed after the page was loaded. If you signed in
-        earlier, your session may still be active.
+        Your sign-in status could not be checked: the server is not reachable right now. If you
+        signed in earlier, your session may still be active.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <Link to="/login" className={primaryButton}>
+        <button type="button" onClick={checkSession} className={primaryButton}>
+          Try again
+        </button>
+        <Link to="/login" className={secondaryButton}>
           Sign in
         </Link>
-        <button type="button" onClick={() => void signOut()} disabled={pending} className={secondaryButton}>
+        <button type="button" onClick={() => void signOut()} disabled={pending} className={ghostButton}>
           {pending ? 'Signing out…' : 'Sign out'}
         </button>
       </div>
@@ -110,7 +123,8 @@ export function AccountPanel() {
       <h2 id="account-heading" className="mb-4 text-lg font-semibold text-zinc-100">
         Your account
       </h2>
-      <div aria-live="polite">
+      <div aria-live="polite" aria-busy={state.status === 'checking'}>
+        {state.status === 'checking' && <Checking />}
         {state.status === 'authenticated' && <SignedIn user={state.user} />}
         {state.status === 'unknown' && <Unknown />}
         {state.status === 'anonymous' && <SignedOut expired={state.reason === 'session-expired'} />}

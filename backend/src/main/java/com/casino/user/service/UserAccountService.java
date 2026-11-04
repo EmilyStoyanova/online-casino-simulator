@@ -3,7 +3,6 @@ package com.casino.user.service;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -13,7 +12,6 @@ import com.casino.user.dto.NewAccount;
 import com.casino.user.dto.UserCredentials;
 import com.casino.user.dto.UserProfileResponse;
 import com.casino.user.dto.UserRegistered;
-import com.casino.user.dto.UserRole;
 import com.casino.user.entity.UserAccount;
 import com.casino.user.entity.UserStatus;
 import com.casino.user.exception.EmailAlreadyRegisteredException;
@@ -82,7 +80,7 @@ public class UserAccountService {
             throw ex;
         }
         events.publishEvent(new UserRegistered(saved.getId()));
-        return profile(saved);
+        return UserProfiles.of(saved);
     }
 
     /**
@@ -93,7 +91,7 @@ public class UserAccountService {
     @Transactional(readOnly = true)
     public Optional<UserCredentials> findCredentials(String email) {
         return repository.findByEmail(normalizeEmail(email)).map(account -> new UserCredentials(account.getId(),
-                account.getPasswordHash(), role(account), account.getStatus() == UserStatus.ACTIVE));
+                account.getPasswordHash(), UserProfiles.role(account), account.getStatus() == UserStatus.ACTIVE));
     }
 
     /**
@@ -104,16 +102,7 @@ public class UserAccountService {
     @Transactional
     public UserProfileResponse recordLogin(UUID userId) {
         repository.updateLastLoginAt(userId, clock.instant().truncatedTo(ChronoUnit.MICROS));
-        return profile(repository.findById(userId).orElseThrow(() -> new IllegalStateException("The account no longer exists")));
-    }
-
-    private static UserRole role(UserAccount account) {
-        return UserRole.valueOf(account.getRole().name());
-    }
-
-    private static UserProfileResponse profile(UserAccount account) {
-        return new UserProfileResponse(account.getId(), account.getEmail(), account.getDisplayName(),
-                role(account), List.of(), account.getAdultConfirmedAt(), account.getCreatedAt());
+        return UserProfiles.of(repository.findById(userId).orElseThrow(() -> new IllegalStateException("The account no longer exists")));
     }
 
     private static boolean violates(DataIntegrityViolationException ex, String constraint) {

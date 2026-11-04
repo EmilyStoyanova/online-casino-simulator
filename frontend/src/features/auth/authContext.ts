@@ -3,24 +3,29 @@ import type { LoginRequest, RegisterRequest } from '../../types/auth'
 import type { UserProfile } from '../../types/user'
 
 /**
- * What the SPA knows about the session. Kept in memory only, never in browser storage.
+ * What the SPA knows about the session. Kept in memory only, never in browser storage; the session
+ * itself is the `HttpOnly` cookie, which JavaScript cannot read.
  *
- * - `unknown`: after a page load. The session cookie is `HttpOnly`, and the endpoint that reports the
- *   signed-in user (`GET /api/v1/users/me`, W2-10) does not exist yet, so an earlier session may or
- *   may not still be active.
- * - `authenticated`: from the `UserProfile` of a successful registration or login in this page.
- * - `anonymous`: after logout, or after the server reported `401 SESSION_EXPIRED`.
+ * - `checking`: after a page load, while `GET /api/v1/users/me` asks the server.
+ * - `authenticated`: the server confirmed the session (start-up check, registration or login).
+ * - `anonymous`: the server confirmed that there is no valid session (`401`), or the user signed out.
+ *   `session-expired` when the session had ended (`401 SESSION_EXPIRED`).
+ * - `unknown`: the start-up check failed (no connection, server error). An earlier session may still
+ *   be active, so the SPA claims neither state and offers to check again.
  */
 export type AuthState =
-  | { status: 'unknown' }
+  | { status: 'checking' }
   | { status: 'authenticated'; user: UserProfile }
   | { status: 'anonymous'; reason: 'signed-out' | 'session-expired' }
+  | { status: 'unknown' }
 
 export interface AuthContextValue {
   state: AuthState
   register: (request: RegisterRequest) => Promise<UserProfile>
   login: (request: LoginRequest) => Promise<UserProfile>
   logout: () => Promise<void>
+  /** Asks the server again who is signed in (after `unknown`). */
+  checkSession: () => void
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null)

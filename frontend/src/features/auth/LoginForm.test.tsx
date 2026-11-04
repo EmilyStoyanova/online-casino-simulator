@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { alice, PASSWORD, upStatus } from '../../test/fixtures'
-import { csrfEndpoint, jsonResponse, problemResponse, signedIn, stubApi } from '../../test/http'
+import { csrfEndpoint, jsonResponse, noSession, problemResponse, signedIn, stubApi } from '../../test/http'
 import { renderApp } from '../../test/renderApp'
 
 const LOGIN = 'POST /api/v1/auth/login'
@@ -11,6 +11,7 @@ function backend(login: Parameters<typeof stubApi>[0][string]) {
   return stubApi({
     'GET /api/v1/auth/csrf': csrfEndpoint(),
     'GET /api/v1/system/status': () => jsonResponse(upStatus),
+    'GET /api/v1/users/me': noSession(),
     [LOGIN]: login,
   })
 }

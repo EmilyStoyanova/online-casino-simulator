@@ -2,10 +2,13 @@ package com.casino.user.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class UserAccountTest {
 
@@ -39,5 +42,48 @@ class UserAccountTest {
                 .withMessage("displayName");
         assertThatNullPointerException().isThrownBy(() -> new UserAccount("a@b.c", HASH, "Alice", null))
                 .withMessage("adultConfirmedAt");
+    }
+
+    @Test
+    void changesTheDisplayName() {
+        UserAccount account = new UserAccount("alice@example.com", HASH, "Alice", CONFIRMED);
+
+        account.changeDisplayName("Alice B.");
+
+        assertThat(account.getDisplayName()).isEqualTo("Alice B.");
+        assertThatNullPointerException().isThrownBy(() -> account.changeDisplayName(null)).withMessage("displayName");
+    }
+
+    @Test
+    void replacesTheWholeSelectionOfInterests() {
+        UserAccount account = new UserAccount("alice@example.com", HASH, "Alice", CONFIRMED);
+        account.replaceInterests(List.of(interest("PROBABILITY"), interest("MATHEMATICS")));
+
+        // Equal by code: another instance of a selected interest stays selected.
+        account.replaceInterests(List.of(interest("MATHEMATICS"), interest("STATISTICS")));
+
+        assertThat(account.getInterests()).extracting(Interest::getCode).containsExactlyInAnyOrder("MATHEMATICS", "STATISTICS");
+        account.replaceInterests(List.of());
+        assertThat(account.getInterests()).isEmpty();
+    }
+
+    @Test
+    void theSelectionCannotBeChangedFromOutside() {
+        UserAccount account = new UserAccount("alice@example.com", HASH, "Alice", CONFIRMED);
+
+        assertThatThrownBy(() -> account.getInterests().add(interest("PROBABILITY")))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void interestsAreEqualByCode() {
+        assertThat(interest("PROBABILITY")).isEqualTo(interest("PROBABILITY")).hasSameHashCodeAs(interest("PROBABILITY"));
+        assertThat(interest("PROBABILITY")).isNotEqualTo(interest("MATHEMATICS")).isNotEqualTo("PROBABILITY");
+    }
+
+    private static Interest interest(String code) {
+        Interest interest = new Interest();
+        ReflectionTestUtils.setField(interest, "code", code);
+        return interest;
     }
 }

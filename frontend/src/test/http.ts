@@ -114,3 +114,8 @@ export function signedIn(body: unknown, status = 200): Handler {
     return jsonResponse(body, status)
   }
 }
+
+/** `GET /api/v1/users/me` without a valid session: `401 AUTHENTICATION_REQUIRED`. */
+export function noSession(): Handler {
+  return () => problemResponse(401, 'AUTHENTICATION_REQUIRED')
+}

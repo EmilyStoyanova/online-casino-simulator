@@ -116,11 +116,12 @@ frontend/src
   (`XSRF-TOKEN` cookie, read by `services/csrf.ts`) in `X-XSRF-TOKEN`, fetching it from
   `GET /api/v1/auth/csrf` when missing, and retry once on `403 CSRF_TOKEN_INVALID`.
 - Routing: React Router 8 (declarative `BrowserRouter`); pages `/`, `/login`, `/register`.
-- Authentication state (`features/auth/AuthProvider`) lives in memory only: the `UserProfile` of
-  the last registration or login in this page. Nothing about the user, the password or the session
-  is written to browser storage; the session id stays in the `HttpOnly` cookie. After a page load
-  the state is *unknown* until `GET /api/v1/users/me` (W2-10) can confirm it. Any
-  `401 SESSION_EXPIRED` clears the state and opens the login page.
+- Authentication state (`features/auth/AuthProvider`) lives in memory only. Nothing about the
+  user, the password or the session is written to browser storage; the session id stays in the
+  `HttpOnly` cookie. After a page load the state is *checking* while `GET /api/v1/users/me`
+  (`services/userApi.ts`) asks the server: the profile restores the signed-in user, a `401` means
+  signed out, and a network or server error leaves the state *unknown* with a retry (never
+  "signed out"). A `401 SESSION_EXPIRED` while signed in clears the state and opens the login page.
 - Development: the Vite dev server proxies `/api` to the backend (same origin, no CORS).
 - Production (decided in Week 12): the preferred setup keeps the API on the **same site** as the
   frontend, through a reverse proxy for `/api/*`. Session cookies then stay first-party, because
@@ -141,7 +142,7 @@ frontend/src
 | API documentation | Swagger UI at `/swagger-ui.html`, showing the contract and the generated implementation view (to be disabled in production, Week 12) |
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
-| Security | [ADR-0006](decisions/0006-session-authentication-security.md) (proposed). **Implemented (W2-04):** Spring Security in `auth.config.SecurityConfig` (deny by default, JSON 401/403 via `ProblemDetailFactory`), Spring Session JDBC (30 min idle), `HttpOnly`/`SameSite=Lax` session cookie (`__Host-` + `Secure` in production), CSRF (`csrf.spa()`, `GET /api/v1/auth/csrf`), CORS via a `CorsConfigurationSource`, BCrypt cost 12. **Implemented (W2-06):** throttling infrastructure (`auth_throttle`, V4; `AuthThrottleService` with fixed windows per account + IP, IP and registration IP; `429 TOO_MANY_ATTEMPTS` + `Retry-After`; hourly cleanup; HMAC-SHA-256 keys with the required `APP_SECURITY_THROTTLE_SECRET`; start-up check of the forwarded-header settings), not yet used by an endpoint. **Implemented (W2-07):** `POST /api/v1/auth/register` with automatic sign-in (session-id rotation, CSRF token cleared), registration throttling and BCrypt hashing. **Implemented (W2-08):** login (`DaoAuthenticationProvider`, identical `401` for every failure, account + IP and IP throttling) and logout, 12 h absolute session lifetime (`AbsoluteSessionTimeoutFilter`). **Planned:** session revocation on admin changes (Week 10). |
+| Security | [ADR-0006](decisions/0006-session-authentication-security.md) (proposed). **Implemented (W2-04):** Spring Security in `auth.config.SecurityConfig` (deny by default, JSON 401/403 via `ProblemDetailFactory`), Spring Session JDBC (30 min idle), `HttpOnly`/`SameSite=Lax` session cookie (`__Host-` + `Secure` in production), CSRF (`csrf.spa()`, `GET /api/v1/auth/csrf`), CORS via a `CorsConfigurationSource`, BCrypt cost 12. **Implemented (W2-06):** throttling infrastructure (`auth_throttle`, V4; `AuthThrottleService` with fixed windows per account + IP, IP and registration IP; `429 TOO_MANY_ATTEMPTS` + `Retry-After`; hourly cleanup; HMAC-SHA-256 keys with the required `APP_SECURITY_THROTTLE_SECRET`; start-up check of the forwarded-header settings), not yet used by an endpoint. **Implemented (W2-07):** `POST /api/v1/auth/register` with automatic sign-in (session-id rotation, CSRF token cleared), registration throttling and BCrypt hashing. **Implemented (W2-08):** login (`DaoAuthenticationProvider`, identical `401` for every failure, account + IP and IP throttling) and logout, 12 h absolute session lifetime (`AbsoluteSessionTimeoutFilter`). **Implemented (W2-10):** `GET/PATCH /api/v1/users/me` for the session's own user only (principal name = user id), optimistic locking with `409 CONCURRENT_MODIFICATION`. **Planned:** session revocation on admin changes (Week 10). |
 | Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
 | Testing | Unit (JUnit + Mockito), web slices (`@WebMvcTest`), integration (Testcontainers PostgreSQL), frontend (Vitest + RTL), E2E (Playwright, Week 11) |
 | CI | GitHub Actions: backend `mvnw verify`, frontend lint → typecheck → test → build |

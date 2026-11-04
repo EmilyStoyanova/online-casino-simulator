@@ -307,6 +307,46 @@ stay in W2-08).
   restrict, upgrade from V4 with an existing account, session and counter), `InterestIT`,
   `OpenApiContractIT`, `WebSecurityIT`, `CasinoSimulatorApplicationIT` (schema version 5).
 
+**Implemented in W2-10 (pending review):** AC-7.1–AC-7.4, AC-8.2, AC-8.3, AC-9.3 for `/users/me`.
+- `GET/PATCH /api/v1/users/me` (`UserProfileController`, `UserProfileService`,
+  `UpdateProfileRequest`): the user id is the session principal's name, never a request value; no
+  path or property addresses another user. Protected by the existing `/api/**` rule; `PATCH` needs
+  the CSRF token like every unsafe method. No new migration: `UserAccount.interests` maps V5's
+  `user_interests` (`@ManyToMany` to the read-only `Interest`).
+- `PATCH`: `displayName` trimmed, 3–30 characters, no control characters (as at registration);
+  `interests` 0–8 distinct codes in the code format (Bean Validation), then unknown or inactive
+  codes → `400 VALIDATION_FAILED` per position (`interests[2]`), without echoing the code
+  (`UnknownInterestException`). Omitted or `null` properties stay unchanged; `[]` clears the
+  selection. Other properties are ignored. One transaction: a rejected request saves nothing.
+- Optimistic locking: every change, also one of the interests only, increments `users.version`; an
+  update that overlaps with another change → `409 CONCURRENT_MODIFICATION`
+  (`ConcurrentModificationException`, the flush is inside the service). The contract has no client
+  version (`If-Match`), so updates that do not overlap are applied in order (last one wins).
+- `UserProfile.interests` lists only active interests, in catalogue order, so the client can send
+  the listed selection back. A deactivated selected interest stays stored until the next change of
+  the selection. Login and registration return the same profile (with the interests).
+- Decisions found during implementation, reflected in the contract:
+  - `500` documented on both operations, as on every implemented one;
+  - `null` = unchanged: a Java record cannot tell an omitted property from an explicit `null`;
+  - `UserAccount` is `@DynamicUpdate`: a full-row update would write back a `last_login_at` that a
+    concurrent login set (that query does not increment `version`), a lost update;
+  - `updatedAt` is read back only at insert: with `UPDATE … RETURNING`, Hibernate 7 reports a
+    version conflict as a generic error instead of an optimistic-locking failure;
+  - `ApiException` can carry field violations, so services report `VALIDATION_FAILED` like Bean
+    Validation;
+  - the implementation view adds `csrfHeader` to every unsafe operation's security requirement
+    (`OpenApiConfig`); the annotations cannot combine two schemes;
+  - a session whose account no longer exists (manual deletion only) →
+    `401 AUTHENTICATION_REQUIRED` (`AccountNotFoundException`).
+- Contract: `planned` markers removed; no planned operation is left. `OpenApiContractTest` checks
+  the marker with a minimal specification.
+- Tests: `UserProfileServiceTest`, `UserProfileControllerTest`, `UserAccountTest`,
+  `GlobalExceptionHandlerTest`, `UserProfileServiceIT` (what is written, unchanged profiles are not
+  written, atomicity, deterministic version conflicts, `last_login_at` kept), `ProfileIT` (end to end:
+  restore after registration, 401/`SESSION_EXPIRED`, mass assignment, all 8 interests, invalid and
+  inactive codes, own profile only, CSRF, 8 concurrent updates: only `200`/`409`, never a mix of two
+  requests), `OpenApiContractIT`, `CsrfIT`.
+
 ### FR-9 Roles & authorization
 
 | ID | Acceptance criterion |
@@ -350,14 +390,22 @@ so that registration and login can be used in the browser before W2-10. Done:
   `apiClient.test.ts`, `authApi.test.ts`, `RegisterForm.test.tsx`, `LoginForm.test.tsx`,
   `AuthProvider.test.tsx`.
 
-**Deviation until W2-10:** without `GET /users/me`, the state starts as `unknown` after every page
-load (§8 expects "anonymous" on `401`); the UI says the status could not be confirmed and offers
-both sign-in and sign-out. Reliable session restoration requires `GET /users/me`.
+**Deviation until W2-10 (resolved in W2-10):** without `GET /users/me`, the state started as
+`unknown` after every page load.
 
-**Remaining for W2-13/W2-14 (not duplicated there):** start-up check with `GET /users/me`
-(`unknown` → `authenticated`/`anonymous`), `RequireAuth` with the internal-redirect check (AC-11.2,
-`RequireAuth.test.tsx`), `userApi.ts`, `ProfilePage` with `ProfileForm` and `InterestPicker`
-(`ProfileForm.test.tsx`), and the manual walkthrough.
+**Session restoration (W2-10, pending review):** `userApi.ts` (`getCurrentUser`); `AuthProvider`
+starts in `checking` and calls `GET /users/me` once per page load: the profile → `authenticated`;
+`401` → `anonymous` (`session-expired` for `SESSION_EXPIRED`, shown with an explanation, without
+leaving a public page; during use a `SESSION_EXPIRED` still opens `/login`); a network or server
+error → `unknown` with "Try again", never "signed out". A sign-in or sign-out that finishes before a
+slow check is not overwritten by it. The header and the account panel show "Checking…" meanwhile;
+the login and registration forms stay usable. Tests: `userApi.test.ts`, `AuthProvider.test.tsx`
+(valid, missing, ended and unavailable sessions, loading, retry, reload, the race with a sign-in).
+
+**Remaining for W2-13/W2-14 (not duplicated there):** `RequireAuth` with the internal-redirect check
+(AC-11.2, `RequireAuth.test.tsx`), `updateCurrentUser` (`PATCH`) in `userApi.ts`, `ProfilePage` with
+`ProfileForm` and `InterestPicker` (`ProfileForm.test.tsx`, including the `409` reload-and-retry
+message), and the manual walkthrough.
 
 ### FR-12 Architecture
 
@@ -946,8 +994,8 @@ src/
 └── types/     auth.ts, user.ts, problem.ts — mirror openapi.yaml
 ```
 
-- Auth state from `GET /users/me` at start-up (`401` = anonymous, not an error). Until W2-10 the
-  state starts as `unknown` (early slice, see the note after FR-11).
+- Auth state from `GET /users/me` at start-up (`401` = anonymous, not an error; other failures =
+  unknown with a retry). Implemented in W2-10, see the note after FR-11.
 - `401 SESSION_EXPIRED` → clear the state, go to `/login` with a message.
 - Redirect after login only to internal paths (starts with `/`, not `//`).
 - Accessible forms: labels, `aria-invalid`, `aria-describedby`, focus on the first error.
@@ -1057,10 +1105,10 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-07 | **Endpoint `POST /auth/register`** (①–⑥): `RegisterRequest`, `UserProfileResponse`; `AuthController`; `RegistrationService`, `UserAccountService`, `PasswordPolicy`, `SessionSignInService`; `REGISTER_IP`; `RegistrationIT`, `CsrfIT` (part). *Implemented 2026-11-03 (pending review); the registration CSRF cases are in `RegistrationIT`, `CsrfIT` for every operation follows in W2-08.* | L | W2-04, W2-05, W2-06 |
 | W2-08 | **Endpoints `POST /auth/login` and `/auth/logout`** (①–⑥): `LoginRequest`; `AccountUserDetailsService`, `LoginService`; `AbsoluteSessionTimeoutFilter`; login limits; `LoginLogoutIT`, `CsrfIT`, `SessionLifetimeIT`, `SessionRestartIT`, `CookieAttributesIT`, `ThrottleIT`. *Implemented 2026-11-03 (pending review), see the note after FR-3.* | L | W2-07 |
 | W2-09 | **Endpoint `GET /interests`** (①–⑥): **V5** (moved from W2-05, renumbered from V4), entity `Interest`, `InterestRepository`, `InterestResponse`, `InterestController`, `InterestService`. *Implemented 2026-11-03 (pending review), see the note after FR-8.* | M | W2-04, W2-05 |
-| W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT` | M | W2-08, W2-09 |
+| W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT`. *Implemented 2026-11-04 (pending review) with the frontend session restoration, see the notes after FR-8 and FR-11.* | M | W2-08, W2-09 |
 | W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT` | M | W2-08, W2-10 |
 | W2-12 | **Should:** password denylist (only with a verified licence; otherwise record as deferred) | S | W2-07 |
-| W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` and the `/users/me` start-up check done early (2026-11-03), see the note after FR-11.* | L | W2-02 (parallel with mocks) |
+| W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` done early (2026-11-03); the `/users/me` start-up check with W2-10 (2026-11-04), see the note after FR-11.* | L | W2-02 (parallel with mocks) |
 | W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile and InterestPicker remain.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
 | W2-15 | Docs & config: `api.md`, `database.md` (revocation runbook), `architecture.md`, README, `.env.example` | S | W2-04…W2-14 |
 | W2-16 | Verification: all suites, manual walkthrough, CI green, pull request | M | all |

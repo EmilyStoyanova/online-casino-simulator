@@ -84,6 +84,8 @@ The API is **design-first**. The contract
 | POST | `/api/v1/auth/login` | Authentication | `200` `UserProfile` (+ session cookie), `400`, `401`, `403`, `429`, `500` `ProblemDetail` | Signs in (public, CSRF token required) |
 | POST | `/api/v1/auth/logout` | Authentication | `204`, `403`, `500` `ProblemDetail` | Ends the session (public, CSRF token required) |
 | GET | `/api/v1/interests` | Interests | `200` `Interest[]`, `500` `ProblemDetail` | Active educational interests in display order (public) |
+| GET | `/api/v1/users/me` | Users | `200` `UserProfile`, `401`, `500` `ProblemDetail` | Profile of the signed-in user (session required) |
+| PATCH | `/api/v1/users/me` | Users | `200` `UserProfile`, `400`, `401`, `403`, `409`, `500` `ProblemDetail` | Updates the display name and/or interests (session and CSRF token required) |
 | GET | `/actuator/health` | Operations | `200` / `503` `HealthStatus` | Aggregated health incl. health groups |
 | GET | `/actuator/health/liveness` | Operations | `200` / `503` `HealthStatus` | Liveness probe |
 | GET | `/actuator/health/readiness` | Operations | `200` / `503` `HealthStatus` | Readiness probe |
@@ -161,7 +163,27 @@ Example `GET /api/v1/system/status` → `200`:
   display order, then by code; the order and the codes are stable.
 - Public: the same response without a session, with one, or with an ended one; no session is
   created. Only `code`, `name` and `description` are returned.
-- Users select 0–8 of these codes in their profile (`PATCH /api/v1/users/me`, planned for W2-10).
+- Users select 0–8 of these codes in their profile (`PATCH /api/v1/users/me`).
+
+### Profile (`GET /api/v1/users/me`, `PATCH /api/v1/users/me`)
+
+```json
+{ "displayName": "Alice B.", "interests": ["PROBABILITY", "STATISTICS"] }
+```
+
+- Both require a session; the user is always the one of the session (no user id in the path or the
+  body). Without a session `401 AUTHENTICATION_REQUIRED`, with an ended one `401 SESSION_EXPIRED`.
+  The SPA calls `GET` at start-up to restore the signed-in user after a page reload.
+- `GET` `200` returns the `UserProfile` (as registration and login do), with the selected active
+  interests in catalogue order.
+- `PATCH` changes only `displayName` and/or `interests`; omitted properties and `null` leave a value
+  unchanged, `"interests": []` removes all, other properties (`email`, `role`, …) are ignored.
+  Requires the CSRF token. `200` returns the updated profile.
+- Validation (`400 VALIDATION_FAILED`): display name as at registration (trimmed, 3–30 characters,
+  no control characters); at most 8 interests, no duplicates; unknown or inactive codes are reported
+  per position (`interests[1]`), without echoing the code. A rejected request changes nothing.
+- An update that overlaps with another change of the same profile → `409 CONCURRENT_MODIFICATION`:
+  reload the profile and try again.
 
 Example error (`POST /api/v1/system/status` → `405`):
 
@@ -194,14 +216,13 @@ Example validation error (`400`):
 ## Planned (from the implementation plan)
 
 These endpoints are added to the contract first, in the week they are implemented. The Week 2
-operations, schemas, error codes and security schemes are already in `openapi.yaml` (contract
-version 0.2.0) and marked `planned` (W2-02) until they are implemented (`GET /api/v1/auth/csrf`, register, login, logout and
-interests since W2-04, W2-07, W2-08 and W2-09); the design rationale is in [`docs/plans/week-02.md`](plans/week-02.md) §5.
+operations, schemas, error codes and security schemes were added to `openapi.yaml` (contract
+version 0.2.0) in W2-02 and marked `planned` until they were implemented (W2-04 … W2-10); every
+Week 2 operation is implemented now. The design rationale is in
+[`docs/plans/week-02.md`](plans/week-02.md) §5.
 
 | Method | Endpoint | Purpose | Week |
 |---|---|---|---|
-| GET | `/api/v1/users/me` | Current user profile | 2 |
-| PATCH | `/api/v1/users/me` | Update profile / interests | 2 |
 | GET | `/api/v1/wallet` | Current virtual balance | 3 |
 | GET | `/api/v1/wallet/transactions` | Transaction history | 3 |
 | POST | `/api/v1/games/roulette/spins` | Place bets and play a round (idempotency key) | 4 |

@@ -58,4 +58,16 @@ public class Interest {
     public boolean isActive() {
         return active;
     }
+
+    /** Equal by {@code code}, the assigned and never changing key, so sets of interests work across loads. */
+    @Override
+    public boolean equals(Object other) {
+        // The getter, not the field: `other` may be a Hibernate proxy.
+        return this == other || other instanceof Interest interest && code.equals(interest.getCode());
+    }
+
+    @Override
+    public int hashCode() {
+        return code.hashCode();
+    }
 }

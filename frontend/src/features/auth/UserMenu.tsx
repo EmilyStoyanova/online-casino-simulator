@@ -38,6 +38,15 @@ export function UserMenu() {
     )
   }
 
+  if (state.status === 'checking') {
+    return (
+      <span className="flex items-center gap-2 text-sm text-zinc-400">
+        <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-emerald-400/70" />
+        Checking sign-in…
+      </span>
+    )
+  }
+
   // Also while the state is unknown: "Sign in" is always possible; the account panel offers "Sign out".
   return (
     <div className="flex items-center gap-2">

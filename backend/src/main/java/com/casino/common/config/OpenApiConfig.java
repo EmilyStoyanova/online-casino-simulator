@@ -7,6 +7,7 @@ import java.util.Set;
 import com.casino.common.exception.ProblemCode;
 import com.casino.common.exception.ProblemDetailFactory;
 import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.media.Schema;
@@ -29,6 +30,10 @@ class OpenApiConfig {
 
     static final String PROBLEM_DETAIL_SCHEMA = "ProblemDetail";
     static final String FIELD_ERROR_SCHEMA = "FieldError";
+    static final String CSRF_SCHEME = "csrfHeader";
+
+    private static final Set<PathItem.HttpMethod> UNSAFE_METHODS = Set.of(
+            PathItem.HttpMethod.POST, PathItem.HttpMethod.PUT, PathItem.HttpMethod.PATCH, PathItem.HttpMethod.DELETE);
 
     @Bean
     OpenAPI casinoOpenApi(@Value("${app.version}") String version) {
@@ -73,6 +78,26 @@ class OpenApiConfig {
                     .addProperty("field", typed("string"))
                     .addProperty("message", typed("string"))
                     .required(List.of("field", "message")));
+        };
+    }
+
+    /**
+     * Every unsafe method needs a CSRF token ({@code SecurityConfig}), also on protected operations:
+     * adds {@code csrfHeader} to each security requirement of a {@code POST}, {@code PUT},
+     * {@code PATCH} or {@code DELETE} operation, so {@code sessionCookie} becomes "session and CSRF
+     * token" as in the contract. The annotations cannot express two schemes in one requirement.
+     */
+    @Bean
+    OpenApiCustomizer csrfRequirementCustomizer() {
+        return openApi -> {
+            if (openApi.getPaths() == null) {
+                return;
+            }
+            openApi.getPaths().values().forEach(path -> path.readOperationsMap().forEach((method, operation) -> {
+                if (UNSAFE_METHODS.contains(method) && operation.getSecurity() != null) {
+                    operation.getSecurity().forEach(requirement -> requirement.putIfAbsent(CSRF_SCHEME, List.of()));
+                }
+            }));
         };
     }
 
