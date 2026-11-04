@@ -12,6 +12,7 @@ import com.casino.user.dto.NewAccount;
 import com.casino.user.dto.UserCredentials;
 import com.casino.user.dto.UserProfileResponse;
 import com.casino.user.dto.UserRegistered;
+import com.casino.user.entity.Role;
 import com.casino.user.entity.UserAccount;
 import com.casino.user.entity.UserStatus;
 import com.casino.user.exception.EmailAlreadyRegisteredException;
@@ -23,8 +24,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * User accounts: creation (registration), credentials and last login (login), and the normalisation
- * of email addresses.
+ * User accounts: creation (registration, administrator bootstrap), credentials and last login
+ * (login), and the normalisation of email addresses.
  *
  * <p>The email is normalised here, once for every caller: trimmed and lower-cased, as the database
  * requires ({@code ck_users_email_normalized}), so case variants can never become a second account.
@@ -60,6 +61,25 @@ public class UserAccountService {
      */
     @Transactional
     public UserProfileResponse createAccount(NewAccount account) {
+        UserAccount saved = save(account, Role.PLAYER);
+        events.publishEvent(new UserRegistered(saved.getId()));
+        return UserProfiles.of(saved);
+    }
+
+    /**
+     * Creates an {@code ADMIN} account in status {@code ACTIVE}, for the administrator bootstrap only
+     * (AC-9.4). No {@link UserRegistered} event: that event stands for a player's registration.
+     *
+     * @throws EmailAlreadyRegisteredException if the email already has an account; that account is
+     *                                         never changed (never promoted)
+     * @throws IllegalArgumentException        if the 18+ confirmation is missing
+     */
+    @Transactional
+    public UserProfileResponse createAdministrator(NewAccount account) {
+        return UserProfiles.of(save(account, Role.ADMIN));
+    }
+
+    private UserAccount save(NewAccount account, Role role) {
         if (!account.adultConfirmed()) {
             throw new IllegalArgumentException("An account requires the confirmation of being at least 18");
         }
@@ -67,20 +87,18 @@ public class UserAccountService {
         if (repository.existsByEmail(email)) {
             throw new EmailAlreadyRegisteredException();
         }
-        UserAccount saved;
         try {
             // Flushed here, so a concurrent registration of the same email fails inside this method.
             // Microseconds, as PostgreSQL stores them, so the response shows the stored value.
             Instant adultConfirmedAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
-            saved = repository.saveAndFlush(new UserAccount(email, account.passwordHash(), account.displayName(), adultConfirmedAt));
+            return repository.saveAndFlush(new UserAccount(email, account.passwordHash(), account.displayName(),
+                    adultConfirmedAt, role));
         } catch (DataIntegrityViolationException ex) {
             if (violates(ex, EMAIL_UNIQUE_CONSTRAINT)) {
                 throw new EmailAlreadyRegisteredException();
             }
             throw ex;
         }
-        events.publishEvent(new UserRegistered(saved.getId()));
-        return UserProfiles.of(saved);
     }
 
     /**

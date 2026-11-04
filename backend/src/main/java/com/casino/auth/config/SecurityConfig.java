@@ -38,7 +38,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  * {@code application.yml}.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({SecurityProperties.class, ThrottleProperties.class})
+@EnableConfigurationProperties({SecurityProperties.class, ThrottleProperties.class, BootstrapAdminProperties.class})
 public class SecurityConfig {
 
     private static final String BCRYPT = "bcrypt";
@@ -67,6 +67,10 @@ public class SecurityConfig {
                                 "/v3/api-docs", "/v3/api-docs/**").permitAll()
                         // Errors forwarded by the container must never turn into 401.
                         .requestMatchers("/error").permitAll()
+                        // Administrative operations (Week 10): ROLE_ADMIN from the session, which
+                        // comes from users.role at sign-in, never from the request. Anonymous → 401,
+                        // signed in without the role → 403 ACCESS_DENIED, also for unknown admin paths.
+                        .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 // XSRF-TOKEN cookie (readable by JavaScript) + X-XSRF-TOKEN header on every unsafe method.

@@ -356,6 +356,37 @@ stay in W2-08).
 | AC-9.3 | Self-service endpoints use only the user id from the session (`/users/me`), never one from the request. |
 | AC-9.4 | The first admin is created at start-up only when `APP_BOOTSTRAP_ADMIN_EMAIL` and `APP_BOOTSTRAP_ADMIN_PASSWORD` are set. The operation is idempotent, never promotes an existing account and never logs the password. |
 
+**Implemented in W2-11 (pending review):** AC-9.1–AC-9.4, AC-0.6.
+- `SecurityConfig`: `/api/v1/admin/**` → `hasRole("ADMIN")` before `/api/**` → `authenticated()`;
+  everything else stays `denyAll()`. Anonymous → `401` (`SESSION_EXPIRED` for an ended session),
+  signed in without the role → `403 ACCESS_DENIED`, for every path below `/api/v1/admin`, also
+  unknown ones, so their existence is not revealed. URL rules only: method security is deferred to
+  the Week 10 admin services (§12). Week 2 has no PLAYER-only operation: `/api/**` operations are for
+  every signed-in user, administrators included; the roles are exclusive and have no hierarchy.
+- The role comes only from `users.role`: read at sign-in (`AccountUserDetailsService`, the profile
+  of registration/login) and stored as the session's authority. No request type has a role
+  property; client values (`role`, `roles`, `authorities`, headers, parameters) are ignored.
+- Existing sessions keep the role they were signed in with until they end (≤ 30 min idle, ≤ 12 h);
+  a role change in the database applies from the next sign-in. Revocation on role changes stays
+  required in Week 10 (§7.5); the behaviour is pinned by `AdminAuthorizationIT`.
+- `AdminBootstrapRunner` (`auth.config`, `BootstrapAdminProperties`, `app.bootstrap.admin.*`):
+  disabled when both values are empty; only one value → start-up fails. The values must pass the
+  registration rules (`RegisterRequest` validation; the error names the rule, never the value).
+  Creates an `ACTIVE` `ADMIN` account (`UserAccountService.createAdministrator`, display name
+  "Administrator", no `UserRegistered` event) or, when the email exists, changes nothing and logs
+  whether it is an administrator; it never promotes. Hashes only when it creates; never logs the
+  password. Concurrent starts: the unique email decides.
+- Contract: description of the roles and the admin rule in `info.description`; no new operation
+  (the admin test endpoint lives in `AdminAuthorizationIT` only).
+- Tests: `AdminBootstrapRunnerTest`, `UserAccountServiceTest`, `UserAccountTest`,
+  `AdminAuthorizationIT` (bootstrap admin: login, `200`, CSRF, `404` for unknown paths; anonymous
+  `401` and `SESSION_EXPIRED`; players `403` despite client-supplied roles at registration, login and
+  profile update; path variants such as an encoded `a`, `..`, `;`, `//`, a trailing slash or another
+  case do not bypass the rule; players keep their operations; role changes apply from the next
+  sign-in), `AccessRulesContractIT` (every contract operation: anonymous, with a session, without a
+  CSRF token), `ErrorHandlingIT` (401/403 Problem Details over real HTTP). A temporary removal of
+  the rule makes `AdminAuthorizationIT` fail.
+
 ### FR-10 Secure error handling
 
 | ID | Acceptance criterion |
@@ -818,8 +849,8 @@ CorsFilter → SessionRepositoryFilter (Spring Session) → SecurityContextHolde
 
 **Implemented in W2-04 (pending review):** `auth.config.SecurityConfig` with the rules above for the
 operations that exist. The `permitAll` rules for register (W2-07), login and logout (W2-08) and
-interests (W2-09) were added with those endpoints; the `/admin/**` rule follows in W2-11, until then
-that path is covered by `/api/**` → `401`. Details:
+interests (W2-09) were added with those endpoints; the `/admin/**` rule was added in W2-11 (see the
+note after FR-9). Details:
 - Public paths are permitted for **every method** (the table above lists the documented `GET`s):
   `HEAD` works wherever `GET` does, and an unsupported method answers `405` instead of `401`
   (unsafe methods need a CSRF token first).
@@ -1106,7 +1137,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-08 | **Endpoints `POST /auth/login` and `/auth/logout`** (①–⑥): `LoginRequest`; `AccountUserDetailsService`, `LoginService`; `AbsoluteSessionTimeoutFilter`; login limits; `LoginLogoutIT`, `CsrfIT`, `SessionLifetimeIT`, `SessionRestartIT`, `CookieAttributesIT`, `ThrottleIT`. *Implemented 2026-11-03 (pending review), see the note after FR-3.* | L | W2-07 |
 | W2-09 | **Endpoint `GET /interests`** (①–⑥): **V5** (moved from W2-05, renumbered from V4), entity `Interest`, `InterestRepository`, `InterestResponse`, `InterestController`, `InterestService`. *Implemented 2026-11-03 (pending review), see the note after FR-8.* | M | W2-04, W2-05 |
 | W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT`. *Implemented 2026-11-04 (pending review) with the frontend session restoration, see the notes after FR-8 and FR-11.* | M | W2-08, W2-09 |
-| W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT` | M | W2-08, W2-10 |
+| W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT`. *Implemented 2026-11-04 (pending review), see the note after FR-9.* | M | W2-08, W2-10 |
 | W2-12 | **Should:** password denylist (only with a verified licence; otherwise record as deferred) | S | W2-07 |
 | W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` done early (2026-11-03); the `/users/me` start-up check with W2-10 (2026-11-04), see the note after FR-11.* | L | W2-02 (parallel with mocks) |
 | W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile and InterestPicker remain.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |

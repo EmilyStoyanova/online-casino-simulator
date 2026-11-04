@@ -107,10 +107,19 @@ public class UserAccount {
      * @param adultConfirmedAt when the user confirmed being at least 18 (server clock)
      */
     public UserAccount(String email, String passwordHash, String displayName, Instant adultConfirmedAt) {
+        this(email, passwordHash, displayName, adultConfirmedAt, Role.PLAYER);
+    }
+
+    /**
+     * An account with an explicit role. Only the administrator bootstrap creates {@link Role#ADMIN}
+     * accounts; registration always uses the {@code PLAYER} constructor above.
+     */
+    public UserAccount(String email, String passwordHash, String displayName, Instant adultConfirmedAt, Role role) {
         this.email = Objects.requireNonNull(email, "email");
         this.passwordHash = Objects.requireNonNull(passwordHash, "passwordHash");
         this.displayName = Objects.requireNonNull(displayName, "displayName");
         this.adultConfirmedAt = Objects.requireNonNull(adultConfirmedAt, "adultConfirmedAt");
+        this.role = Objects.requireNonNull(role, "role");
     }
 
     public UUID getId() {

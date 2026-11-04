@@ -72,6 +72,30 @@ class UserAccountServiceTest {
     }
 
     @Test
+    void createsAnActiveAdministratorWithoutARegistrationEvent() {
+        when(repository.saveAndFlush(any())).thenAnswer(invocation -> saved(invocation.getArgument(0)));
+
+        UserProfileResponse profile = service.createAdministrator(new NewAccount(" Admin@Example.com ", HASH, "Administrator", true));
+
+        ArgumentCaptor<UserAccount> account = ArgumentCaptor.forClass(UserAccount.class);
+        verify(repository).saveAndFlush(account.capture());
+        assertThat(account.getValue().getEmail()).isEqualTo("admin@example.com");
+        assertThat(account.getValue().getRole()).isEqualTo(Role.ADMIN);
+        assertThat(account.getValue().getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(profile.role()).isEqualTo(UserRole.ADMIN);
+        verifyNoInteractions(events);
+    }
+
+    @Test
+    void anExistingEmailIsNeverTurnedIntoAnAdministrator() {
+        when(repository.existsByEmail("alice@example.com")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.createAdministrator(new NewAccount("alice@example.com", HASH, "Administrator", true)))
+                .isInstanceOf(EmailAlreadyRegisteredException.class);
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
     void anExistingEmailIsRejectedBeforeSaving() {
         when(repository.existsByEmail("alice@example.com")).thenReturn(true);
 

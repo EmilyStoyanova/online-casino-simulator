@@ -45,6 +45,16 @@ class UserAccountTest {
     }
 
     @Test
+    void anAdministratorIsCreatedOnlyWithAnExplicitRole() {
+        UserAccount admin = new UserAccount("admin@example.com", HASH, "Administrator", CONFIRMED, Role.ADMIN);
+
+        assertThat(admin.getRole()).isEqualTo(Role.ADMIN);
+        assertThat(admin.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThatNullPointerException().isThrownBy(() -> new UserAccount("a@b.c", HASH, "Alice", CONFIRMED, null))
+                .withMessage("role");
+    }
+
+    @Test
     void changesTheDisplayName() {
         UserAccount account = new UserAccount("alice@example.com", HASH, "Alice", CONFIRMED);
 

@@ -124,3 +124,10 @@ app:
       register-ip:
         max-attempts: 10
         window: 1h
+  # First administrator, created at start-up when both values are set (AdminBootstrapRunner, AC-9.4).
+  # Empty = disabled. Never committed: set them once in the secret store and remove them after the
+  # first start. An existing account is never changed or promoted.
+  bootstrap:
+    admin:
+      email: ${APP_BOOTSTRAP_ADMIN_EMAIL:}
+      password: ${APP_BOOTSTRAP_ADMIN_PASSWORD:}

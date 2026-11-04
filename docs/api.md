@@ -13,7 +13,11 @@ The API is **design-first**. The contract
 
 ## Conventions
 
-- Base path `/api/v1`; administrative endpoints will use `/api/v1/admin/**`.
+- Base path `/api/v1`; administrative endpoints will use `/api/v1/admin/**` (from Week 10). That path
+  already requires the `ADMIN` role: without a session `401`, signed in as `PLAYER` `403 ACCESS_DENIED`
+  for every path below it. The role comes from the account at sign-in, never from a request; a role
+  change applies from the next sign-in. `ADMIN` is never assigned through the API (first
+  administrator: `APP_BOOTSTRAP_ADMIN_EMAIL`/`APP_BOOTSTRAP_ADMIN_PASSWORD`).
 - JSON request and response bodies; timestamps are ISO-8601 UTC.
 - Errors are RFC 9457 Problem Details (`application/problem+json`, schema `ProblemDetail`) with a
   stable `code` and `Cache-Control: no-store`. They are built by `common.exception.ProblemDetailFactory`

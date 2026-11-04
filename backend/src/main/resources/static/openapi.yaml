@@ -58,6 +58,11 @@ info:
     - Operations with `security: []` are public. All other operations require a session;
       without one they return `401 AUTHENTICATION_REQUIRED`, or `401 SESSION_EXPIRED` when the
       session cookie refers to a session that has ended.
+    - Roles (`UserRole`): `PLAYER` for every registered user, `ADMIN` only for administrators
+      created from server configuration. The role is taken from the account when signing in, never
+      from a request. Administrative operations under `/api/v1/admin/**` (from Week 10) require
+      `ADMIN`: other signed-in users get `403 ACCESS_DENIED` for every path there, also unknown
+      ones. A role change applies from the next sign-in.
   license:
     name: Proprietary — SAP mentorship project
 
