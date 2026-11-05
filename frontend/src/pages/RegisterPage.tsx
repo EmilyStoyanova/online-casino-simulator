@@ -1,6 +1,7 @@
 import { Link, Navigate, useNavigate } from 'react-router'
 import { AuthCard } from '../components/layout/AuthCard'
 import { RegisterForm } from '../features/auth/RegisterForm'
+import { loginPath, useReturnPath } from '../features/auth/returnPath'
 import { useAuth } from '../features/auth/useAuth'
 
 const linkClasses = 'font-semibold text-emerald-300 underline-offset-2 hover:underline'
@@ -8,9 +9,11 @@ const linkClasses = 'font-semibold text-emerald-300 underline-offset-2 hover:und
 export function RegisterPage() {
   const { state } = useAuth()
   const navigate = useNavigate()
+  // Kept from the login page, so a new account also comes back to the requested page.
+  const returnTo = useReturnPath()
 
   if (state.status === 'authenticated') {
-    return <Navigate to="/" replace />
+    return <Navigate to={returnTo} replace />
   }
 
   return (
@@ -25,14 +28,14 @@ export function RegisterPage() {
       footer={
         <>
           Already have an account?{' '}
-          <Link to="/login" className={linkClasses}>
+          <Link to={loginPath(returnTo)} className={linkClasses}>
             Sign in
           </Link>
         </>
       }
     >
       {/* Registration signs the user in, so the account is shown right away. */}
-      <RegisterForm onSuccess={() => navigate('/', { replace: true })} />
+      <RegisterForm onSuccess={() => navigate(returnTo, { replace: true })} />
     </AuthCard>
   )
 }

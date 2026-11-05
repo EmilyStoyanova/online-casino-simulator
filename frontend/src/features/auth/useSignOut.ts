@@ -1,12 +1,13 @@
 import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router'
 import { ApiError } from '../../services/apiClient'
 import { useAuth } from './useAuth'
 
-/** Logout with its pending and error state, shared by the header and the account panel. */
+/**
+ * Logout with its pending and error state, shared by the header and the account panel. A successful
+ * logout ends on the home page (`AuthProvider`).
+ */
 export function useSignOut() {
   const { logout } = useAuth()
-  const navigate = useNavigate()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -15,7 +16,6 @@ export function useSignOut() {
     setError(null)
     try {
       await logout()
-      navigate('/')
     } catch (failure) {
       setError(
         failure instanceof ApiError && failure.isNetworkError
@@ -25,7 +25,7 @@ export function useSignOut() {
     } finally {
       setPending(false)
     }
-  }, [logout, navigate])
+  }, [logout])
 
   return { signOut, pending, error }
 }

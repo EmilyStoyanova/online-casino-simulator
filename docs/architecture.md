@@ -122,6 +122,15 @@ frontend/src
   (`services/userApi.ts`) asks the server: the profile restores the signed-in user, a `401` means
   signed out, and a network or server error leaves the state *unknown* with a retry (never
   "signed out"). A `401 SESSION_EXPIRED` while signed in clears the state and opens the login page.
+  Such a response is ignored if a sign-in or sign-out happened after its request was sent, because
+  it concerns the replaced session.
+- Protected pages (W2-13): `features/auth/RequireAuth` is a layout route
+  (`<Route element={<RequireAuth />}>`). It renders the page only when *authenticated*. *Anonymous*
+  users are redirected to `/login?returnTo=<page>`. While *checking* or *unknown* it shows a status
+  card: never the page, and no redirect. After sign-in or registration the user returns to
+  `returnTo` only if `features/auth/returnPath.ts` accepts it as an internal path; anything else goes
+  to `/`. The guard is interface only. The backend checks the session and role on every request and
+  remains the security boundary. The first protected page is the profile (W2-14).
 - Development: the Vite dev server proxies `/api` to the backend (same origin, no CORS).
 - Production (decided in Week 12): the preferred setup keeps the API on the **same site** as the
   frontend, through a reverse proxy for `/api/*`. Session cookies then stay first-party, because

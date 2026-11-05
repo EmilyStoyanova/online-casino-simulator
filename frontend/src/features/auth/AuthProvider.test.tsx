@@ -173,6 +173,26 @@ describe('Session restoration on start-up', () => {
     expect(within(accountPanel()).getByText('alice@example.com')).toBeInTheDocument()
     expect(within(header()).getByText('Alice')).toBeInTheDocument()
   })
+
+  it('keeps a sign-in when a slow start-up check reports the old session as ended', async () => {
+    const check = deferred()
+    backend({ currentUser: check.handler })
+    renderApp('/login')
+    const user = userEvent.setup()
+
+    await user.type(screen.getByLabelText('Email'), 'alice@example.com')
+    await user.type(screen.getByLabelText('Password'), PASSWORD)
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(await within(await screen.findByRole('region', { name: 'Your account' })).findByText('alice@example.com'))
+      .toBeInTheDocument()
+
+    // SESSION_EXPIRED concerns the cookie the check was sent with, not the new session.
+    await check.respond(problemResponse(401, 'SESSION_EXPIRED'))
+
+    expect(within(accountPanel()).getByText('alice@example.com')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Your session has ended/)).not.toBeInTheDocument()
+  })
 })
 
 describe('Authentication state', () => {

@@ -433,10 +433,59 @@ slow check is not overwritten by it. The header and the account panel show "Chec
 the login and registration forms stay usable. Tests: `userApi.test.ts`, `AuthProvider.test.tsx`
 (valid, missing, ended and unavailable sessions, loading, retry, reload, the race with a sign-in).
 
-**Remaining for W2-13/W2-14 (not duplicated there):** `RequireAuth` with the internal-redirect check
-(AC-11.2, `RequireAuth.test.tsx`), `updateCurrentUser` (`PATCH`) in `userApi.ts`, `ProfilePage` with
-`ProfileForm` and `InterestPicker` (`ProfileForm.test.tsx`, including the `409` reload-and-retry
-message), and the manual walkthrough.
+**Protected routes (W2-13, 2026-11-05, pending review):** AC-11.2, and AC-11.5 extended to protected pages.
+- `features/auth/RequireAuth.tsx` is a layout route (`<Route element={<RequireAuth />}>` + `<Outlet />`):
+  - `authenticated`: the page.
+  - `anonymous`: `<Navigate replace>` to `/login?returnTo=<path?query#hash>`. After
+    `SESSION_EXPIRED` the login page explains why; otherwise it shows "Please sign in to open this
+    page."
+  - `checking`: a status card, neither the page nor a redirect, so a reload with a valid session
+    goes straight to the page.
+  - `unknown`: a status card with "Try again", "Sign in" (keeping the page) and "Sign out". The user
+    is never treated as signed out.
+
+  The "checking" and "unavailable" views are shared with the account panel (`SessionStatus.tsx`,
+  moved from `AccountPanel`).
+- **Return path** (`features/auth/returnPath.ts`, S17): `?returnTo=` instead of router state, so the
+  page survives a reload of the login page and is kept when switching to registration (registration
+  signs in, too). Anyone can set the parameter, so `safeReturnPath` accepts only paths of this
+  application. It rejects absolute and protocol-relative URLs, backslashes, whitespace and control
+  characters (browsers drop tabs and line breaks, so `/<tab>/host` would become `//host`), and the
+  sign-in pages. It then resolves the value against a placeholder origin and requires that the
+  origin is unchanged. Anything else goes to `/`. A signed-in user who opens `/login?returnTo=…`
+  goes straight to that page.
+- **Session ends during use:** `AuthProvider` opens `/login?returnTo=<current page>`; after signing in
+  again the user is back on the page.
+- **Two races fixed:**
+  1. A slow start-up check that answered `SESSION_EXPIRED` after a fresh sign-in triggered the
+     global `onSessionExpired` listener and signed the new session out. `apiClient` now remembers
+     the session generation a request was sent with (`sessionChanged()`, called by `authApi` after
+     register, login and logout) and reports `SESSION_EXPIRED` only for the current one.
+  2. React Router 8 navigates in transitions, while the auth state update was urgent. Signing out on
+     a protected page therefore rendered it as signed out first, and `RequireAuth` sent the user to
+     the login page. `AuthProvider.logout` now changes the state and navigates to `/` in one
+     `startTransition`; `useSignOut` no longer navigates itself. The session-expiry path does the same.
+- No protected page exists yet. The first one, `/profile`, comes with W2-14 as a child of the
+  `RequireAuth` route in `App.tsx`. Until then the tests use a test-only page with the real
+  provider, layout and pages. No role-aware routes: there is no admin page in Week 2. The guard
+  is not a security boundary, because the backend checks session and role on every request.
+- Tests: `RequireAuth.test.tsx` (11 cases):
+  - anonymous redirect without rendering the page;
+  - return with query and fragment after login and after registration;
+  - foreign `returnTo` ignored;
+  - reload with a valid session without a detour, checked through every visited location;
+  - ended session;
+  - network and server errors with retry;
+  - expiry during use, and return afterwards;
+  - sign-out on a protected page ends on `/`;
+  - signed-in user on `/login?returnTo=`.
+
+  Also `returnPath.test.ts`, and `apiClient.test.ts` and `AuthProvider.test.tsx` for the late
+  `SESSION_EXPIRED` (both fail without the fix).
+
+**Remaining for W2-14 (not duplicated there):** `updateCurrentUser` (`PATCH`) in `userApi.ts`,
+`ProfilePage` (under `RequireAuth`) with `ProfileForm` and `InterestPicker` (`ProfileForm.test.tsx`,
+including the `409` reload-and-retry message), and the manual walkthrough.
 
 ### FR-12 Architecture
 
@@ -1164,7 +1213,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-10 | **Endpoints `GET/PATCH /users/me`** (①–⑥): `UpdateProfileRequest`; `UserProfileController`; `UserProfileService`; `ProfileIT`. *Implemented 2026-11-04 (pending review) with the frontend session restoration, see the notes after FR-8 and FR-11.* | M | W2-08, W2-09 |
 | W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT`. *Implemented 2026-11-04 (pending review), see the note after FR-9.* | M | W2-08, W2-10 |
 | W2-12 | **Should:** password denylist (only with a verified licence; otherwise record as deferred). *Implemented 2026-11-04 (pending review) with a public-domain source, see the note in §7.3.* | S | W2-07 |
-| W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` done early (2026-11-03); the `/users/me` start-up check with W2-10 (2026-11-04), see the note after FR-11.* | L | W2-02 (parallel with mocks) |
+| W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` done early (2026-11-03); the `/users/me` start-up check with W2-10 (2026-11-04); `RequireAuth` and the return path implemented 2026-11-05 (pending review), see the notes after FR-11.* | L | W2-02 (parallel with mocks) |
 | W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile and InterestPicker remain.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
 | W2-15 | Docs & config: `api.md`, `database.md` (revocation runbook), `architecture.md`, README, `.env.example` | S | W2-04…W2-14 |
 | W2-16 | Verification: all suites, manual walkthrough, CI green, pull request | M | all |
@@ -1253,7 +1302,7 @@ New dependencies: `spring-boot-starter-security`, `spring-boot-starter-session-j
 | S14 | Information leakage in errors | Central factory, generic 500, `no-store` | `ErrorHandlingIT` |
 | S15 | Third-party cookie blocking in production | Same-site routing (§7.10) | Week 12 |
 | S16 | Hard-coded admin credentials | Environment-only bootstrap | `AdminBootstrapRunnerTest` |
-| S17 | Open redirect after login | Internal paths only | `RequireAuth.test.tsx` |
+| S17 | Open redirect after login | Internal paths only (`safeReturnPath`) | `RequireAuth.test.tsx`, `returnPath.test.ts` |
 | S18 | Contract drift | Contract-first tasks, contract tests | FR-0 |
 
 ---

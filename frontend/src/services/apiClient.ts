@@ -78,16 +78,25 @@ export function parseRetryAfter(value: string | null, now: number = Date.now()):
 }
 
 const sessionExpiredListeners = new Set<() => void>()
+// Incremented by every sign-in and sign-out (see sessionChanged).
+let sessionGeneration = 0
 
 /**
  * Calls `listener` whenever a response reports `401 SESSION_EXPIRED` (idle or absolute timeout, or a
- * deleted session). Returns a function that removes the listener.
+ * deleted session). Responses to requests sent before the latest sign-in or sign-out are not
+ * reported: they concern a session that has already been replaced. Returns a function that removes
+ * the listener.
  */
 export function onSessionExpired(listener: () => void): () => void {
   sessionExpiredListeners.add(listener)
   return () => {
     sessionExpiredListeners.delete(listener)
   }
+}
+
+/** Called after every successful sign-in and sign-out: the browser now holds a different session. */
+export function sessionChanged(): void {
+  sessionGeneration += 1
 }
 
 async function parseBody(response: Response): Promise<unknown> {
@@ -110,6 +119,7 @@ async function request<T>(
   options: RequestOptions,
   retryOnCsrfError = true,
 ): Promise<T> {
+  const sentWithSession = sessionGeneration
   const headers: Record<string, string> = { Accept: 'application/json, application/problem+json' }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
@@ -149,7 +159,7 @@ async function request<T>(
     await refreshCsrfToken()
     return request<T>(method, path, body, options, false)
   }
-  if (error.code === 'SESSION_EXPIRED') {
+  if (error.code === 'SESSION_EXPIRED' && sentWithSession === sessionGeneration) {
     sessionExpiredListeners.forEach((listener) => listener())
   }
   throw error

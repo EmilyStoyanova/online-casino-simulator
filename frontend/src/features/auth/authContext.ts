@@ -12,6 +12,9 @@ import type { UserProfile } from '../../types/user'
  *   `session-expired` when the session had ended (`401 SESSION_EXPIRED`).
  * - `unknown`: the start-up check failed (no connection, server error). An earlier session may still
  *   be active, so the SPA claims neither state and offers to check again.
+ *
+ * `RequireAuth` shows protected pages only for `authenticated` and redirects to the login page only
+ * for `anonymous`.
  */
 export type AuthState =
   | { status: 'checking' }
@@ -23,6 +26,7 @@ export interface AuthContextValue {
   state: AuthState
   register: (request: RegisterRequest) => Promise<UserProfile>
   login: (request: LoginRequest) => Promise<UserProfile>
+  /** Ends the session and goes to the home page; on failure the state is unchanged. */
   logout: () => Promise<void>
   /** Asks the server again who is signed in (after `unknown`). */
   checkSession: () => void

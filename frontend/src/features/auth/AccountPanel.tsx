@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
-import { ghostButton, primaryButton, secondaryButton } from '../../components/buttonStyles'
+import { primaryButton, secondaryButton } from '../../components/buttonStyles'
 import type { UserProfile } from '../../types/user'
+import { CheckingSession, SessionUnavailable } from './SessionStatus'
 import { useAuth } from './useAuth'
 import { useSignOut } from './useSignOut'
 
@@ -53,45 +54,6 @@ function SignedIn({ user }: { user: UserProfile }) {
   )
 }
 
-function Checking() {
-  return (
-    <p className="flex items-center gap-2 text-sm text-zinc-400">
-      <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-emerald-400/70" />
-      Checking your sign-in status…
-    </p>
-  )
-}
-
-function Unknown() {
-  const { checkSession } = useAuth()
-  const { signOut, pending, error } = useSignOut()
-
-  return (
-    <>
-      <p className="text-sm leading-relaxed text-zinc-300">
-        Your sign-in status could not be checked: the server is not reachable right now. If you
-        signed in earlier, your session may still be active.
-      </p>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={checkSession} className={primaryButton}>
-          Try again
-        </button>
-        <Link to="/login" className={secondaryButton}>
-          Sign in
-        </Link>
-        <button type="button" onClick={() => void signOut()} disabled={pending} className={ghostButton}>
-          {pending ? 'Signing out…' : 'Sign out'}
-        </button>
-      </div>
-      {error && (
-        <p role="alert" className="mt-3 text-sm text-rose-300">
-          {error}
-        </p>
-      )}
-    </>
-  )
-}
-
 function SignedOut({ expired }: { expired: boolean }) {
   return (
     <>
@@ -124,9 +86,9 @@ export function AccountPanel() {
         Your account
       </h2>
       <div aria-live="polite" aria-busy={state.status === 'checking'}>
-        {state.status === 'checking' && <Checking />}
+        {state.status === 'checking' && <CheckingSession />}
         {state.status === 'authenticated' && <SignedIn user={state.user} />}
-        {state.status === 'unknown' && <Unknown />}
+        {state.status === 'unknown' && <SessionUnavailable />}
         {state.status === 'anonymous' && <SignedOut expired={state.reason === 'session-expired'} />}
       </div>
     </section>

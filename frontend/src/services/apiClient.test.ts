@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { csrfEndpoint, jsonResponse, noContent, problemResponse, setCookie, stubApi, stubFetch } from '../test/http'
-import { ApiError, apiGet, apiPost, ensureCsrfToken, onSessionExpired, parseRetryAfter, resolveApiUrl } from './apiClient'
+import {
+  ApiError,
+  apiGet,
+  apiPost,
+  ensureCsrfToken,
+  onSessionExpired,
+  parseRetryAfter,
+  resolveApiUrl,
+  sessionChanged,
+} from './apiClient'
 
 describe('resolveApiUrl', () => {
   it('uses a relative URL when no base URL is configured', () => {
@@ -200,5 +209,23 @@ describe('onSessionExpired', () => {
     unsubscribe()
     await apiGet('/api/v1/wallet').catch(() => undefined)
     expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores SESSION_EXPIRED of a request sent before the latest sign-in or sign-out', async () => {
+    let respond: (response: Response) => void = () => undefined
+    const api = stubApi({ 'GET /api/v1/wallet': () => new Promise<Response>((resolve) => (respond = resolve)) })
+    const listener = vi.fn()
+    const unsubscribe = onSessionExpired(listener)
+
+    const late = apiGet('/api/v1/wallet').catch((error: unknown) => error)
+    await vi.waitFor(() => expect(api.requestsTo('GET /api/v1/wallet')).toHaveLength(1))
+    // E.g. a sign-in finished while the request was on its way; its answer concerns the old session.
+    sessionChanged()
+    respond(problemResponse(401, 'SESSION_EXPIRED'))
+
+    // The caller still gets the error, but the new session is not reported as ended.
+    await expect(late).resolves.toMatchObject({ status: 401, code: 'SESSION_EXPIRED' })
+    expect(listener).not.toHaveBeenCalled()
+    unsubscribe()
   })
 })
