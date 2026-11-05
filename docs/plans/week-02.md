@@ -1291,7 +1291,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` done early (2026-11-03); the `/users/me` start-up check with W2-10 (2026-11-04); `RequireAuth` and the return path implemented 2026-11-05 (pending review), see the notes after FR-11.* | L | W2-02 (parallel with mocks) |
 | W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile, `ProfileForm` and `InterestPicker` implemented 2026-11-05 with passing automated tests (pending review). The manual browser walkthrough is part of W2-16, see the note after FR-11.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
 | W2-15 | Docs & config: `api.md`, `database.md` (revocation runbook), `architecture.md`, README, `.env.example`. *Implemented 2026-11-05 (pending review). README: purpose, status, Windows 11 + Git Bash setup in start-up order, every variable, troubleshooting. `api.md`: client flow for sessions, CSRF and authorization, system status and CSRF sections. `database.md`: schema after V5, session persistence, session revocation runbook. `architecture.md`: §5.1 security summary instead of the task-by-task list, deployment checklist (§7.8). `.env.example`: secret generation without printing, bootstrap password rules. Commands verified against the running stack. No functional change.* | S | W2-04…W2-14 |
-| W2-16 | Verification: all suites, manual walkthrough, CI green, pull request. *In progress (2026-11-05): automated suites and the real-HTTP acceptance run are green; the browser walkthrough, CI and the pull request are open, see "W2-16 verification record" after §15.* | M | all |
+| W2-16 | Verification: all suites, manual walkthrough, CI green, pull request. *In progress (2026-11-05): automated suites, the real-HTTP acceptance run and the browser acceptance scenarios 1–9 (manual 1–3, Playwright 1–9) are green; the admin-bootstrap browser check, CI and the pull request are open, see "W2-16 verification record" after §15.* | M | all |
 
 ```mermaid
 graph LR
@@ -1422,8 +1422,40 @@ New dependencies: `spring-boot-starter-security`, `spring-boot-starter-session-j
   Two harness bugs were fixed during the run; they were not application defects. The
   environment was removed afterwards.
 
+**Browser acceptance (2026-11-05):**
+- **Manual, confirmed by the developer:** scenarios 1–3 (protected `/profile` and return, display
+  name, interests persisting after a reload).
+- **Automated in a real browser:** `frontend/e2e/w2-16-acceptance.spec.ts` (Playwright 1.64.1, the
+  installed Google Chrome).
+  - Isolated stack: throwaway PostgreSQL container, the backend jar, Vite; nothing mocked.
+  - The 12 tests cover scenarios 1–9.
+  - Two full runs after the fix below: **12/12 passed each, 0 skipped, 0 flaky, 0 retries**.
+
+| # | Scenario | Manual | Automated (real browser) |
+|---|---|---|---|
+| 1 | Anonymous `/profile` → login → back; foreign `returnTo` ignored | ✅ | ✅ |
+| 2 | Display name → details, header, account panel; after a reload | ✅ | ✅ |
+| 3 | Interests saved, still selected after a reload | ✅ | ✅ |
+| 4 | Two tabs: sequential saves send only their changes and the last write wins (4 × `200`); simultaneous saves → genuine `409` with the conflict message, edits kept, latest version loaded, then saved | — | ✅ |
+| 5 | Backend stopped: error "Saving failed on our side … still in the form", edits kept; backend restarted → "Try again" saves | — | ✅ |
+| 6 | 375 px without horizontal overflow (also signed in with a 63-character email); login and profile edit with Tab, Space and Enter only; every control labelled | — | ✅ |
+| 7 | Real 1-minute idle timeout → save → login with "Your session has ended" → back on `/profile` | — | ✅ |
+| 8 | Register → logout → login → logout → login: correct UI each time, `GET /users/me` 401 after each logout, three different session ids | — | ✅ |
+| 9 | Display name of 2 characters and missing 18+ confirmation (checked in the browser, nothing sent, focus on display name); `Password1234` (server, focus on password); then registration succeeds | — | ✅ |
+
+Notes on the automated run:
+- **Scenario 4:** the two `PATCH` requests are held in the browser and released together. Two
+  Playwright clicks otherwise arrive after the first update has finished, so no real overlap
+  happens. The requests and responses themselves are not changed.
+- **Scenario 5:** behind the Vite proxy, a stopped backend arrives as a proxy `500`, so the message
+  is the server-error one. Without the proxy it would be "The server could not be reached".
+- **Defect found and fixed (W2-14, AC-11.1):** below the `lg`/`md` breakpoints the grids on
+  `/profile` and on the home page had an implicit `auto` column. A long email, shown unwrapped,
+  widened the page: by 182 px at 375 px with a 63-character email. Both grids now use
+  `grid-cols-1` (`minmax(0, 1fr)`), so the email is truncated. The test fails without the fix.
+
 **Open:**
-- the browser walkthrough (§3 FR-11 checklist, admin bootstrap included);
+- the admin-bootstrap check in the browser (the HTTP part is verified);
 - CI on GitHub;
 - the pull request;
 - approval of ADR-0006 (O5).

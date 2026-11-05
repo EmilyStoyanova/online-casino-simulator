@@ -66,7 +66,8 @@ export function ProfilePage() {
         <h1 className="text-3xl font-bold tracking-tight">My profile</h1>
         <p className="text-sm text-zinc-400">Choose how you appear to other players and what you want to learn.</p>
       </div>
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      {/* grid-cols-1 = minmax(0, 1fr): a long email is truncated instead of widening the page. */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <AccountDetails user={user} catalog={catalog} />
         <section aria-labelledby="profile-edit-heading" className={card}>
           <h2 id="profile-edit-heading" className="mb-4 text-lg font-semibold text-zinc-100">
