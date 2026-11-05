@@ -32,13 +32,8 @@ export function validateRegistration(values: RegistrationValues): FieldErrors {
   const emailError = validateEmail(email)
   if (emailError) errors.email = emailError
 
-  if (displayName === '') {
-    errors.displayName = 'Enter a display name.'
-  } else if (displayName.length < DISPLAY_NAME_MIN || displayName.length > DISPLAY_NAME_MAX) {
-    errors.displayName = `Use ${DISPLAY_NAME_MIN} to ${DISPLAY_NAME_MAX} characters.`
-  } else if (/\p{Cc}/u.test(displayName)) {
-    errors.displayName = 'Remove control characters such as tabs or line breaks.'
-  }
+  const displayNameError = validateDisplayName(displayName)
+  if (displayNameError) errors.displayName = displayNameError
 
   const password = values.password
   if (password === '') {
@@ -64,6 +59,17 @@ export function validateLogin(values: LoginValues): FieldErrors {
   if (values.email.trim() === '') errors.email = 'Enter your email address.'
   if (values.password === '') errors.password = 'Enter your password.'
   return errors
+}
+
+/** Registration and profile (`displayName` of `RegisterRequest` and `UpdateProfileRequest`); trims first. */
+export function validateDisplayName(value: string): string | undefined {
+  const displayName = value.trim()
+  if (displayName === '') return 'Enter a display name.'
+  if (displayName.length < DISPLAY_NAME_MIN || displayName.length > DISPLAY_NAME_MAX) {
+    return `Use ${DISPLAY_NAME_MIN} to ${DISPLAY_NAME_MAX} characters.`
+  }
+  if (/\p{Cc}/u.test(displayName)) return 'Remove control characters such as tabs or line breaks.'
+  return undefined
 }
 
 function validateEmail(email: string): string | undefined {

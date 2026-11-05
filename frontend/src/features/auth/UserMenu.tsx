@@ -5,7 +5,10 @@ import { useSignOut } from './useSignOut'
 
 const compact = 'px-3 py-1.5'
 
-/** Header navigation: the signed-in user with "Sign out", otherwise "Sign in" and "Create account". */
+/**
+ * Header navigation: for the signed-in user "My profile", the display name and "Sign out", otherwise
+ * "Sign in" and "Create account".
+ */
 export function UserMenu() {
   const { state } = useAuth()
   const { signOut, pending, error } = useSignOut()
@@ -14,6 +17,10 @@ export function UserMenu() {
     const { displayName } = state.user
     return (
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+        {/* NavLink sets aria-current="page" on the profile page. */}
+        <NavLink to="/profile" className={`${ghostButton} ${compact} aria-[current=page]:bg-zinc-800 aria-[current=page]:text-zinc-50`}>
+          My profile
+        </NavLink>
         <span className="flex min-w-0 items-center gap-2 text-sm">
           <span
             aria-hidden="true"

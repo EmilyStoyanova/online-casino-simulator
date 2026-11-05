@@ -174,6 +174,11 @@ export function apiPost<T>(path: string, body?: unknown, options: RequestOptions
   return request<T>('POST', path, body, options)
 }
 
+/** A `PATCH` with a JSON body and the CSRF header. */
+export function apiPatch<T>(path: string, body: unknown, options: RequestOptions = {}): Promise<T> {
+  return request<T>('PATCH', path, body, options)
+}
+
 let pendingToken: Promise<string> | null = null
 
 /** The current CSRF token, fetched from `GET /api/v1/auth/csrf` if there is no cookie yet. */

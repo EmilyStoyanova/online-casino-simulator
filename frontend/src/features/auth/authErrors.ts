@@ -66,7 +66,7 @@ export function formatWait(seconds: number): string {
 }
 
 /** Server messages are lower-case fragments ("must be at least 12 characters long"). */
-function serverFieldErrors(error: ApiError): FieldErrors {
+export function serverFieldErrors(error: ApiError): FieldErrors {
   const errors: FieldErrors = {}
   for (const { field, message } of error.problem?.errors ?? []) {
     const sentence = `${message.charAt(0).toUpperCase()}${message.slice(1)}.`

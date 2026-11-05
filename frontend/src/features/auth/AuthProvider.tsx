@@ -2,8 +2,9 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState, typ
 import { useLocation, useNavigate } from 'react-router'
 import { ApiError, onSessionExpired } from '../../services/apiClient'
 import * as authApi from '../../services/authApi'
-import { getCurrentUser } from '../../services/userApi'
+import { getCurrentUser, updateCurrentUser } from '../../services/userApi'
 import type { LoginRequest, RegisterRequest } from '../../types/auth'
+import type { UpdateProfileRequest, UserProfile } from '../../types/user'
 import { AuthContext, type AuthContextValue, type AuthState } from './authContext'
 import { loginPath } from './returnPath'
 
@@ -104,9 +105,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCheckRequest((request) => request + 1)
   }, [])
 
+  // A profile from the server replaces the shown one only while the same user is still signed in:
+  // a late answer must never sign a user back in after logout or session expiry.
+  const applyProfile = useCallback((user: UserProfile) => {
+    setState((current) =>
+      current.status === 'authenticated' && current.user.id === user.id ? { status: 'authenticated', user } : current,
+    )
+  }, [])
+
+  // `SESSION_EXPIRED` is handled by the listener above; any other 401 means the session is gone too.
+  const endSessionOnUnauthorized = useCallback((error: unknown) => {
+    if (error instanceof ApiError && error.status === 401 && error.code !== 'SESSION_EXPIRED') {
+      setState((current) => (current.status === 'authenticated' ? { status: 'anonymous', reason: 'signed-out' } : current))
+    }
+  }, [])
+
+  const updateProfile = useCallback(
+    async (request: UpdateProfileRequest) => {
+      try {
+        const user = await updateCurrentUser(request)
+        applyProfile(user)
+        return user
+      } catch (error) {
+        endSessionOnUnauthorized(error)
+        throw error
+      }
+    },
+    [applyProfile, endSessionOnUnauthorized],
+  )
+
+  const reloadProfile = useCallback(async () => {
+    try {
+      const user = await getCurrentUser()
+      applyProfile(user)
+      return user
+    } catch (error) {
+      endSessionOnUnauthorized(error)
+      throw error
+    }
+  }, [applyProfile, endSessionOnUnauthorized])
+
   const value = useMemo<AuthContextValue>(
-    () => ({ state, register, login, logout, checkSession }),
-    [state, register, login, logout, checkSession],
+    () => ({ state, register, login, logout, checkSession, updateProfile, reloadProfile }),
+    [state, register, login, logout, checkSession, updateProfile, reloadProfile],
   )
   return <AuthContext value={value}>{children}</AuthContext>
 }

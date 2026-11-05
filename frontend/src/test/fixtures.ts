@@ -1,3 +1,4 @@
+import type { Interest } from '../types/interest'
 import type { SystemStatus } from '../types/system'
 import type { UserProfile } from '../types/user'
 
@@ -21,3 +22,19 @@ export const upStatus: SystemStatus = {
 }
 
 export const PASSWORD = 'correct-horse-battery-staple'
+
+/** `GET /api/v1/interests` as seeded by migration V5, in display order. */
+export const interestCatalog: Interest[] = [
+  { code: 'PROBABILITY', name: 'Probability & odds', description: 'How likely outcomes are and how odds are expressed' },
+  { code: 'MATHEMATICS', name: 'Mathematics of games', description: 'Expected value, house edge and variance' },
+  { code: 'STATISTICS', name: 'Statistics & data', description: 'Reading results, randomness and the law of large numbers' },
+  { code: 'GAME_THEORY', name: 'Game theory & strategy', description: 'Decision-making under uncertainty' },
+  { code: 'PSYCHOLOGY', name: 'Psychology of decisions', description: "Cognitive biases such as the gambler's fallacy" },
+  { code: 'FINANCIAL_LITERACY', name: 'Financial literacy', description: 'Budgeting, risk and personal finance basics' },
+  { code: 'HISTORY', name: 'History of games', description: 'Origins and evolution of casino games' },
+  {
+    code: 'RESPONSIBLE_PLAY',
+    name: 'Responsible play',
+    description: 'Healthy habits, limits and self-awareness (informational, not clinical)',
+  },
+]

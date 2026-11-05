@@ -1,6 +1,6 @@
 import { createContext } from 'react'
 import type { LoginRequest, RegisterRequest } from '../../types/auth'
-import type { UserProfile } from '../../types/user'
+import type { UpdateProfileRequest, UserProfile } from '../../types/user'
 
 /**
  * What the SPA knows about the session. Kept in memory only, never in browser storage; the session
@@ -30,6 +30,17 @@ export interface AuthContextValue {
   logout: () => Promise<void>
   /** Asks the server again who is signed in (after `unknown`). */
   checkSession: () => void
+  /**
+   * Saves profile changes (`PATCH /api/v1/users/me`) and shows the saved profile everywhere (header,
+   * account panel, profile page). Rejects with the `ApiError`; the state is then unchanged, except
+   * that a `401` ends the signed-in state.
+   */
+  updateProfile: (request: UpdateProfileRequest) => Promise<UserProfile>
+  /**
+   * Loads the saved profile again (`GET /api/v1/users/me`) without passing through `checking`, so a
+   * page that shows it stays mounted (e.g. after `409 CONCURRENT_MODIFICATION`). Failures as above.
+   */
+  reloadProfile: () => Promise<UserProfile>
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null)

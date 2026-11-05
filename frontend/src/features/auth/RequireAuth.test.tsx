@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
@@ -54,13 +54,18 @@ function Vault() {
   return <h1>Coin vault</h1>
 }
 
-/** Records every location the router shows, to prove that no redirect happened in between. */
+/**
+ * Records every location the router shows, to prove that no redirect happened in between. The current
+ * one is also rendered, in the same commit as the page: the list is filled by an effect, which may run
+ * only after `findBy…` has seen the new page.
+ */
 function LocationSpy({ visited }: { visited: string[] }) {
   const location = useLocation()
+  const here = `${location.pathname}${location.search}${location.hash}`
   useEffect(() => {
-    visited.push(`${location.pathname}${location.search}${location.hash}`)
-  }, [location, visited])
-  return null
+    visited.push(here)
+  }, [here, visited])
+  return <span data-testid="location" hidden>{here}</span>
 }
 
 /** The application's pages and layout, with one protected page, as after a full page load at `path`. */
@@ -83,7 +88,7 @@ function renderAt(path: string) {
       </AuthProvider>
     </MemoryRouter>,
   )
-  return { visited, current: () => visited[visited.length - 1] }
+  return { visited, current: () => screen.getByTestId('location').textContent }
 }
 
 async function signIn() {
@@ -105,7 +110,9 @@ describe('RequireAuth', () => {
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Please sign in to open this page.')
     expect(router.current()).toBe('/login?returnTo=%2Fvault%3Ftab%3Dcoins%23top')
-    expect(router.visited).toEqual(['/vault?tab=coins#top', '/login?returnTo=%2Fvault%3Ftab%3Dcoins%23top'])
+    await waitFor(() =>
+      expect(router.visited).toEqual(['/vault?tab=coins#top', '/login?returnTo=%2Fvault%3Ftab%3Dcoins%23top']),
+    )
     expect(vault()).not.toBeInTheDocument()
   })
 

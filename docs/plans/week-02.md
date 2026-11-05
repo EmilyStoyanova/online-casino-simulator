@@ -483,9 +483,84 @@ the login and registration forms stay usable. Tests: `userApi.test.ts`, `AuthPro
   Also `returnPath.test.ts`, and `apiClient.test.ts` and `AuthProvider.test.tsx` for the late
   `SESSION_EXPIRED` (both fail without the fix).
 
-**Remaining for W2-14 (not duplicated there):** `updateCurrentUser` (`PATCH`) in `userApi.ts`,
-`ProfilePage` (under `RequireAuth`) with `ProfileForm` and `InterestPicker` (`ProfileForm.test.tsx`,
-including the `409` reload-and-retry message), and the manual walkthrough.
+**Profile page (W2-14, 2026-11-05, pending review):** AC-11.1 for the profile; the frontend side of
+AC-7.2–AC-7.4 and AC-8.2–AC-8.3. No backend change.
+- **Route:** `/profile` (`pages/ProfilePage.tsx`) is the first child of the `RequireAuth` route in
+  `App.tsx`. The page contains no authentication logic. The header shows "My profile" for signed-in
+  users (`NavLink`, `aria-current="page"`), and the account panel shows "Edit profile".
+- **Account details** (read-only): display name, email, role, member since, 18+ confirmation, and
+  the saved interests by name (by code while the catalogue is unavailable). The page states that
+  email, role and the 18+ confirmation cannot be changed. There are no inputs for them.
+- **Shared state:** `AuthProvider.updateProfile` (`PATCH /users/me` through `userApi.updateCurrentUser`
+  and the new `apiPatch`, cookies and CSRF header as for every unsafe request) and
+  `AuthProvider.reloadProfile` (`GET /users/me` without passing through `checking`, so the page
+  stays mounted). Both apply the server's profile only while the same user is still signed in. A
+  late answer never signs a user back in. A `401` other than `SESSION_EXPIRED` ends the signed-in
+  state, and `RequireAuth` then opens the login page with `returnTo=/profile`. `SESSION_EXPIRED`
+  keeps its existing handling. The header, the account panel and the page show a saved display
+  name immediately.
+- **`ProfileForm`** (`features/profile`):
+  - **Draft:** starts from the saved profile and sends only what differs (`profileChanges`: the name
+    trimmed, the interests compared as a set). So the interests are never sent while their
+    catalogue could not be loaded. After a save, form and details show the server's answer.
+  - **Controls:** a success message, "Discard changes", "You have unsaved changes". Inputs and buttons
+    are disabled while saving, and a synchronous guard allows only one request per save.
+  - **Client checks:** the display-name check is shared with registration (`validateDisplayName`).
+    The server's field errors are shown next to the fields; `interests[n]` are reported on the
+    picker. Focus moves to the first invalid field.
+- **`409 CONCURRENT_MODIFICATION`:** nothing is retried automatically, and the edits stay. "Load the
+  latest saved version" updates the details, the header and every field the user did not edit; the
+  edited fields stay as typed. Saving then sends only the edited fields, so the other change is not
+  undone through an untouched field. This bug was found while writing the tests and is covered by
+  them. The contract has no client version (`If-Match`), so changes that do not overlap still
+  follow "last one wins" (W2-10).
+- **Other failures** (edits always kept):
+  - network error and `5xx`: an explanation and "Try again";
+  - `403 CSRF_TOKEN_INVALID`: the existing single retry with a new token, then an explanation and
+    "Try again" (never without a token);
+  - `MALFORMED_REQUEST`: reload hint.
+- **`InterestPicker`:**
+  - one labelled checkbox per catalogue entry (`GET /api/v1/interests` via `services/interestApi.ts`
+    and `useInterests`), in a `fieldset`/`legend`, with selected entries highlighted;
+  - "n of 8 selected" (live region) and the maximum rule explained; when it is reached, the
+    unselected entries are disabled;
+  - catalogue order, no duplicates;
+  - loading, empty and failed states; on failure the selection stays unchanged and is shown by code,
+    with "Load interests again".
+
+  The selection is saved only with the profile.
+- **Refactoring kept small:** `DetailRow`, `formatDate` and `roleLabel` moved out of `AccountPanel`
+  for reuse; `serverFieldErrors` is exported.
+- **Tests:** `ProfileForm.test.tsx` (20 cases, whole application through `renderApp('/profile')`):
+  - access, reload, navigation, logout and login redirect, ended and missing session;
+  - details and read-only fields;
+  - saving the name (header and account panel updated without a new request) and the interests
+    (full replacement, also to `[]`);
+  - discard, client and server validation, double submit, catalogue failure;
+  - `409` with reload, network error, `500`, CSRF retry.
+
+  Also `InterestPicker.test.tsx` (order, keyboard, maximum with a 9-entry catalogue, loading, empty
+  and failed states), `profileChanges.test.ts`, `userApi.test.ts` (`PATCH`) and
+  `interestApi.test.ts`. The `409` test fails without the untouched-field fix.
+- **Test stability:** `asyncUtilTimeout` raised to 3 s in `test/setup.ts`. A whole-app test exceeded
+  the 1 s default once under parallel load. In `RequireAuth.test.tsx` the current location is now
+  read from the rendered page, not from an effect that may run after `findBy…` returns. No
+  expectation changed.
+
+**Manual browser tests (open, W2-16 walkthrough), against the real backend:**
+1. Open `/profile` signed out: login, then back on `/profile`.
+2. Change the display name: header and home page updated.
+3. Select and deselect interests, save, reload the page: selection kept.
+4. Edit in two tabs and save in both: the second shows the conflict message; "Load the latest saved
+   version" keeps its edits.
+5. Stop the backend while editing: error, edits kept, "Try again" after the restart.
+6. Keyboard only (Tab, Space, Enter) and a 375 px wide window: every control reachable, no
+   horizontal scrolling.
+7. Let the session expire (30 min idle) on `/profile`, then save: login with the explanation,
+   then back.
+
+Leaving the page with unsaved changes is not intercepted: `useBlocker` needs a data router, and
+the app uses the declarative `BrowserRouter` (A7).
 
 ### FR-12 Architecture
 
@@ -1214,7 +1289,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-11 | Roles: `/admin/**` rule, `AdminBootstrapRunner`, test-only admin endpoint, `AdminAuthorizationIT`, `AccessRulesContractIT`, `ErrorHandlingIT`. *Implemented 2026-11-04 (pending review), see the note after FR-9.* | M | W2-08, W2-10 |
 | W2-12 | **Should:** password denylist (only with a verified licence; otherwise record as deferred). *Implemented 2026-11-04 (pending review) with a public-domain source, see the note in §7.3.* | S | W2-07 |
 | W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` done early (2026-11-03); the `/users/me` start-up check with W2-10 (2026-11-04); `RequireAuth` and the return path implemented 2026-11-05 (pending review), see the notes after FR-11.* | L | W2-02 (parallel with mocks) |
-| W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile and InterestPicker remain.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
+| W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile, `ProfileForm` and `InterestPicker` implemented 2026-11-05 with passing automated tests (pending review). The manual browser walkthrough is part of W2-16, see the note after FR-11.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
 | W2-15 | Docs & config: `api.md`, `database.md` (revocation runbook), `architecture.md`, README, `.env.example` | S | W2-04…W2-14 |
 | W2-16 | Verification: all suites, manual walkthrough, CI green, pull request | M | all |
 

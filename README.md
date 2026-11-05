@@ -113,7 +113,8 @@ The Vite dev server proxies `/api/*` to the backend, so no CORS configuration is
 The home page shows a **Platform status** card that proves the browser → frontend → backend →
 database chain works. **Create account** (`/register`) and **Sign in** (`/login`) use the real
 backend endpoints; the signed-in user is shown in the header and on the home page. After a page
-reload the SPA restores the signed-in user from the session (`GET /api/v1/users/me`).
+reload the SPA restores the signed-in user from the session (`GET /api/v1/users/me`). **My profile**
+(`/profile`, signed-in users only) changes the display name and the educational interests.
 
 ### Useful URLs
 

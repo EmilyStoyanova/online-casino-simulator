@@ -115,7 +115,14 @@ frontend/src
   `errors`, `Retry-After`) and supports request cancellation. Unsafe methods send the CSRF token
   (`XSRF-TOKEN` cookie, read by `services/csrf.ts`) in `X-XSRF-TOKEN`, fetching it from
   `GET /api/v1/auth/csrf` when missing, and retry once on `403 CSRF_TOKEN_INVALID`.
-- Routing: React Router 8 (declarative `BrowserRouter`); pages `/`, `/login`, `/register`.
+- Routing: React Router 8 (declarative `BrowserRouter`); pages `/`, `/login`, `/register` and the
+  protected `/profile`.
+- Profile (W2-14): `pages/ProfilePage` shows the saved profile. `features/profile/ProfileForm` edits
+  the display name and the interests (`InterestPicker`, catalogue from `GET /api/v1/interests`).
+  Each save sends only the changed properties through `AuthProvider.updateProfile`
+  (`PATCH /api/v1/users/me`), so the header and the account panel show the result at once. After
+  `409 CONCURRENT_MODIFICATION` the user can load the latest version (`reloadProfile`) without
+  losing their edits.
 - Authentication state (`features/auth/AuthProvider`) lives in memory only. Nothing about the
   user, the password or the session is written to browser storage; the session id stays in the
   `HttpOnly` cookie. After a page load the state is *checking* while `GET /api/v1/users/me`
