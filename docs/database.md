@@ -28,6 +28,73 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 | V4 | `auth_throttle`: fixed-window counters for login/registration throttling; keys are `<scope>:<HMAC-SHA-256 hex>` with the secret `APP_SECURITY_THROTTLE_SECRET` (no raw email or IP, enforced by a `CHECK`); rows are deleted hourly a day after their window ended |
 | V5 | `interests`: catalogue of educational interests (stable upper-case `code` as key, `sort_order`, `active`), seeded with 8 fixed entries; `user_interests`: each user's selection, replacing the plan's use of `user_preferences` for interests (primary key `(user_id, interest_code)`, cascade on user deletion, interests referenced by users cannot be deleted, only deactivated) |
 
+Flyway records every applied migration in `flyway_schema_history`. `GET /api/v1/system/status`
+reports the latest version as `schemaVersion` (`5`).
+
+## Current schema (after V5)
+
+```mermaid
+erDiagram
+    users ||--o{ user_interests : "selects (ON DELETE CASCADE)"
+    interests ||--o{ user_interests : "is selected (delete rejected)"
+    spring_session ||--o{ spring_session_attributes : "has (ON DELETE CASCADE)"
+    users ||..o{ spring_session : "principal_name = users.id (no foreign key)"
+```
+
+`auth_throttle` stands alone: its keys are HMACs, so it does not reference `users`.
+
+### Users and roles (`users`, V3)
+
+| Column | Notes |
+|---|---|
+| `id` | `UUID`, generated (`gen_random_uuid()`), so account ids cannot be enumerated |
+| `email` | `VARCHAR(254)`, unique (`uq_users_email`), stored trimmed and lower-cased (`ck_users_email_normalized`) |
+| `password_hash` | `VARCHAR(100)`, only an encoded hash with the `{id}` prefix, e.g. `{bcrypt}$2a$12$…` (`ck_users_password_hash_encoded`) |
+| `display_name` | `VARCHAR(30)` |
+| `role` | `PLAYER` (default) or `ADMIN` (`ck_users_role`); one role per account |
+| `status` | `ACTIVE` (default) or `DISABLED` (`ck_users_status`); disabled accounts cannot log in |
+| `adult_confirmed_at` | when the 18+ confirmation was given (server clock); no date of birth is stored |
+| `last_login_at` | set at each successful login |
+| `created_at`, `updated_at` | `updated_at` maintained by the `trg_users_updated_at` trigger (`set_updated_at()`, V1) |
+| `version` | optimistic locking (`409 CONCURRENT_MODIFICATION`) |
+
+Registration always creates a `PLAYER`. An `ADMIN` is created only by the start-up bootstrap
+(`APP_BOOTSTRAP_ADMIN_EMAIL`/`_PASSWORD`). Week 2 has no feature that changes a role or a status.
+
+### Interests (`interests`, `user_interests`, V5)
+
+- `interests`: reference data maintained only by migrations. Columns: `code` (primary key,
+  `^[A-Z][A-Z0-9_]*$`), `name`, `description`, `sort_order`, `active`. Eight entries are seeded.
+  `GET /api/v1/interests` lists the active ones by `sort_order`, then `code`.
+- `user_interests`: a user's selection. The primary key is `(user_id, interest_code)`, so there are
+  no duplicates. Deleting a user deletes its rows; an interest that is still referenced cannot be
+  deleted, only deactivated. The limit of 8 per user and the rejection of inactive codes are
+  enforced by the application.
+
+### Session persistence (`spring_session`, `spring_session_attributes`, V2)
+
+- The official Spring Session JDBC schema. Hibernate and Spring Session do not create it
+  (`spring.session.jdbc.initialize-schema=never`).
+- One row per HTTP session. `session_id` is the value of the session cookie, so these rows are as
+  sensitive as passwords: never copy them into tickets or logs. `principal_name` holds the **user
+  id** of a signed-in session and is indexed (`spring_session_ix3`) for revocation.
+- The attributes hold the Spring Security context (user id and role, never the password hash) and
+  `com.casino.auth.service.SessionSignInService.AUTHENTICATED_AT` (sign-in time) for the 12-hour
+  absolute lifetime.
+- Logout deletes the row. Expired sessions are deleted by Spring Session's periodic cleanup job.
+  Sessions survive backend restarts.
+
+### Authentication throttling (`auth_throttle`, V4)
+
+- One row per throttle key: `throttle_key` (`<SCOPE>:<64 hex>`, enforced by
+  `ck_auth_throttle_key_hashed`), `attempt_count` (> 0) and `window_started_at` (indexed for the
+  cleanup).
+- Scopes: `LOGIN_ACCOUNT_IP` (5 failed logins for one account from one IP per 15 min), `LOGIN_IP`
+  (50 failed logins from one IP per 15 min) and `REGISTER_IP` (10 registration attempts from one IP
+  per hour, whatever their outcome). Limits: `app.security.throttle.*` in `application.yml`.
+- The key is an HMAC of the normalised email and/or client IP (see
+  [Throttling secret](#throttling-secret)), so the table contains no email or IP address.
+
 ## Planned tables (from the implementation plan)
 
 The Week 2 design is in [`docs/plans/week-02.md`](plans/week-02.md) §6. Deviations from the
@@ -95,14 +162,47 @@ The orphaned rows are deleted by the hourly cleanup at most 1 h (longest window)
   profile update; updates write only the changed columns, so neither overwrites the other.
 - To withdraw an interest, set `interests.active = false` (a migration). Users who selected it no
   longer see it in their profile; their row is removed at their next change of the selection.
-- Manual changes of `users` in the database bypass these rules. After deleting an account or
-  changing its role, status or password by hand, also delete its sessions:
-  `DELETE FROM spring_session WHERE principal_name = '<user id>';` (`docs/plans/week-02.md` §7.5).
+- Manual changes of `users` in the database bypass these rules. Follow the
+  [session revocation runbook](#session-revocation-runbook) after such a change.
+
+## Session revocation runbook
+
+**Why:** a session keeps the role and status that the account had at sign-in. Week 2 has no feature
+that disables a user or changes a role or password, so nothing revokes sessions automatically
+(`docs/plans/week-02.md` §7.5; mandatory with the admin features in Week 10). Without revocation, a
+session after a manual change lasts at most 30 minutes idle or 12 hours in total.
+
+**When:** after every manual change in the database that deletes an account, disables it
+(`status = 'DISABLED'`), changes its `role` or replaces its `password_hash`.
+
+**Steps** (in `psql`, see [Local database](#local-database)):
+
+1. Find the user id:
+
+   ```sql
+   SELECT id, role, status FROM users WHERE email = lower('alice@example.com');
+   ```
+
+2. Make the change, then delete all sessions of that user in the same transaction:
+
+   ```sql
+   BEGIN;
+   UPDATE users SET status = 'DISABLED' WHERE id = '<user id>';   -- the manual change
+   DELETE FROM spring_session WHERE principal_name = '<user id>'; -- attributes are deleted by cascade
+   COMMIT;
+   ```
+
+3. Check: `SELECT count(*) FROM spring_session WHERE principal_name = '<user id>';` returns `0`. The
+   user's next request gets `401 SESSION_EXPIRED`.
 
 ## Local database
 
 ```bash
-docker compose up -d                                  # start
-docker exec -it casino-postgres psql -U casino casino # SQL shell
-docker compose down -v                                # reset (deletes local data)
+docker compose up -d       # start (repository root)
+docker compose ps          # state and health
+docker compose stop        # stop, keep the data
+docker exec -it casino-postgres psql -U <POSTGRES_USER> -d <POSTGRES_DB>   # SQL shell (both "casino" in .env.example)
 ```
+
+`docker compose down -v` **deletes the volume with all local data** (accounts, sessions). Use it
+only as a deliberate reset, not as a routine fix.

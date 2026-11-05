@@ -30,16 +30,16 @@ The API is **design-first**. The contract
   |---|---|---|
   | `VALIDATION_FAILED` | 400 | Bean Validation failures; `errors` lists `{field, message}` sorted by field, never the rejected value |
   | `MALFORMED_REQUEST` | 400 | Unreadable JSON, wrong JSON types, missing body, missing or unconvertible parameter |
-  | `AUTHENTICATION_REQUIRED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS` | 401 | Authentication (Week 2, W2-04 and later) |
-  | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID` | 403 | Authorization and CSRF (W2-04 and later) |
+  | `AUTHENTICATION_REQUIRED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS` | 401 | No session, ended session, failed login |
+  | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID` | 403 | Missing role (`/api/v1/admin/**`), missing or invalid CSRF token |
   | `NOT_FOUND` | 404 | Unknown path or resource |
   | `METHOD_NOT_ALLOWED` | 405 | Unsupported method (`Allow` header) |
   | `NOT_ACCEPTABLE` | 406 | No representation matches the `Accept` header (the problem itself is still JSON) |
   | `CONFLICT` | 409 | Generic conflict (e.g. a framework `409`) |
-  | `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION` | 409 | Specific conflicts (W2-07, W2-10) |
+  | `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION` | 409 | Registration with an existing email; overlapping profile update |
   | `CONTENT_TOO_LARGE` | 413 | Request too large |
   | `UNSUPPORTED_MEDIA_TYPE` | 415 | Unsupported request `Content-Type` (`Accept` header lists the supported types) |
-  | `TOO_MANY_ATTEMPTS` | 429 | Login/registration throttling; `Retry-After` = whole seconds until the window ends (W2-06; used by login and registration from W2-07/W2-08) |
+  | `TOO_MANY_ATTEMPTS` | 429 | Login and registration throttling; `Retry-After` = whole seconds until the window ends |
   | `INTERNAL_ERROR` | 500 | Unexpected failure; generic detail, the exception is only logged |
   | `SERVICE_UNAVAILABLE` | 503 | Temporarily unavailable (e.g. a request timeout) |
   | `CLIENT_ERROR` | other `4xx` | Generic fallback; the status is kept (e.g. `410`, `422`) |
@@ -64,6 +64,45 @@ The API is **design-first**. The contract
   plain-text body `Invalid CORS request` and no CORS headers. The browser does not expose this
   response to the foreign page, so a Problem Details body would have no reader; standardizing it
   would require replacing Spring Security's CORS filter.
+
+## Authentication and CSRF for clients
+
+The API uses **server-side sessions**, not bearer tokens ([ADR-0006](decisions/0006-session-authentication-security.md)).
+The session id is in an `HttpOnly` cookie (`SESSION` locally, `__Host-SESSION` in production), so
+JavaScript never sees it. The SPA keeps nothing about the session in browser storage.
+
+| Operation | Without a session | Session | CSRF token |
+|---|---|---|---|
+| `GET /api/v1/system/status`, `GET /api/v1/auth/csrf`, `GET /api/v1/interests` | ✅ | not needed | not needed |
+| `POST /api/v1/auth/register`, `/login`, `/logout` | ✅ | not needed | **required** |
+| `GET /api/v1/users/me` | `401` | required | not needed |
+| `PATCH /api/v1/users/me` | `401` | required | **required** |
+| `/api/v1/admin/**` (no endpoints yet) | `401` | `ADMIN` role, otherwise `403 ACCESS_DENIED` | for unsafe methods |
+| `/actuator/health/**`, `/actuator/info`, Swagger UI, `/openapi.yaml`, `/v3/api-docs` | ✅ | not needed | — |
+
+Flow of a client:
+
+1. `GET /api/v1/auth/csrf` → `204` and the `XSRF-TOKEN` cookie.
+2. Every `POST`, `PUT`, `PATCH` and `DELETE` sends that cookie value in the `X-XSRF-TOKEN` header.
+3. Register or log in → `200`/`201` with the `UserProfile`, a **new** session id, and the
+   `XSRF-TOKEN` cookie deleted. Repeat step 1 before the next unsafe request.
+4. Logout → `204`, session deleted, `XSRF-TOKEN` deleted.
+
+The SPA does this in `frontend/src/services/apiClient.ts`. It retries once with a new token after
+`403 CSRF_TOKEN_INVALID`.
+
+The same flow with curl in Git Bash (the cookie file holds the session; delete it afterwards):
+
+```bash
+curl -s -c cookies.txt -b cookies.txt http://localhost:8080/api/v1/auth/csrf
+TOKEN=$(awk '$6 == "XSRF-TOKEN" { print $7 }' cookies.txt)
+curl -s -c cookies.txt -b cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -H "Content-Type: application/json" \
+  -d '{"email":"alice@example.com","password":"<password>"}' http://localhost:8080/api/v1/auth/login
+rm cookies.txt
+```
+
+In Swagger UI ("Try it out"), call `GET /api/v1/auth/csrf` first: Swagger UI then sends the token
+itself (`springdoc.swagger-ui.csrf.enabled`).
 
 ## Workflow for API changes
 
@@ -102,10 +141,23 @@ Example `GET /api/v1/system/status` → `200`:
   "application": "online-casino-simulator",
   "version": "0.1.0-SNAPSHOT",
   "status": "UP",
-  "database": { "status": "UP", "schemaVersion": "1" },
+  "database": { "status": "UP", "schemaVersion": "5" },
   "timestamp": "2026-10-29T10:15:30.123Z"
 }
 ```
+
+### System status (`GET /api/v1/system/status`)
+
+- Public. `200` when the backend and the database are up; `503` with the same `SystemStatus` body
+  when the database is unreachable (`database.status` = `DOWN`, `schemaVersion` = `null`).
+- `schemaVersion` is the latest applied Flyway migration (`5` after Week 2).
+
+### CSRF token (`GET /api/v1/auth/csrf`)
+
+- Public. `204` without a body; the response sets the `XSRF-TOKEN` cookie (readable by JavaScript,
+  `Path=/`). See [Authentication and CSRF for clients](#authentication-and-csrf-for-clients).
+- The token is a stateless double-submit value: the server compares the cookie with the
+  `X-XSRF-TOKEN` header and stores nothing.
 
 ### Registration (`POST /api/v1/auth/register`)
 
@@ -122,8 +174,8 @@ Example `GET /api/v1/system/status` → `200`:
   the email or display name (ignoring case), not a commonly used password (`must not be a commonly
   used password`; 15,535-entry denylist from a public-domain dataset, ignoring case and surrounding
   whitespace, see `backend/src/main/resources/auth/common-passwords-NOTICE.md`); `displayName`
-  trimmed, 3–30 characters, no control
-  characters; `adultConfirmed` must be `true`. Rejected values are never echoed.
+  trimmed, 3–30 characters, no control characters; `adultConfirmed` must be `true`. Rejected values
+  are never echoed.
 - The email is lower-cased before the duplicate check and storage; an existing email (also a case
   variant, also a concurrent request) → `409 EMAIL_ALREADY_REGISTERED`, without a session.
 - Other properties (`role`, `status`, `id`, …) are ignored. The password is stored only as a BCrypt

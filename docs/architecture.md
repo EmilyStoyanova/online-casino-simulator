@@ -36,7 +36,7 @@ Root package `com.casino`. Each direct sub-package is a module:
 |---|---|---|
 | `common` | Shared kernel: web/OpenAPI config, clock, platform status, API error format | 1 |
 | `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 |
-| `user` | Profile, educational interests, preferences | 2 |
+| `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 |
 | `wallet` | Balances, immutable transaction ledger, idempotency | 3 |
 | `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 |
 | `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 |
@@ -143,7 +143,7 @@ frontend/src
   frontend, through a reverse proxy for `/api/*`. Session cookies then stay first-party, because
   browsers block third-party cookies. As a fallback, `VITE_API_BASE_URL` points to a backend on a
   shared custom domain, and that backend allows the frontend origin via `APP_CORS_ALLOWED_ORIGINS`.
-  See `docs/plans/week-02.md` §7.11. In that fallback the SPA cannot read the API host's
+  See `docs/plans/week-02.md` §7.10. In that fallback the SPA cannot read the API host's
   `XSRF-TOKEN` cookie unless the cookie is shared with the frontend host; this is part of the
   Week 12 decision.
 
@@ -158,10 +158,52 @@ frontend/src
 | API documentation | Swagger UI at `/swagger-ui.html`, showing the contract and the generated implementation view (to be disabled in production, Week 12) |
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
-| Security | [ADR-0006](decisions/0006-session-authentication-security.md) (proposed). **Implemented (W2-04):** Spring Security in `auth.config.SecurityConfig` (deny by default, JSON 401/403 via `ProblemDetailFactory`), Spring Session JDBC (30 min idle), `HttpOnly`/`SameSite=Lax` session cookie (`__Host-` + `Secure` in production), CSRF (`csrf.spa()`, `GET /api/v1/auth/csrf`), CORS via a `CorsConfigurationSource`, BCrypt cost 12. **Implemented (W2-06):** throttling infrastructure (`auth_throttle`, V4; `AuthThrottleService` with fixed windows per account + IP, IP and registration IP; `429 TOO_MANY_ATTEMPTS` + `Retry-After`; hourly cleanup; HMAC-SHA-256 keys with the required `APP_SECURITY_THROTTLE_SECRET`; start-up check of the forwarded-header settings), not yet used by an endpoint. **Implemented (W2-07):** `POST /api/v1/auth/register` with automatic sign-in (session-id rotation, CSRF token cleared), registration throttling and BCrypt hashing. **Implemented (W2-08):** login (`DaoAuthenticationProvider`, identical `401` for every failure, account + IP and IP throttling) and logout, 12 h absolute session lifetime (`AbsoluteSessionTimeoutFilter`). **Implemented (W2-10):** `GET/PATCH /api/v1/users/me` for the session's own user only (principal name = user id), optimistic locking with `409 CONCURRENT_MODIFICATION`. **Implemented (W2-11):** roles `PLAYER`/`ADMIN` from `users.role` at sign-in; `/api/v1/admin/**` → `hasRole("ADMIN")` (anonymous `401`, others `403 ACCESS_DENIED`); first administrator only from `APP_BOOTSTRAP_ADMIN_EMAIL`/`_PASSWORD` (`AdminBootstrapRunner`, never promotes). **Implemented (W2-12):** common-password denylist in the password policy (`auth.dto.CommonPasswords`, 15,535 entries from a public-domain dataset; source and licence in `backend/src/main/resources/auth/common-passwords-NOTICE.md`), checked only on the server. **Planned:** session revocation on role, status or password changes and method security for the admin services (Week 10). |
+| Security | Spring Security and Spring Session JDBC, see [§5.1](#51-security-week-2) and [ADR-0006](decisions/0006-session-authentication-security.md) (status: proposed) |
 | Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
-| Testing | Unit (JUnit + Mockito), web slices (`@WebMvcTest`), integration (Testcontainers PostgreSQL), frontend (Vitest + RTL), E2E (Playwright, Week 11) |
+| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. E2E: Playwright (Week 11) |
 | CI | GitHub Actions: backend `mvnw verify`, frontend lint → typecheck → test → build |
+
+### 5.1 Security (Week 2)
+
+Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.md) and
+[`docs/plans/week-02.md`](plans/week-02.md) §7. Implemented in `auth.config.SecurityConfig` and the
+`auth` services:
+
+- **Authorization:** deny by default.
+  - Public: system status, CSRF token, registration, login, logout, interests, health and info,
+    Swagger UI and both API descriptions.
+  - `/api/v1/admin/**` needs the role `ADMIN` (no endpoints yet). Every other `/api/**` path needs a
+    session. Everything else is denied.
+  - `401` and `403` are Problem Details from `ProblemDetailFactory`.
+- **Authentication:** JSON login and registration endpoints; `DaoAuthenticationProvider` with
+  `AccountUserDetailsService`. Every failed login gets the same `401 INVALID_CREDENTIALS`, also for
+  unknown and disabled accounts.
+  - The session principal is Spring's `User`: the user id as username, `ROLE_PLAYER` or
+    `ROLE_ADMIN` from `users.role` at sign-in.
+  - Controllers identify the user only through the principal.
+- **Sessions:** Spring Session JDBC in PostgreSQL (survives restarts).
+  - The cookie is `HttpOnly` and `SameSite=Lax`; `__Host-SESSION` + `Secure` in production.
+  - The session id changes at every sign-in. Sessions end after 30 min idle and 12 h after sign-in
+    (`AbsoluteSessionTimeoutFilter`).
+- **CSRF:** `csrf.spa()`. The `XSRF-TOKEN` cookie value goes into the `X-XSRF-TOKEN` header on every
+  unsafe method. Sign-in and logout delete the cookie.
+- **CORS:** only the origins in `APP_CORS_ALLOWED_ORIGINS`.
+- **Passwords:** BCrypt cost 12 (`DelegatingPasswordEncoder`, `{bcrypt}` prefix). Policy: 12
+  characters to 72 UTF-8 bytes, not the email or display name, not on the common-password denylist
+  (`auth.dto.CommonPasswords`).
+- **Throttling:** fixed windows in `auth_throttle`, checked before the password is verified.
+  - Keys are HMACs with `APP_SECURITY_THROTTLE_SECRET`.
+  - The client IP is the TCP peer. Forwarded headers are ignored unless the trusted proxies are
+    configured (`ForwardedHeadersCheck`).
+- **Administrators:** `ADMIN` is never assigned through the API. `AdminBootstrapRunner` creates the
+  first one from the environment and never promotes an existing account.
+- **Frontend:** `RequireAuth` only shapes the interface; the backend checks every request.
+- **Known limitations:**
+  - Sessions are not revoked automatically when a role, status or password changes. There is no
+    such feature yet; it is mandatory in Week 10, and until then the manual runbook in
+    [`database.md`](database.md#session-revocation-runbook) applies.
+  - CSRF tokens are not revoked on the server.
+  - Method security comes with the admin services (Week 10).
 
 ## 6. Deployment view (target, Week 12)
 
@@ -173,3 +215,23 @@ frontend/src
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a
 fast feedback loop.
+
+### Deployment checklist (before public access, Week 12)
+
+The configuration exists already; the checklist makes sure production uses it (from
+`docs/plans/week-02.md` §7.4, §7.8 and §13). All values live in the hosting provider's secret store,
+never in the repository.
+
+1. `APP_SESSION_COOKIE_NAME=__Host-SESSION` and `APP_SESSION_COOKIE_SECURE=true` (HTTPS only).
+2. `APP_SECURITY_THROTTLE_SECRET`: a new production value, different from every local one.
+3. `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` of the managed database.
+4. `APP_CORS_ALLOWED_ORIGINS`: the production frontend origin only.
+5. `SERVER_FORWARD_HEADERS_STRATEGY=native` together with an explicit
+   `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` that matches only the platform's proxies. Spring Boot's
+   default would trust all private address ranges, and the backend refuses to start without the list.
+6. Verify behind the proxy: the client IP is the right-most untrusted `X-Forwarded-For` entry,
+   `request.isSecure()` is `true`, and the cookies carry `Secure`; add a smoke test for the cookie
+   attributes over HTTPS.
+7. `APP_BOOTSTRAP_ADMIN_EMAIL`/`_PASSWORD` only for the first start, then remove them.
+8. Decide the routing (same site via reverse proxy, or shared custom domain;
+   `docs/plans/week-02.md` §7.10) and disable Swagger UI and `/v3/api-docs` in production.
