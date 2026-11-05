@@ -1,6 +1,8 @@
 # ADR-0006: Session-based authentication and abuse protection
 
-- **Status:** Proposed. Points 1–4 restate decisions approved on 2026-10-28; the ADR as a whole awaits approval.
+- **Status:** Accepted (2026-11-05), after the Week 2 implementation review (W2-16): points 1–9 are
+  implemented as decided and covered by tests; the limitations below remain accepted, with their
+  triggers. Points 1–4 had been approved on 2026-10-28.
 - **Date:** 2026-10-29 (revised: simplified to standard Spring mechanisms)
 - **Details:** `docs/plans/week-02.md` §7
 

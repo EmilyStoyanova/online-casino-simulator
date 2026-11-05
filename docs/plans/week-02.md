@@ -6,7 +6,7 @@
 - **Architecture:** modular monolith ([ADR-0001](../decisions/0001-modular-monolith.md)), layered
   packages and design-first API ([ADR-0004](../decisions/0004-design-first-api.md)), ArchUnit
   ([ADR-0005](../decisions/0005-architecture-rules-archunit.md)), security approach
-  ([ADR-0006](../decisions/0006-session-authentication-security.md), Proposed)
+  ([ADR-0006](../decisions/0006-session-authentication-security.md), Accepted 2026-11-05)
 - **Expected result (plan):** users can register, sign in securely and manage their profiles.
 
 | Revision | Date | Change |
@@ -940,7 +940,7 @@ The implementation plan uses `user_preferences` for interests. Interests get `us
 
 ## 7. Security architecture
 
-Details and rationale: [ADR-0006](../decisions/0006-session-authentication-security.md) (Proposed).
+Details and rationale: [ADR-0006](../decisions/0006-session-authentication-security.md) (Accepted).
 
 ### 7.1 Filter chain (`auth.config.SecurityConfig`)
 
@@ -1291,7 +1291,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` done early (2026-11-03); the `/users/me` start-up check with W2-10 (2026-11-04); `RequireAuth` and the return path implemented 2026-11-05 (pending review), see the notes after FR-11.* | L | W2-02 (parallel with mocks) |
 | W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile, `ProfileForm` and `InterestPicker` implemented 2026-11-05 with passing automated tests (pending review). The manual browser walkthrough is part of W2-16, see the note after FR-11.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
 | W2-15 | Docs & config: `api.md`, `database.md` (revocation runbook), `architecture.md`, README, `.env.example`. *Implemented 2026-11-05 (pending review). README: purpose, status, Windows 11 + Git Bash setup in start-up order, every variable, troubleshooting. `api.md`: client flow for sessions, CSRF and authorization, system status and CSRF sections. `database.md`: schema after V5, session persistence, session revocation runbook. `architecture.md`: §5.1 security summary instead of the task-by-task list, deployment checklist (§7.8). `.env.example`: secret generation without printing, bootstrap password rules. Commands verified against the running stack. No functional change.* | S | W2-04…W2-14 |
-| W2-16 | Verification: all suites, manual walkthrough, CI green, pull request. *In progress (2026-11-05): automated suites, the real-HTTP acceptance run and the browser acceptance scenarios 1–9 (manual 1–3, Playwright 1–9) are green; the admin-bootstrap browser check, CI and the pull request are open, see "W2-16 verification record" after §15.* | M | all |
+| W2-16 | Verification: all suites, manual walkthrough, CI green, pull request. *In progress (2026-11-05): automated suites, the real-HTTP acceptance run, the browser acceptance scenarios 1–9 (manual 1–3, Playwright 1–9) and the admin-bootstrap browser check are green; ADR-0006 accepted; CI green on the pull request (reported by the developer). Review approval and merge are open, see "W2-16 verification record" after §15.* | M | all |
 
 ```mermaid
 graph LR
@@ -1454,13 +1454,52 @@ Notes on the automated run:
   widened the page: by 182 px at 375 px with a 63-character email. Both grids now use
   `grid-cols-1` (`minmax(0, 1fr)`), so the email is truncated. The test fails without the fix.
 
-**Open:**
-- the admin-bootstrap check in the browser (the HTTP part is verified);
-- CI on GitHub;
-- the pull request;
-- approval of ADR-0006 (O5).
+**Administrator bootstrap in the browser (2026-11-05):** `frontend/e2e/w2-16-admin-bootstrap.spec.ts`,
+same isolated stack. The backend is restarted with throwaway `APP_BOOTSTRAP_ADMIN_*` values; the
+normal backend is restored afterwards. Verified:
+- exactly one `ADMIN` row is created (`ACTIVE`, display name "Administrator", BCrypt cost 12), and
+  the backend log does not contain the password;
+- the administrator signs in in Chrome: `GET /users/me` reports `ADMIN`, the account panel and
+  `/profile` show the role "Administrator"; an administrative path passes the role rule (`404`,
+  no administrative endpoint before Week 10), and an unsafe request without a CSRF token is still
+  rejected (`403 CSRF_TOKEN_INVALID`);
+- anonymous `401 AUTHENTICATION_REQUIRED` on `/api/v1/admin/**`;
+- a registration from the browser that sends `role`/`roles`/`authorities` = `ADMIN` gets `PLAYER`;
+  that player gets `403 ACCESS_DENIED` on `/api/v1/admin`, `/api/v1/admin/**` (GET and POST), and a
+  profile update with `role: ADMIN` leaves the role `PLAYER`;
+- a restart with the same email and a different password changes nothing (same id, role, status,
+  display name and password hash; still one administrator; the backend reports "already exists").
+  The session survives the restart, and the original password still signs in.
 
-W2-16 and Week 2 are **not complete** until these are done.
+The "never promotes an existing `PLAYER`" case is covered by the real-HTTP run and
+`AdminBootstrapRunnerTest`, not in the browser.
+
+**Full browser suite (13 tests, 2026-11-05):** four full runs (`retries: 0`): runs 1–2 found two
+test-infrastructure faults, runs 3–4 passed 13/13 each (0 failed, 0 flaky, 0 skipped, about 5 min).
+- The bootstrap test's fixture registration was the 11th from the fixtures' client IP that hour
+  (`429`); the test now registers its player from the browser.
+- Vite listened on `::1` only, and Chrome intermittently connected to `localhost` over IPv4
+  (`ERR_CONNECTION_REFUSED` while Vite was running, 3 tests in one run). The test frontend now
+  runs on `127.0.0.1:5174`.
+
+Neither was an application defect.
+
+Re-run after these changes: `./mvnw -B -ntp verify` (195 + 134 tests, 0 failures), frontend
+`lint`, `typecheck`, `test` (107) and `build` green, `git diff --check` clean.
+
+**ADR-0006 review (O5):** points 1–9 match the implementation (`SecurityConfig`,
+`SessionSignInService`, `AccountUserDetailsService`, `AbsoluteSessionTimeoutFilter`,
+`AuthThrottleService`, `ForwardedHeadersCheck`, `application.yml`) and are covered by tests
+(`WebSecurityIT`, `CsrfIT`, `LoginLogoutIT`, `SessionLifetimeIT`, `ThrottleIT`, `ClientAddressIT`,
+`AdminAuthorizationIT`, …). The limitations and deferred measures are unchanged and still accurate.
+Status set to **Accepted**.
+
+**Open:**
+- review approval and merge of the pull request (DoD);
+- the throttled login of the DoD walkthrough was verified over real HTTP and in `ThrottleIT`, not
+  in a browser.
+
+W2-16 and Week 2 are **not complete** until the pull request is approved and merged.
 - Fixed in W2-16: the `SystemStatus` example in `openapi.yaml` showed `schemaVersion: '1'` (now `'5'`).
 
 ---
@@ -1473,4 +1512,4 @@ W2-16 and Week 2 are **not complete** until these are done.
 | O2 | Throttle limits (5 / 15 min per account + IP, 50 / 15 min per IP, 10 / h registrations) | Yes, configurable |
 | O3 | Denylist source and licence | Verify in W2-12, otherwise defer. *Resolved 2026-11-04: public-domain dataset (Mark Burnett), SecLists copy under MIT (§7.3).* |
 | O4 | Production routing A or B | A; ADR-0007 in Week 12 |
-| O5 | Approve ADR-0006 | After this review |
+| O5 | Approve ADR-0006 | After this review. *Resolved 2026-11-05: Accepted (W2-16 review, see the verification record).* |

@@ -158,9 +158,9 @@ frontend/src
 | API documentation | Swagger UI at `/swagger-ui.html`, showing the contract and the generated implementation view (to be disabled in production, Week 12) |
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
-| Security | Spring Security and Spring Session JDBC, see [§5.1](#51-security-week-2) and [ADR-0006](decisions/0006-session-authentication-security.md) (status: proposed) |
+| Security | Spring Security and Spring Session JDBC, see [§5.1](#51-security-week-2) and [ADR-0006](decisions/0006-session-authentication-security.md) |
 | Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
-| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. E2E: Playwright (Week 11) |
+| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. Browser acceptance: Playwright against an isolated real stack (`frontend/e2e`, run locally); full E2E coverage and CI in Week 11 |
 | CI | GitHub Actions: backend `mvnw verify`, frontend lint → typecheck → test → build |
 
 ### 5.1 Security (Week 2)

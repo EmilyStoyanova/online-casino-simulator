@@ -1,12 +1,12 @@
 /**
  * W2-16 browser acceptance scenarios (docs/plans/week-02.md, "W2-16 verification record"), in a real
- * Chrome against the real frontend, backend and PostgreSQL. Nothing is mocked or intercepted; the
- * tests only observe the responses.
+ * Chrome against the real frontend, backend and PostgreSQL. Nothing is mocked; the tests only
+ * observe the responses (scenario 4 holds two requests so that they overlap, unchanged).
  */
 import { createHash } from 'node:crypto'
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test'
 import { createAccount, newAccount, recordProfileUpdates, signIn, signInFromHome } from './support/accounts'
-import { startBackend, stopBackend } from './support/stack'
+import { FRONTEND_URL, startBackend, stopBackend } from './support/stack'
 
 const header = (page: Page) => page.getByRole('navigation', { name: 'Account' })
 const details = (page: Page) => page.getByRole('region', { name: 'Account details' })
@@ -54,7 +54,7 @@ test.describe('Scenario 1 — protected /profile and safe return', () => {
     const account = await createAccount('s1b')
     await page.goto(`/login?returnTo=${encodeURIComponent('//evil.example/profile')}`)
     await signIn(page, account)
-    await expect(page).toHaveURL(/localhost:5174\/$/)
+    await expect(page).toHaveURL(`${FRONTEND_URL}/`)
   })
 })
 

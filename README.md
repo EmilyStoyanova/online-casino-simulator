@@ -269,8 +269,9 @@ npm run build
 
 ### Browser acceptance tests (Playwright)
 
-The W2-16 acceptance scenarios run in a real Google Chrome against the real frontend, backend and
-PostgreSQL (`frontend/e2e/`). They are not part of `npm test` or CI yet.
+The W2-16 acceptance scenarios and the administrator bootstrap check run in a real Google Chrome
+against the real frontend, backend and PostgreSQL (`frontend/e2e/`). They are not part of
+`npm test` or CI yet.
 
 ```bash
 cd backend && ./mvnw -DskipTests package    # the tests start this jar
@@ -280,12 +281,14 @@ cd ../frontend && npm run test:e2e           # Docker running, JAVA_HOME set, Go
 What the tests use:
 
 - **Their own isolated stack:** a throwaway PostgreSQL container `casino-e2e-pg` on port 5441, the
-  backend on 8091 and Vite on 5174, with random secrets that are never printed. Your local
+  backend on 8091 and Vite on `127.0.0.1:5174`, with random secrets that are never printed. The
+  bootstrap test restarts the backend with a throwaway administrator that exists only in that
+  container. Your local
   database, `.env` and dev servers on 5432/8080/5173 are not used. The container and its data are
   removed afterwards.
 - **The installed Chrome** (`channel: 'chrome'`), so no Playwright browser download is needed.
-- **Real waits:** the session-expiry scenario waits for a real 1-minute idle timeout, so a run takes
-  about 4 minutes.
+- **Real waits:** the session-expiry scenario waits for a real 1-minute idle timeout, and some tests
+  restart the backend, so a run takes about 5 minutes.
 - **Reports:** failures leave a screenshot and a trace in `frontend/test-results/`; the HTML report
   is in `frontend/playwright-report/` (`npx playwright show-report`). Both are git-ignored. Traces
   contain the disposable test passwords.

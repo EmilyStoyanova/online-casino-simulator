@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test'
-import { BACKEND_IPV4, FRONTEND_PORT, FRONTEND_URL } from './e2e/support/stack'
+import { BACKEND_IPV4, FRONTEND_HOST, FRONTEND_PORT, FRONTEND_URL } from './e2e/support/stack'
 
 /**
  * Browser acceptance tests (W2-16) against the real application: Chrome → Vite dev server →
@@ -26,7 +26,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: `npx vite --port ${FRONTEND_PORT} --strictPort`,
+    command: `npx vite --host ${FRONTEND_HOST} --port ${FRONTEND_PORT} --strictPort`,
     url: FRONTEND_URL,
     reuseExistingServer: false,
     timeout: 60_000,

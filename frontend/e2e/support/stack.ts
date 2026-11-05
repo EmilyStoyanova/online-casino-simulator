@@ -15,7 +15,12 @@ import { join, resolve } from 'node:path'
 export const BACKEND_PORT = 8091
 export const FRONTEND_PORT = 5174
 export const DB_PORT = 5441
-export const FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`
+/**
+ * An IP address, not `localhost`: Vite would listen on `::1` only, and Chrome does not always try
+ * `::1` for `localhost` (seen as intermittent ERR_CONNECTION_REFUSED).
+ */
+export const FRONTEND_HOST = '127.0.0.1'
+export const FRONTEND_URL = `http://${FRONTEND_HOST}:${FRONTEND_PORT}`
 /** The backend seen through IPv4 (the Vite proxy) and IPv6 (test fixtures): two client IPs for the throttle limits. */
 export const BACKEND_IPV4 = `http://127.0.0.1:${BACKEND_PORT}`
 export const BACKEND_IPV6 = `http://[::1]:${BACKEND_PORT}`
@@ -121,6 +126,23 @@ export async function stopBackend(): Promise<void> {
   }
   writeState({ ...state, backendPid: undefined })
   await waitFor(async () => !(await backendUp()), 'the backend to stop', 30_000)
+}
+
+/**
+ * Runs one query against the throwaway database (psql inside the container) and returns the rows,
+ * fields split at `|`. `vars` are psql variables, used in the query as `:'name'` (quoted literals).
+ */
+export function queryDatabase(sql: string, vars: Record<string, string> = {}): string[][] {
+  const args = ['exec', '-i', CONTAINER, 'psql', '-U', 'e2e', '-d', 'casino_e2e', '-X', '-q', '-A', '-t', '-F', '|',
+    '-v', 'ON_ERROR_STOP=1', ...Object.entries(vars).flatMap(([name, value]) => ['-v', `${name}=${value}`])]
+  const output = execFileSync('docker', args, { input: sql, encoding: 'utf8' })
+  return output.split(/\r?\n/).filter((line) => line !== '').map((line) => line.split('|'))
+}
+
+/** The backend log of this run (all starts), to check what the backend reported. */
+export function backendLog(): string {
+  const file = join(DIR, 'backend.log')
+  return existsSync(file) ? readFileSync(file, 'utf8') : ''
 }
 
 export function stopDatabase(): void {
