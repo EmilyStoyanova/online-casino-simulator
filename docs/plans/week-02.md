@@ -1291,7 +1291,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day.
 | W2-13 | Frontend foundation: React Router, `apiClient` (methods, CSRF, ProblemDetails), `csrf.ts`, types from the contract, `AuthProvider`, `RequireAuth`. *All but `RequireAuth` done early (2026-11-03); the `/users/me` start-up check with W2-10 (2026-11-04); `RequireAuth` and the return path implemented 2026-11-05 (pending review), see the notes after FR-11.* | L | W2-02 (parallel with mocks) |
 | W2-14 | Frontend pages: Register, Login, Profile with InterestPicker, header user menu. *Register, Login and the header user menu done early (2026-11-03); Profile, `ProfileForm` and `InterestPicker` implemented 2026-11-05 with passing automated tests (pending review). The manual browser walkthrough is part of W2-16, see the note after FR-11.* | L | W2-13 (+ W2-07/08/10 for the manual walkthrough) |
 | W2-15 | Docs & config: `api.md`, `database.md` (revocation runbook), `architecture.md`, README, `.env.example`. *Implemented 2026-11-05 (pending review). README: purpose, status, Windows 11 + Git Bash setup in start-up order, every variable, troubleshooting. `api.md`: client flow for sessions, CSRF and authorization, system status and CSRF sections. `database.md`: schema after V5, session persistence, session revocation runbook. `architecture.md`: §5.1 security summary instead of the task-by-task list, deployment checklist (§7.8). `.env.example`: secret generation without printing, bootstrap password rules. Commands verified against the running stack. No functional change.* | S | W2-04…W2-14 |
-| W2-16 | Verification: all suites, manual walkthrough, CI green, pull request | M | all |
+| W2-16 | Verification: all suites, manual walkthrough, CI green, pull request. *In progress (2026-11-05): automated suites and the real-HTTP acceptance run are green; the browser walkthrough, CI and the pull request are open, see "W2-16 verification record" after §15.* | M | all |
 
 ```mermaid
 graph LR
@@ -1393,6 +1393,43 @@ New dependencies: `spring-boot-starter-security`, `spring-boot-starter-session-j
 - Manual walkthrough: fresh browser → register → logout → login → edit profile/interests → throttled
   login → admin bootstrap.
 - Pull request `feature/week-02-auth` → `main`, CI green, merged after approval.
+
+### W2-16 verification record (2026-11-05, commit `8ef4faf` + this record)
+
+**Automated (local):**
+- `./mvnw -B -ntp verify`: 195 unit and slice tests and 134 integration tests, 0 failures, 0 Maven
+  warnings. This includes ArchUnit (12 + 12), `OpenApiContractTest` (22), `OpenApiContractIT` (11),
+  `AccessRulesContractIT` and `MigrationsIT`.
+- Frontend `npm run lint`, `typecheck`, `test` (107 tests) and `build`: green.
+- `git diff --check`: clean.
+
+**Real HTTP + PostgreSQL (isolated):**
+- The current jar ran on port 8090 against a throwaway `postgres:17.11-alpine` container on port
+  5440, with random throwaway secrets. The developer database, its throttle counters and the
+  running dev servers were not used: the running dev backend predated W2-11/W2-12.
+- Flyway applied V1–V5 to an empty database.
+- **63 of 63 checks passed:**
+  - CSRF, registration, login and logout; cookie attributes; session rotation;
+  - profile and interests, including 0–8 interests, unknown codes, mass assignment, and 8 parallel
+    updates (7 × `409`, 1 × `200`, no mixed state);
+  - `PLAYER`/`ADMIN`/anonymous on `/api/v1/admin/**`; bootstrap admin created and able to sign in,
+    an existing `PLAYER` never promoted;
+  - error format and `no-store`;
+  - all throttling limits, including another client IP (`::1`) and the reset after success;
+  - session survival across a backend restart; idle (1 min) and absolute (2 min) expiry;
+  - backend logs free of 139 known passwords, session ids and CSRF tokens.
+
+  Two harness bugs were fixed during the run; they were not application defects. The
+  environment was removed afterwards.
+
+**Open:**
+- the browser walkthrough (§3 FR-11 checklist, admin bootstrap included);
+- CI on GitHub;
+- the pull request;
+- approval of ADR-0006 (O5).
+
+W2-16 and Week 2 are **not complete** until these are done.
+- Fixed in W2-16: the `SystemStatus` example in `openapi.yaml` showed `schemaVersion: '1'` (now `'5'`).
 
 ---
 

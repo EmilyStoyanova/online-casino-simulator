@@ -105,7 +105,7 @@ paths:
                 status: UP
                 database:
                   status: UP
-                  schemaVersion: '1'
+                  schemaVersion: '5'
                 timestamp: '2026-10-29T10:15:30.123Z'
         '503':
           description: Platform is unavailable (database unreachable). The body still describes the status.
