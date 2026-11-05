@@ -3,9 +3,14 @@ package com.casino.contract;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
+import com.casino.common.exception.ProblemCode;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import org.junit.jupiter.api.Test;
@@ -19,6 +24,16 @@ class OpenApiContractTest {
     private static final String VALID_UP = """
             {"application":"online-casino-simulator","version":"0.1.0","status":"UP",
              "database":{"status":"UP","schemaVersion":"1"},"timestamp":"2026-10-29T10:15:30.123Z"}""";
+
+    /** Schema body for {@link #minimalSpec}: an optional property {@code extra} that is not implemented yet. */
+    private static final String PLANNED_PROPERTY = """
+            properties:
+              extra:
+                type: string
+                x-implementation-status: planned""";
+
+    /** Operation extension for {@link #minimalSpec}: {@code GET /a} is not implemented yet. */
+    private static final String PLANNED_OPERATION = "x-implementation-status: planned";
 
     private final OpenApiContract contract = OpenApiContract.load();
 
@@ -80,11 +95,35 @@ class OpenApiContractTest {
     }
 
     @Test
+    void responsesWithoutDocumentedContentMustHaveNoBody() {
+        assertThat(contract.validateResponse("/api/v1/auth/csrf", "GET", 204, null, "")).isEmpty();
+        assertThat(contract.validateResponse("/api/v1/auth/csrf", "GET", 204, JSON, "{}")).containsExactly(
+                "GET /api/v1/auth/csrf 204: no content is documented, but the body is not empty");
+    }
+
+    @Test
     void problemDetailsAllowExtensionMembers() {
         String problem = """
-                {"title":"Internal Server Error","status":500,"detail":"x","instance":"/api/v1/system/status","hint":"X"}""";
+                {"title":"Internal Server Error","status":500,"detail":"x","instance":"/api/v1/system/status",
+                 "code":"INTERNAL_ERROR","hint":"X"}""";
 
         assertThat(contract.validateResponse(STATUS_PATH, "GET", 500, "application/problem+json", problem)).isEmpty();
+    }
+
+    @Test
+    void problemDetailsRequireAKnownCode() {
+        assertThat(contract.validateSchema("ProblemDetail", """
+                {"title":"Bad Request","status":400,"code":"VALIDATION_FAILED","errors":[{"field":"email","message":"m"}]}"""))
+                .isEmpty();
+        assertThat(contract.validateSchema("ProblemDetail", """
+                {"title":"Not Found","status":404}""")).containsExactly("$: missing required property 'code'");
+        // The documented codes are exactly the ProblemCode constants.
+        Set<String> codes = Arrays.stream(ProblemCode.values()).map(Enum::name).collect(Collectors.toCollection(TreeSet::new));
+        assertThat(contract.validateSchema("ProblemDetail", """
+                {"title":"I'm a teapot","status":418,"code":"TEAPOT","errors":[{"field":"email"}]}""")).containsExactly(
+                "$.code: value 'TEAPOT' is not one of " + codes,
+                "$.errors[0]: missing required property 'message'");
+        assertThat(contract.validateSchema("Problem", "{}")).containsExactly("Schema Problem is not documented in the contract");
     }
 
     @Test
@@ -123,18 +162,14 @@ class OpenApiContractTest {
     // ------------------------------------------------------------------ planned elements
 
     @Test
-    void week2OperationsArePlanned() {
+    void everyWeek2OperationIsImplemented() {
         assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.2.0");
-        assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "GET /api/v1/auth/csrf",
-                "POST /api/v1/auth/register",
-                "POST /api/v1/auth/login",
-                "POST /api/v1/auth/logout",
-                "GET /api/v1/users/me",
-                "PATCH /api/v1/users/me",
-                "GET /api/v1/interests");
-        assertThat(contract.implementedOperations()).contains("GET " + STATUS_PATH).doesNotContainAnyElementsOf(
-                contract.plannedOperations());
+        // GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08),
+        // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10). The planned marker stays
+        // available for later weeks; the tests below use a minimal specification for it.
+        assertThat(contract.plannedOperations()).isEmpty();
+        assertThat(contract.implementedOperations()).contains("GET " + STATUS_PATH, "GET /api/v1/users/me",
+                "PATCH /api/v1/users/me");
     }
 
     @Test
@@ -152,44 +187,50 @@ class OpenApiContractTest {
 
     @Test
     void plannedElementsThatAreNotImplementedAreSkipped() {
-        assertThat(contract.differencesTo(implementationWithoutPlannedElements(), path -> true)).isEmpty();
+        String yaml = minimalSpec(PLANNED_OPERATION, PLANNED_PROPERTY);
+        OpenApiContract planned = OpenApiContract.fromYaml(yaml);
+
+        assertThat(planned.plannedOperations()).containsExactly("GET /a");
+        assertThat(planned.implementedOperations()).isEmpty();
+        assertThat(planned.differencesTo(withoutPlannedElements(yaml), path -> true)).isEmpty();
     }
 
     @Test
     void reportsPlannedOperationThatIsAlreadyImplemented() {
-        OpenApiContract implementation = OpenApiContract.load();
-        implementation.spec().getPaths().get("/api/v1/interests").getGet().getExtensions()
-                .remove(OpenApiContract.IMPLEMENTATION_STATUS);
+        OpenApiContract planned = OpenApiContract.fromYaml(minimalSpec(PLANNED_OPERATION, ""));
+        OpenApiContract implementation = OpenApiContract.fromYaml(minimalSpec("", ""));
 
-        assertThat(contract.differencesTo(implementation, path -> true)).containsExactly(
-                "GET /api/v1/interests: implemented, but still marked x-implementation-status: planned");
+        assertThat(planned.differencesTo(implementation, path -> true)).containsExactly(
+                "GET /a: implemented, but still marked x-implementation-status: planned");
     }
 
     @Test
-    void reportsPlannedPropertyThatIsAlreadyImplemented() {
-        OpenApiContract implementation = implementationWithoutPlannedElements();
-        Schema<?> code = (Schema<?>) OpenApiContract.load().spec().getComponents().getSchemas().get("ProblemDetail")
-                .getProperties().get("code");
-        code.getExtensions().remove(OpenApiContract.IMPLEMENTATION_STATUS);
-        implementation.spec().getComponents().getSchemas().get("ProblemDetail").addProperty("code", code);
+    void plannedPropertiesAreSkippedUntilImplemented() {
+        OpenApiContract planned = OpenApiContract.fromYaml(minimalSpec("", PLANNED_PROPERTY));
+        OpenApiContract notImplemented = OpenApiContract.fromYaml(minimalSpec("", ""));
+        OpenApiContract implemented = OpenApiContract.fromYaml(minimalSpec("", PLANNED_PROPERTY.replace(
+                "\n    x-implementation-status: planned", "")));
 
-        assertThat(contract.differencesTo(implementation, path -> true)).containsExactly(
-                "#/components/schemas/ProblemDetail.code: implemented, but still marked x-implementation-status: planned");
+        assertThat(planned.differencesTo(notImplemented, path -> true)).isEmpty();
+        assertThat(planned.differencesTo(implemented, path -> true)).containsExactly(
+                "#/components/schemas/Item.extra: implemented, but still marked x-implementation-status: planned");
     }
 
     @Test
     void plannedOperationsCannotBeValidatedAsImplemented() {
-        assertThat(contract.validateResponse("/api/v1/interests", "GET", 200, JSON, "[]")).containsExactly(
-                "GET /api/v1/interests is marked x-implementation-status: planned; remove the marker when implementing it");
+        OpenApiContract planned = OpenApiContract.fromYaml(minimalSpec(PLANNED_OPERATION, ""));
+
+        assertThat(planned.validateResponse("/a", "GET", 200, JSON, "{}")).containsExactly(
+                "GET /a is marked x-implementation-status: planned; remove the marker when implementing it");
     }
 
     @Test
     void reportsPlannedPropertiesInResponses() {
-        String problem = """
-                {"title":"Internal Server Error","status":500,"instance":"/api/v1/system/status","code":"INTERNAL_ERROR"}""";
+        OpenApiContract planned = OpenApiContract.fromYaml(minimalSpec("", PLANNED_PROPERTY));
 
-        assertThat(contract.validateResponse(STATUS_PATH, "GET", 500, "application/problem+json", problem)).containsExactly(
-                "$.code: property is marked x-implementation-status: planned but present; remove the marker when implementing it");
+        assertThat(planned.validateResponse("/a", "GET", 200, JSON, "{}")).isEmpty();
+        assertThat(planned.validateResponse("/a", "GET", 200, JSON, "{\"extra\":\"x\"}")).containsExactly(
+                "$.extra: property is marked x-implementation-status: planned but present; remove the marker when implementing it");
     }
 
     @Test
@@ -219,9 +260,9 @@ class OpenApiContractTest {
                 "GET /a 200 application/json: schema reference differs (contract: Item, implementation: null)");
     }
 
-    /** The contract as springdoc would generate it while no planned element is implemented. */
-    private static OpenApiContract implementationWithoutPlannedElements() {
-        OpenApiContract implementation = OpenApiContract.load();
+    /** The specification {@code yaml} as springdoc would generate it while no planned element is implemented. */
+    private static OpenApiContract withoutPlannedElements(String yaml) {
+        OpenApiContract implementation = OpenApiContract.fromYaml(yaml);
         implementation.spec().getPaths().values().forEach(item -> item.readOperationsMap().forEach((method, operation) -> {
             if (isPlanned(operation.getExtensions())) {
                 item.operation(method, null);

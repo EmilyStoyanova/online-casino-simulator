@@ -42,7 +42,8 @@ import io.swagger.v3.oas.models.security.SecurityRequirement;
  *       springdoc generates from the controllers;</li>
  *   <li>{@link #validateResponse} — validation of an actual HTTP response against the documented
  *       status code, media type and schema. Undocumented properties are reported unless the schema
- *       explicitly allows additional properties.</li>
+ *       explicitly allows additional properties. {@link #validateSchema} applies the same check
+ *       against a component schema, e.g. {@code ProblemDetail}.</li>
  * </ul>
  *
  * <p><b>Planned elements.</b> Operations and schema properties that are designed but not implemented
@@ -213,7 +214,6 @@ public final class OpenApiContract {
      * @return violations; empty when the response conforms to the contract
      */
     public List<String> validateResponse(String path, String method, int status, String contentType, String body) {
-        List<String> errors = new ArrayList<>();
         PathItem pathItem = spec.getPaths() == null ? null : spec.getPaths().get(path);
         Operation operation = pathItem == null ? null
                 : pathItem.readOperationsMap().get(PathItem.HttpMethod.valueOf(method.toUpperCase(Locale.ROOT)));
@@ -228,18 +228,42 @@ public final class OpenApiContract {
         if (response == null) {
             return List.of(method + " " + path + ": status " + status + " is not documented");
         }
+        Map<String, MediaType> content = orEmpty(resolve(response).getContent());
+        if (content.isEmpty()) {
+            // e.g. 204: no body is documented, so none may be sent.
+            return body == null || body.isEmpty() ? List.of()
+                    : List.of(method + " " + path + " " + status + ": no content is documented, but the body is not empty");
+        }
         String baseType = contentType == null ? "" : contentType.split(";")[0].trim().toLowerCase(Locale.ROOT);
-        MediaType mediaType = orEmpty(resolve(response).getContent()).get(baseType);
+        MediaType mediaType = content.get(baseType);
         if (mediaType == null) {
             return List.of(method + " " + path + " " + status + ": media type '" + baseType + "' is not documented");
         }
+        return validateBody(body, mediaType.getSchema());
+    }
+
+    /**
+     * Validates a JSON body against a component schema, e.g. an error response of a request that
+     * matches no documented operation against {@code ProblemDetail}.
+     *
+     * @return violations; empty when the body conforms to the schema
+     */
+    public List<String> validateSchema(String schemaName, String body) {
+        if (!schemas().containsKey(schemaName)) {
+            return List.of("Schema " + schemaName + " is not documented in the contract");
+        }
+        return validateBody(body, new Schema<>().$ref(SCHEMA_REF_PREFIX + schemaName));
+    }
+
+    private List<String> validateBody(String body, Schema<?> schema) {
         JsonNode node;
         try {
             node = Json31.mapper().readTree(body);
         } catch (IOException ex) {
             return List.of("Response body is not valid JSON: " + ex.getMessage());
         }
-        validate("$", node, mediaType.getSchema(), errors);
+        List<String> errors = new ArrayList<>();
+        validate("$", node, schema, errors);
         return errors;
     }
 

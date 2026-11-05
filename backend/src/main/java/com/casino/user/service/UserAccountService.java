@@ -1,0 +1,134 @@
+package com.casino.user.service;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+
+import com.casino.user.dto.NewAccount;
+import com.casino.user.dto.UserCredentials;
+import com.casino.user.dto.UserProfileResponse;
+import com.casino.user.dto.UserRegistered;
+import com.casino.user.entity.Role;
+import com.casino.user.entity.UserAccount;
+import com.casino.user.entity.UserStatus;
+import com.casino.user.exception.EmailAlreadyRegisteredException;
+import com.casino.user.repository.UserAccountRepository;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * User accounts: creation (registration, administrator bootstrap), credentials and last login
+ * (login), and the normalisation of email addresses.
+ *
+ * <p>The email is normalised here, once for every caller: trimmed and lower-cased, as the database
+ * requires ({@code ck_users_email_normalized}), so case variants can never become a second account.
+ */
+@Service
+public class UserAccountService {
+
+    /** Unique constraint of {@code users.email} (V3). */
+    static final String EMAIL_UNIQUE_CONSTRAINT = "uq_users_email";
+
+    private final UserAccountRepository repository;
+    private final ApplicationEventPublisher events;
+    private final Clock clock;
+
+    public UserAccountService(UserAccountRepository repository, ApplicationEventPublisher events, Clock clock) {
+        this.repository = repository;
+        this.events = events;
+        this.clock = clock;
+    }
+
+    /** The stored form of an email address: trimmed and lower-cased (locale-independent). */
+    public static String normalizeEmail(String email) {
+        return Objects.requireNonNull(email, "email").strip().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Creates a {@code PLAYER} account in status {@code ACTIVE} and publishes {@link UserRegistered}.
+     * The 18+ confirmation time comes from the server clock.
+     *
+     * @throws EmailAlreadyRegisteredException if the email already has an account, also when another
+     *                                         request registers it at the same moment
+     * @throws IllegalArgumentException        if the user did not confirm being at least 18
+     */
+    @Transactional
+    public UserProfileResponse createAccount(NewAccount account) {
+        UserAccount saved = save(account, Role.PLAYER);
+        events.publishEvent(new UserRegistered(saved.getId()));
+        return UserProfiles.of(saved);
+    }
+
+    /**
+     * Creates an {@code ADMIN} account in status {@code ACTIVE}, for the administrator bootstrap only
+     * (AC-9.4). No {@link UserRegistered} event: that event stands for a player's registration.
+     *
+     * @throws EmailAlreadyRegisteredException if the email already has an account; that account is
+     *                                         never changed (never promoted)
+     * @throws IllegalArgumentException        if the 18+ confirmation is missing
+     */
+    @Transactional
+    public UserProfileResponse createAdministrator(NewAccount account) {
+        return UserProfiles.of(save(account, Role.ADMIN));
+    }
+
+    private UserAccount save(NewAccount account, Role role) {
+        if (!account.adultConfirmed()) {
+            throw new IllegalArgumentException("An account requires the confirmation of being at least 18");
+        }
+        String email = normalizeEmail(account.email());
+        if (repository.existsByEmail(email)) {
+            throw new EmailAlreadyRegisteredException();
+        }
+        try {
+            // Flushed here, so a concurrent registration of the same email fails inside this method.
+            // Microseconds, as PostgreSQL stores them, so the response shows the stored value.
+            Instant adultConfirmedAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
+            return repository.saveAndFlush(new UserAccount(email, account.passwordHash(), account.displayName(),
+                    adultConfirmedAt, role));
+        } catch (DataIntegrityViolationException ex) {
+            if (violates(ex, EMAIL_UNIQUE_CONSTRAINT)) {
+                throw new EmailAlreadyRegisteredException();
+            }
+            throw ex;
+        }
+    }
+
+    /**
+     * The credentials of the account with this email, for login. The email is normalised first.
+     *
+     * @return empty if no account has this email
+     */
+    @Transactional(readOnly = true)
+    public Optional<UserCredentials> findCredentials(String email) {
+        return repository.findByEmail(normalizeEmail(email)).map(account -> new UserCredentials(account.getId(),
+                account.getPasswordHash(), UserProfiles.role(account), account.getStatus() == UserStatus.ACTIVE));
+    }
+
+    /**
+     * Records a successful login ({@code last_login_at}, server clock) and returns the profile.
+     *
+     * @throws IllegalStateException if the account no longer exists
+     */
+    @Transactional
+    public UserProfileResponse recordLogin(UUID userId) {
+        repository.updateLastLoginAt(userId, clock.instant().truncatedTo(ChronoUnit.MICROS));
+        return UserProfiles.of(repository.findById(userId).orElseThrow(() -> new IllegalStateException("The account no longer exists")));
+    }
+
+    private static boolean violates(DataIntegrityViolationException ex, String constraint) {
+        for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation) {
+                return constraint.equalsIgnoreCase(violation.getConstraintName());
+            }
+        }
+        return false;
+    }
+}

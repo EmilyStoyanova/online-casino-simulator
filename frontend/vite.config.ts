@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { loadEnv } from 'vite'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
@@ -22,6 +22,8 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'jsdom',
       setupFiles: ['./src/test/setup.ts'],
+      // Browser acceptance tests run with Playwright (`npm run test:e2e`), not Vitest.
+      exclude: [...configDefaults.exclude, 'e2e/**'],
       restoreMocks: true,
       unstubGlobals: true,
       unstubEnvs: true,

@@ -1,0 +1,7 @@
+# Test-only overrides (test classpath, never packaged; loaded after the main application.yml).
+app:
+  security:
+    throttle:
+      # No secret in the repository: without APP_SECURITY_THROTTLE_SECRET, every test application
+      # context uses a random throttling secret.
+      ephemeral-secret: true

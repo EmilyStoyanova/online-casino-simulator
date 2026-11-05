@@ -36,7 +36,7 @@ Root package `com.casino`. Each direct sub-package is a module:
 |---|---|---|
 | `common` | Shared kernel: web/OpenAPI config, clock, platform status, API error format | 1 |
 | `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 |
-| `user` | Profile, educational interests, preferences | 2 |
+| `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 |
 | `wallet` | Balances, immutable transaction ledger, idempotency | 3 |
 | `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 |
 | `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 |
@@ -111,13 +111,41 @@ frontend/src
 ```
 
 - `services/apiClient.ts` is the only place that calls `fetch`. It sends credentials (session
-  cookies from Week 2), maps failures to a typed `ApiError` and supports request cancellation.
+  cookies), maps failures to a typed `ApiError` carrying the Problem Details body (`code`, field
+  `errors`, `Retry-After`) and supports request cancellation. Unsafe methods send the CSRF token
+  (`XSRF-TOKEN` cookie, read by `services/csrf.ts`) in `X-XSRF-TOKEN`, fetching it from
+  `GET /api/v1/auth/csrf` when missing, and retry once on `403 CSRF_TOKEN_INVALID`.
+- Routing: React Router 8 (declarative `BrowserRouter`); pages `/`, `/login`, `/register` and the
+  protected `/profile`.
+- Profile (W2-14): `pages/ProfilePage` shows the saved profile. `features/profile/ProfileForm` edits
+  the display name and the interests (`InterestPicker`, catalogue from `GET /api/v1/interests`).
+  Each save sends only the changed properties through `AuthProvider.updateProfile`
+  (`PATCH /api/v1/users/me`), so the header and the account panel show the result at once. After
+  `409 CONCURRENT_MODIFICATION` the user can load the latest version (`reloadProfile`) without
+  losing their edits.
+- Authentication state (`features/auth/AuthProvider`) lives in memory only. Nothing about the
+  user, the password or the session is written to browser storage; the session id stays in the
+  `HttpOnly` cookie. After a page load the state is *checking* while `GET /api/v1/users/me`
+  (`services/userApi.ts`) asks the server: the profile restores the signed-in user, a `401` means
+  signed out, and a network or server error leaves the state *unknown* with a retry (never
+  "signed out"). A `401 SESSION_EXPIRED` while signed in clears the state and opens the login page.
+  Such a response is ignored if a sign-in or sign-out happened after its request was sent, because
+  it concerns the replaced session.
+- Protected pages (W2-13): `features/auth/RequireAuth` is a layout route
+  (`<Route element={<RequireAuth />}>`). It renders the page only when *authenticated*. *Anonymous*
+  users are redirected to `/login?returnTo=<page>`. While *checking* or *unknown* it shows a status
+  card: never the page, and no redirect. After sign-in or registration the user returns to
+  `returnTo` only if `features/auth/returnPath.ts` accepts it as an internal path; anything else goes
+  to `/`. The guard is interface only. The backend checks the session and role on every request and
+  remains the security boundary. The first protected page is the profile (W2-14).
 - Development: the Vite dev server proxies `/api` to the backend (same origin, no CORS).
 - Production (decided in Week 12): the preferred setup keeps the API on the **same site** as the
   frontend, through a reverse proxy for `/api/*`. Session cookies then stay first-party, because
   browsers block third-party cookies. As a fallback, `VITE_API_BASE_URL` points to a backend on a
   shared custom domain, and that backend allows the frontend origin via `APP_CORS_ALLOWED_ORIGINS`.
-  See `docs/plans/week-02.md` §7.11.
+  See `docs/plans/week-02.md` §7.10. In that fallback the SPA cannot read the API host's
+  `XSRF-TOKEN` cookie unless the cookie is shared with the frontend host; this is part of the
+  Week 12 decision.
 
 ## 5. Cross-cutting concerns
 
@@ -125,15 +153,57 @@ frontend/src
 |---|---|
 | Configuration | `application.yml` + environment variables; local `.env` imported via `spring.config.import` |
 | Schema management | Flyway migrations in `backend/src/main/resources/db/migration`; Hibernate `ddl-auto=validate` |
-| API errors | RFC 9457 Problem Details via `common.exception.GlobalExceptionHandler`; error codes and field errors added in Week 2 |
+| API errors | RFC 9457 Problem Details with a stable `code` (`ProblemCode`), field errors and `Cache-Control: no-store`, built by `common.exception.ProblemDetailFactory`; produced by `GlobalExceptionHandler` and, for errors outside the controllers, by the `/error` fallback (`ErrorFallbackController`). Module exceptions extend `ApiException` |
 | API contract | Design-first `openapi.yaml` (source of truth), verified by `OpenApiContractIT` |
 | API documentation | Swagger UI at `/swagger-ui.html`, showing the contract and the generated implementation view (to be disabled in production, Week 12) |
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
-| Security | *Planned for Week 2* ([ADR-0006](decisions/0006-session-authentication-security.md), proposed): Spring Security (deny by default), Spring Session JDBC (30 min idle, 12 h absolute), `HttpOnly` session cookie (`__Host-` + `Secure` in production), CSRF (SPA pattern), login/registration throttling. Session revocation on admin changes follows in Week 10. |
+| Security | Spring Security and Spring Session JDBC, see [§5.1](#51-security-week-2) and [ADR-0006](decisions/0006-session-authentication-security.md) |
 | Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
-| Testing | Unit (JUnit + Mockito), web slices (`@WebMvcTest`), integration (Testcontainers PostgreSQL), frontend (Vitest + RTL), E2E (Playwright, Week 11) |
+| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. Browser acceptance: Playwright against an isolated real stack (`frontend/e2e`, run locally); full E2E coverage and CI in Week 11 |
 | CI | GitHub Actions: backend `mvnw verify`, frontend lint → typecheck → test → build |
+
+### 5.1 Security (Week 2)
+
+Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.md) and
+[`docs/plans/week-02.md`](plans/week-02.md) §7. Implemented in `auth.config.SecurityConfig` and the
+`auth` services:
+
+- **Authorization:** deny by default.
+  - Public: system status, CSRF token, registration, login, logout, interests, health and info,
+    Swagger UI and both API descriptions.
+  - `/api/v1/admin/**` needs the role `ADMIN` (no endpoints yet). Every other `/api/**` path needs a
+    session. Everything else is denied.
+  - `401` and `403` are Problem Details from `ProblemDetailFactory`.
+- **Authentication:** JSON login and registration endpoints; `DaoAuthenticationProvider` with
+  `AccountUserDetailsService`. Every failed login gets the same `401 INVALID_CREDENTIALS`, also for
+  unknown and disabled accounts.
+  - The session principal is Spring's `User`: the user id as username, `ROLE_PLAYER` or
+    `ROLE_ADMIN` from `users.role` at sign-in.
+  - Controllers identify the user only through the principal.
+- **Sessions:** Spring Session JDBC in PostgreSQL (survives restarts).
+  - The cookie is `HttpOnly` and `SameSite=Lax`; `__Host-SESSION` + `Secure` in production.
+  - The session id changes at every sign-in. Sessions end after 30 min idle and 12 h after sign-in
+    (`AbsoluteSessionTimeoutFilter`).
+- **CSRF:** `csrf.spa()`. The `XSRF-TOKEN` cookie value goes into the `X-XSRF-TOKEN` header on every
+  unsafe method. Sign-in and logout delete the cookie.
+- **CORS:** only the origins in `APP_CORS_ALLOWED_ORIGINS`.
+- **Passwords:** BCrypt cost 12 (`DelegatingPasswordEncoder`, `{bcrypt}` prefix). Policy: 12
+  characters to 72 UTF-8 bytes, not the email or display name, not on the common-password denylist
+  (`auth.dto.CommonPasswords`).
+- **Throttling:** fixed windows in `auth_throttle`, checked before the password is verified.
+  - Keys are HMACs with `APP_SECURITY_THROTTLE_SECRET`.
+  - The client IP is the TCP peer. Forwarded headers are ignored unless the trusted proxies are
+    configured (`ForwardedHeadersCheck`).
+- **Administrators:** `ADMIN` is never assigned through the API. `AdminBootstrapRunner` creates the
+  first one from the environment and never promotes an existing account.
+- **Frontend:** `RequireAuth` only shapes the interface; the backend checks every request.
+- **Known limitations:**
+  - Sessions are not revoked automatically when a role, status or password changes. There is no
+    such feature yet; it is mandatory in Week 10, and until then the manual runbook in
+    [`database.md`](database.md#session-revocation-runbook) applies.
+  - CSRF tokens are not revoked on the server.
+  - Method security comes with the admin services (Week 10).
 
 ## 6. Deployment view (target, Week 12)
 
@@ -145,3 +215,23 @@ frontend/src
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a
 fast feedback loop.
+
+### Deployment checklist (before public access, Week 12)
+
+The configuration exists already; the checklist makes sure production uses it (from
+`docs/plans/week-02.md` §7.4, §7.8 and §13). All values live in the hosting provider's secret store,
+never in the repository.
+
+1. `APP_SESSION_COOKIE_NAME=__Host-SESSION` and `APP_SESSION_COOKIE_SECURE=true` (HTTPS only).
+2. `APP_SECURITY_THROTTLE_SECRET`: a new production value, different from every local one.
+3. `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` of the managed database.
+4. `APP_CORS_ALLOWED_ORIGINS`: the production frontend origin only.
+5. `SERVER_FORWARD_HEADERS_STRATEGY=native` together with an explicit
+   `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` that matches only the platform's proxies. Spring Boot's
+   default would trust all private address ranges, and the backend refuses to start without the list.
+6. Verify behind the proxy: the client IP is the right-most untrusted `X-Forwarded-For` entry,
+   `request.isSecure()` is `true`, and the cookies carry `Secure`; add a smoke test for the cookie
+   attributes over HTTPS.
+7. `APP_BOOTSTRAP_ADMIN_EMAIL`/`_PASSWORD` only for the first start, then remove them.
+8. Decide the routing (same site via reverse proxy, or shared custom domain;
+   `docs/plans/week-02.md` §7.10) and disable Swagger UI and `/v3/api-docs` in production.

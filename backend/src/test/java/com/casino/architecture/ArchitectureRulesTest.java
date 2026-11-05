@@ -9,6 +9,7 @@ import archfixture.common.exception.CommonDependsOnModule;
 import archfixture.game.service.CredentialsOutsideAuth;
 import archfixture.game.service.GameCycle;
 import archfixture.unknownmodule.service.UnknownModule;
+import archfixture.user.config.SecurityOutsideAuth;
 import archfixture.user.controller.EntityReturningController;
 import archfixture.user.dto.EntityWrappingDto;
 import archfixture.user.repository.ReverseLayerAccess;
@@ -26,9 +27,6 @@ import org.junit.jupiter.api.Test;
  * Proves that every architecture rule detects its violation, so a green {@link ModuleArchitectureTest}
  * means something. The fixture in package {@code archfixture} contains valid classes and, per rule,
  * the classes that violate it. Each rule must be violated by exactly those classes.
- *
- * <p>R9 (Spring Security configuration API) has no fixture, because Spring Security is not on the
- * classpath until W2-04.
  */
 class ArchitectureRulesTest {
 
@@ -73,6 +71,11 @@ class ArchitectureRulesTest {
     @Test
     void r8DetectsCredentialsOutsideUserAndAuth() {
         assertViolatedOnlyBy(RULES.userCredentialsAreUsedOnlyByUserAndAuth(), CredentialsOutsideAuth.class);
+    }
+
+    @Test
+    void r9DetectsSecurityConfigurationOutsideAuthConfig() {
+        assertViolatedOnlyBy(RULES.securityConfigurationOnlyInAuthConfig(), SecurityOutsideAuth.class);
     }
 
     @Test

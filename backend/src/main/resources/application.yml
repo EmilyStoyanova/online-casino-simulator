@@ -3,6 +3,11 @@
 spring:
   application:
     name: online-casino-simulator
+  autoconfigure:
+    # Accounts come only from the database (AccountUserDetailsService). Spring Boot's in-memory default
+    # user (with a generated password that is logged) is never wanted, also not in contexts without
+    # that service, such as web test slices.
+    exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
   config:
     # `.env` uses KEY=value syntax, so it can be imported as a properties file.
     # Real OS environment variables always take precedence over these imports.
@@ -17,6 +22,11 @@ spring:
       maximum-pool-size: 10
       # Fail fast (default is 30 s) so requests do not hang when the database is unreachable.
       connection-timeout: 5000
+      data-source-properties:
+        # PostgreSQL error details repeat row values ("Key (email)=(…)", "Failing row contains (…)",
+        # including password hashes); keep them out of exception messages and logs. The constraint
+        # name stays in the message.
+        logServerErrorDetail: false
   jpa:
     # Never keep a DB connection open while rendering the HTTP response.
     open-in-view: false
@@ -29,7 +39,14 @@ spring:
           time_zone: UTC
   flyway:
     locations: classpath:db/migration
-  # Errors are returned as RFC 9457 Problem Details by com.casino.common.exception.GlobalExceptionHandler.
+  session:
+    # Server-side sessions in PostgreSQL (Spring Session JDBC, ADR-0006); ended after this inactivity.
+    timeout: ${APP_SESSION_TIMEOUT:30m}
+    jdbc:
+      # Flyway owns the schema (V2__create_spring_session.sql).
+      initialize-schema: never
+  # Errors are returned as RFC 9457 Problem Details by com.casino.common.exception.GlobalExceptionHandler
+  # and, for errors outside the controllers (/error), by ErrorFallbackController.
 
 server:
   port: ${SERVER_PORT:8080}
@@ -39,6 +56,18 @@ server:
   shutdown: graceful
   error:
     include-stacktrace: never
+  # Forwarded headers (X-Forwarded-For/-Proto) are ignored, so they cannot be spoofed. Production
+  # enables `native` only together with an explicit trusted-proxy list (week-02.md §7.8).
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:none}
+  servlet:
+    session:
+      # Session cookie written by Spring Session. Production: `__Host-SESSION` and Secure.
+      # No Domain and Path=/ (Spring Session defaults), as required for the `__Host-` prefix.
+      cookie:
+        name: ${APP_SESSION_COOKIE_NAME:SESSION}
+        http-only: true
+        secure: ${APP_SESSION_COOKIE_SECURE:false}
+        same-site: ${APP_SESSION_COOKIE_SAME_SITE:lax}
 
 management:
   endpoints:
@@ -63,9 +92,42 @@ springdoc:
       - name: Implementation (generated)
         url: /v3/api-docs
     urls-primary-name: Contract (openapi.yaml)
+    # "Try it out" sends the XSRF-TOKEN cookie value as X-XSRF-TOKEN on unsafe requests.
+    csrf:
+      enabled: true
 
 app:
   # Replaced with the Maven project version at build time (resource filtering).
   version: '@project.version@'
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  security:
+    # BCrypt cost (at least 10).
+    bcrypt-strength: ${APP_SECURITY_BCRYPT_STRENGTH:12}
+    session:
+      # Maximum lifetime of a signed-in session, however active (AbsoluteSessionTimeoutFilter).
+      absolute-timeout: ${APP_SESSION_ABSOLUTE_TIMEOUT:12h}
+    # Fixed-window limits of login and registration throttling (week-02.md §7.7). The IP limit is
+    # generous because of shared networks (NAT). Ended windows are deleted hourly.
+    throttle:
+      # HMAC key of the stored throttle keys (Base64, at least 32 bytes). Required: the application does
+      # not start without it. Never committed; production sets it in the hosting provider's secret store.
+      secret: ${APP_SECURITY_THROTTLE_SECRET:}
+      # Tests only (src/test/resources/config/application.yml): random secret when none is configured.
+      ephemeral-secret: false
+      login-account-ip:
+        max-attempts: 5
+        window: 15m
+      login-ip:
+        max-attempts: 50
+        window: 15m
+      register-ip:
+        max-attempts: 10
+        window: 1h
+  # First administrator, created at start-up when both values are set (AdminBootstrapRunner, AC-9.4).
+  # Empty = disabled. Never committed: set them once in the secret store and remove them after the
+  # first start. An existing account is never changed or promoted.
+  bootstrap:
+    admin:
+      email: ${APP_BOOTSTRAP_ADMIN_EMAIL:}
+      password: ${APP_BOOTSTRAP_ADMIN_PASSWORD:}
