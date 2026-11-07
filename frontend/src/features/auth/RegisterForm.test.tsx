@@ -156,6 +156,19 @@ describe('Registration', () => {
     expect(within(screen.getByRole('alert')).getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/login')
   })
 
+  it('explains closed registration, links to sign in and does not retry like a CSRF error', async () => {
+    const api = backend(() => problemResponse(403, 'REGISTRATION_DISABLED'))
+    renderApp('/register')
+
+    const user = await fillIn()
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('New registrations are currently closed. Existing accounts can still sign in.')
+    expect(within(alert).getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/login')
+    expect(api.requestsTo(REGISTER)).toHaveLength(1)
+  })
+
   it('shows the waiting time of 429 and disables the form meanwhile', async () => {
     backend(() => problemResponse(429, 'TOO_MANY_ATTEMPTS', {}, { 'Retry-After': '3600' }))
     renderApp('/register')

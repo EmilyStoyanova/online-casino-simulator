@@ -24,7 +24,8 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 | Stage | Weeks | Scope | Status |
 |---|---|---|---|
 | 1 — Foundation | 1 | Repository, tooling, database, CI, documentation | ✅ Done |
-| | 2 | Authentication, users, roles, profile & interests | 🔍 Implemented, in review (branch `feature/week-02-auth`) |
+| | 2 | Authentication, users, roles, profile & interests | ✅ Done |
+| Deployment foundation | — | Neon staging database, Render backend staging | 🚧 In progress (branch `feature/deployment-foundation`): Neon staging migrated; Render prepared, not deployed |
 | 2 — Virtual currency & game logic | 3–4 | Wallet ledger, roulette engine | Planned |
 | 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | Planned |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
@@ -51,7 +52,8 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 ### Not implemented yet
 
 Virtual wallet and balances, roulette and every other game, learning modules, quizzes, rewards,
-statistics, play limits, the admin panel and deployment are **planned** (see the table above).
+statistics, play limits and the admin panel are **planned** (see the table above). The deployment
+is being prepared: the backend image and the Render staging runbook exist, but nothing is deployed.
 Nothing in the current application handles coins or game rounds.
 
 ## Architecture at a glance
@@ -77,7 +79,7 @@ Details: [`docs/architecture.md`](docs/architecture.md).
 | Area | Technology |
 |---|---|
 | Backend | Java 21, Spring Boot 4.1, Spring Web MVC, Spring Security, Spring Session JDBC, Spring Data JPA (Hibernate 7), Bean Validation |
-| Database | PostgreSQL 17, Flyway migrations |
+| Database | PostgreSQL 17 locally, 18 on Neon; Flyway migrations |
 | API | Design-first OpenAPI 3.1 contract, springdoc-openapi / Swagger UI |
 | Frontend | React 19, TypeScript 6, Vite 8, React Router 8, Tailwind CSS 4 |
 | Testing | JUnit Jupiter, Mockito, Spring Security Test, Testcontainers, ArchUnit, Vitest, React Testing Library |
@@ -92,7 +94,7 @@ Exact versions and the reasons for them: [ADR-0002](docs/decisions/0002-technolo
 ├── backend/                 Spring Boot application (Maven Wrapper: ./mvnw)
 │   └── src/main/java/com/casino/<module>/   one package per module (common, auth, user)
 ├── frontend/                React + Vite single-page application
-├── infrastructure/          Docker and deployment assets (Weeks 11–12; only a README so far)
+├── infrastructure/          Deployment assets: Neon read-only check scripts (neon/); Docker and hosting in Weeks 11–12
 ├── docs/                    Architecture, API, database, plans, ADRs
 ├── .github/workflows/       CI pipeline
 ├── docker-compose.yml       Local PostgreSQL
@@ -232,6 +234,32 @@ How the bootstrap behaves:
 - **Remove both lines from `.env` after the first start.** The password is then only stored as a
   BCrypt hash.
 
+### 7. Optional: use the Neon cloud database
+
+The steps above use the local Docker database, and that stays the default. To run the backend
+against the Neon staging branch instead:
+- put the connection values into the git-ignored `.env.neon` (template
+  [`.env.neon.example`](.env.neon.example));
+- start the backend with `SPRING_PROFILES_ACTIVE=neon`.
+
+TLS is always verified. Follow [docs/database.md → Neon](docs/database.md#neon) for the first
+start: it covers the read-only pre-flight check, how the migrations are applied, and how to find
+the tables in Neon Console.
+
+### 8. Optional: build and run the backend image
+
+The image that Render deploys can also be built locally (Docker Desktop running):
+
+```bash
+docker build -t casino-backend backend    # build context backend/, about 2–3 minutes
+```
+
+It contains no configuration. A container needs a database, the throttling secret and the
+profiles at runtime, for example `SPRING_PROFILES_ACTIVE=render` with `DB_*` values for a test
+database. Pass them with `--env-file` so values never appear on the command line. Deployment on
+Render, its settings and the Free plan's limits are described in
+[infrastructure/render/README.md](infrastructure/render/README.md).
+
 ### Useful URLs
 
 | URL | Purpose |
@@ -306,8 +334,12 @@ and in the hosting provider's secret store in production.
 | `POSTGRES_PORT` | Docker Compose | no | `5432` | Host port, bound to `127.0.0.1` only. Change `DB_URL` with it. |
 | `DB_URL` | Backend | no | `jdbc:postgresql://localhost:5432/casino` | JDBC URL |
 | `DB_USERNAME` / `DB_PASSWORD` | Backend | **yes** | — | Database credentials (password = secret) |
+| `SPRING_PROFILES_ACTIVE` | Backend | no | none (local database) | `neon` connects to Neon ([database.md](docs/database.md#neon)); `render` adds the public HTTPS settings for Render ([runbook](infrastructure/render/README.md)), used as `neon,render` |
+| `NEON_DB_HOST` / `NEON_DB_NAME` / `NEON_DB_USERNAME` / `NEON_DB_PASSWORD` | Backend with profile `neon`, `infrastructure/neon/readonly-query.sh` | **yes** with `neon` | — | Direct (non-pooler) Neon endpoint, database, role and password (secret). Only in the git-ignored `.env.neon` |
 | `APP_SECURITY_THROTTLE_SECRET` | Backend | **yes** | — | **Secret.** Base64, at least 32 random bytes; HMAC key of the throttle counters ([database.md](docs/database.md#throttling-secret)) |
 | `SERVER_PORT` | Backend | no | `8080` | HTTP port (also change `VITE_DEV_PROXY_TARGET`) |
+| `PORT` | Backend with profile `render` | set by Render | `8080` | Port Render routes traffic to (10000 on Render) |
+| `JDK_JAVA_OPTIONS` | Backend image | no | memory flags for 512 MB (see `backend/Dockerfile`) | JVM options of the container |
 | `APP_CORS_ALLOWED_ORIGINS` | Backend | no | `http://localhost:5173` | Comma-separated browser origins allowed to call the API |
 | `APP_SESSION_COOKIE_NAME` | Backend | no | `SESSION` | Production: `__Host-SESSION` |
 | `APP_SESSION_COOKIE_SECURE` | Backend | no | `false` | Production: `true` (HTTPS) |
@@ -318,6 +350,7 @@ and in the hosting provider's secret store in production.
 | `SERVER_FORWARD_HEADERS_STRATEGY` | Backend | no | `none` | `none` ignores `X-Forwarded-*`. `native` requires `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES`, and `framework` is rejected at start-up. |
 | `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` | Backend | with `native` only | — | Regular expression matching only the hosting platform's proxies (Week 12) |
 | `APP_BOOTSTRAP_ADMIN_EMAIL` / `APP_BOOTSTRAP_ADMIN_PASSWORD` | Backend | no (both or neither) | empty = disabled | First administrator; password = secret; remove after the first start |
+| `APP_REGISTRATION_ENABLED` | Backend | no | `true`; `false` with profile `render` | `false` closes registration (`403 REGISTRATION_DISABLED`); login is unaffected. Opening it on Render: [runbook](infrastructure/render/README.md#registrations-on-a-public-url) |
 | `VITE_API_BASE_URL` | Frontend build | no | empty (same origin) | Backend base URL for production builds |
 | `VITE_DEV_PROXY_TARGET` | Frontend dev server | no | `http://localhost:8080` | Target of the Vite `/api` proxy |
 

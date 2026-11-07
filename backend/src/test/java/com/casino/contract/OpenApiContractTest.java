@@ -163,7 +163,7 @@ class OpenApiContractTest {
 
     @Test
     void everyWeek2OperationIsImplemented() {
-        assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.2.0");
+        assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.3.0");
         // GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08),
         // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10). The planned marker stays
         // available for later weeks; the tests below use a minimal specification for it.

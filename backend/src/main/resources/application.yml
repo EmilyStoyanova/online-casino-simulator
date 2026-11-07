@@ -101,6 +101,10 @@ app:
   version: '@project.version@'
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  registration:
+    # `false` closes POST /api/v1/auth/register (403 REGISTRATION_DISABLED); login is unaffected.
+    # Server configuration only. The profile `render` defaults to false (RegistrationProperties).
+    enabled: ${APP_REGISTRATION_ENABLED:true}
   security:
     # BCrypt cost (at least 10).
     bcrypt-strength: ${APP_SECURITY_BCRYPT_STRENGTH:12}

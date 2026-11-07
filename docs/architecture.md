@@ -209,26 +209,34 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
 
 | Component | Host |
 |---|---|
-| Frontend (static build) | Cloudflare Pages |
-| Backend (Docker image) | Render |
-| Database | Neon (managed PostgreSQL 17) |
+| Frontend (static build) | Cloudflare Pages (Vercel with a same-origin `/api` rewrite is proposed; decided in ADR-0007) |
+| Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render, Frankfurt; staging prepared ([infrastructure/render](../infrastructure/render/README.md)) |
+| Database | Neon (managed PostgreSQL 18; local development and tests use 17) |
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a
-fast feedback loop.
+fast feedback loop. The Spring profile `neon` points a local backend at a Neon branch instead
+(first tests on a `staging` branch; [database.md → Neon](database.md#neon)).
 
 ### Deployment checklist (before public access, Week 12)
 
 The configuration exists already; the checklist makes sure production uses it (from
 `docs/plans/week-02.md` §7.4, §7.8 and §13). All values live in the hosting provider's secret store,
-never in the repository.
+never in the repository. On Render, the profile `render` (`application-render.yml`) already sets
+items 1, 5 and the Swagger part of 8; items 2–4 and 6 remain per environment
+([infrastructure/render](../infrastructure/render/README.md)).
 
 1. `APP_SESSION_COOKIE_NAME=__Host-SESSION` and `APP_SESSION_COOKIE_SECURE=true` (HTTPS only).
 2. `APP_SECURITY_THROTTLE_SECRET`: a new production value, different from every local one.
-3. `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` of the managed database.
+3. Database: `SPRING_PROFILES_ACTIVE=neon` with the `NEON_DB_*` values of the production branch's
+   direct endpoint (verified TLS, channel binding; [database.md → Neon](database.md#neon)).
+   Check the Neon plan's compute hours: Spring Session's cleanup job (every minute by default) keeps
+   a scale-to-zero compute awake.
 4. `APP_CORS_ALLOWED_ORIGINS`: the production frontend origin only.
 5. `SERVER_FORWARD_HEADERS_STRATEGY=native` together with an explicit
    `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` that matches only the platform's proxies. Spring Boot's
    default would trust all private address ranges, and the backend refuses to start without the list.
+   Render: `10.0.0.0/8` (its internal load balancer); the client IP the app sees is then a Cloudflare
+   edge address until Cloudflare's ranges are trusted too.
 6. Verify behind the proxy: the client IP is the right-most untrusted `X-Forwarded-For` entry,
    `request.isSecure()` is `true`, and the cookies carry `Secure`; add a smoke test for the cookie
    attributes over HTTPS.

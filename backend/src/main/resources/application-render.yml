@@ -1,0 +1,50 @@
+# Public deployment behind Render's HTTPS proxy (profile `render`), together with the database
+# profile: SPRING_PROFILES_ACTIVE=neon,render. Only what differs from a local run; secrets and
+# deployment-specific values stay environment variables. Runbook: infrastructure/render/README.md.
+server:
+  # Render routes public traffic to $PORT (default 10000). The address is Spring Boot's default,
+  # all interfaces (0.0.0.0).
+  port: ${PORT:8080}
+  # Render terminates TLS at its load balancer and adds X-Forwarded-For/-Proto. They are honoured
+  # only from the TCP peer, Render's internal load balancer (10.0.0.0/8): then request.isSecure()
+  # is true for HTTPS (HSTS, Secure cookies), and the client cannot choose its own address because
+  # Tomcat takes the right-most entry not appended by a trusted proxy. Render does not strip a
+  # client-supplied X-Forwarded-For, so nothing outside 10.0.0.0/8 is trusted. Verify after the
+  # first deploy (README); override with SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES if Render differs.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: '10\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+    threads:
+      # Fewer request threads (default 200) for a 512 MB instance; each one has its own stack.
+      max: 50
+  servlet:
+    session:
+      cookie:
+        # HTTPS only: the `__Host-` prefix requires Secure, Path=/ and no Domain (ADR-0006).
+        name: __Host-SESSION
+        secure: true
+        same-site: lax
+
+spring:
+  lifecycle:
+    # Render stops an instance with SIGTERM and kills it 30 s later: finish requests before that.
+    timeout-per-shutdown-phase: 20s
+
+app:
+  registration:
+    # Closed on a public deployment unless APP_REGISTRATION_ENABLED=true is set on purpose, after the
+    # deployment has been verified.
+    enabled: ${APP_REGISTRATION_ENABLED:false}
+  cors:
+    # No browser origin is allowed until a frontend exists. Then set APP_CORS_ALLOWED_ORIGINS to its
+    # exact HTTPS origin. Never localhost on a public deployment.
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:}
+
+springdoc:
+  # The generated API description and Swagger UI are development tools; the design-first contract
+  # (/openapi.yaml) stays available.
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

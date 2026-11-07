@@ -31,7 +31,7 @@ The API is **design-first**. The contract
   | `VALIDATION_FAILED` | 400 | Bean Validation failures; `errors` lists `{field, message}` sorted by field, never the rejected value |
   | `MALFORMED_REQUEST` | 400 | Unreadable JSON, wrong JSON types, missing body, missing or unconvertible parameter |
   | `AUTHENTICATION_REQUIRED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS` | 401 | No session, ended session, failed login |
-  | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID` | 403 | Missing role (`/api/v1/admin/**`), missing or invalid CSRF token |
+  | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID`, `REGISTRATION_DISABLED` | 403 | Missing role (`/api/v1/admin/**`), missing or invalid CSRF token, registration closed by configuration |
   | `NOT_FOUND` | 404 | Unknown path or resource |
   | `METHOD_NOT_ALLOWED` | 405 | Unsupported method (`Allow` header) |
   | `NOT_ACCEPTABLE` | 406 | No representation matches the `Accept` header (the problem itself is still JSON) |
@@ -123,7 +123,7 @@ itself (`springdoc.swagger-ui.csrf.enabled`).
 |---|---|---|---|---|
 | GET | `/api/v1/system/status` | System | `200` `SystemStatus`, `503` `SystemStatus`, `500` `ProblemDetail` | Application version and database connectivity (public) |
 | GET | `/api/v1/auth/csrf` | Authentication | `204` (`XSRF-TOKEN` cookie), `500` `ProblemDetail` | CSRF token for unsafe requests (public) |
-| POST | `/api/v1/auth/register` | Authentication | `201` `UserProfile` (+ session cookie), `400`, `403`, `409`, `429`, `500` `ProblemDetail` | Creates a `PLAYER` account and signs it in (public, CSRF token required) |
+| POST | `/api/v1/auth/register` | Authentication | `201` `UserProfile` (+ session cookie), `400`, `403`, `409`, `429`, `500` `ProblemDetail` | Creates a `PLAYER` account and signs it in (public, CSRF token required; `403 REGISTRATION_DISABLED` while closed) |
 | POST | `/api/v1/auth/login` | Authentication | `200` `UserProfile` (+ session cookie), `400`, `401`, `403`, `429`, `500` `ProblemDetail` | Signs in (public, CSRF token required) |
 | POST | `/api/v1/auth/logout` | Authentication | `204`, `403`, `500` `ProblemDetail` | Ends the session (public, CSRF token required) |
 | GET | `/api/v1/interests` | Interests | `200` `Interest[]`, `500` `ProblemDetail` | Active educational interests in display order (public) |
@@ -186,6 +186,12 @@ Example `GET /api/v1/system/status` → `200`:
   headers are ignored unless a trusted proxy is configured.
 - The registration response deletes the `XSRF-TOKEN` cookie; the client calls `GET /api/v1/auth/csrf`
   before its next unsafe request.
+- **Closed registration:** with `APP_REGISTRATION_ENABLED=false` (server configuration only; the
+  default is `true`, and `false` for the Render profile), every request that passes the CSRF check
+  gets `403 REGISTRATION_DISABLED`. The order is then `403 CSRF_TOKEN_INVALID` →
+  `403 REGISTRATION_DISABLED`. Nothing is counted, no body is read, no account or session is
+  created. Login, logout and sessions are unaffected. The registration form shows "New registrations
+  are currently closed" with a link to sign in.
 
 ### Login and logout (`POST /api/v1/auth/login`, `POST /api/v1/auth/logout`)
 
@@ -278,7 +284,8 @@ These endpoints are added to the contract first, in the week they are implemente
 operations, schemas, error codes and security schemes were added to `openapi.yaml` (contract
 version 0.2.0) in W2-02 and marked `planned` until they were implemented (W2-04 … W2-10); every
 Week 2 operation is implemented now. The design rationale is in
-[`docs/plans/week-02.md`](plans/week-02.md) §5.
+[`docs/plans/week-02.md`](plans/week-02.md) §5. Contract version 0.3.0 (deployment foundation) adds
+the error code `REGISTRATION_DISABLED` to `POST /api/v1/auth/register`.
 
 | Method | Endpoint | Purpose | Week |
 |---|---|---|---|

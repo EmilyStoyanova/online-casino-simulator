@@ -38,7 +38,8 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  * {@code application.yml}.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({SecurityProperties.class, ThrottleProperties.class, BootstrapAdminProperties.class})
+@EnableConfigurationProperties({SecurityProperties.class, ThrottleProperties.class, BootstrapAdminProperties.class,
+        RegistrationProperties.class})
 public class SecurityConfig {
 
     private static final String BCRYPT = "bcrypt";

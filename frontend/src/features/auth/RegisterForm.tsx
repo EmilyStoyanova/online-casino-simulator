@@ -36,7 +36,7 @@ export function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
       {message && (
         <FormAlert tone="error">
           {message}{' '}
-          {failureCode === 'EMAIL_ALREADY_REGISTERED' && (
+          {(failureCode === 'EMAIL_ALREADY_REGISTERED' || failureCode === 'REGISTRATION_DISABLED') && (
             <Link to="/login" className="font-semibold text-rose-100 underline underline-offset-2">
               Go to sign in
             </Link>

@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.neon.example
 *.local
 
 # --- Backend (Maven / Java) --------------------------------------------------

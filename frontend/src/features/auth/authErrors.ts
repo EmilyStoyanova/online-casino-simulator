@@ -47,6 +47,8 @@ function describe(error: unknown, action: 'login' | 'register'): FormFailure {
         retryAfterSeconds: error.retryAfterSeconds,
       }
     }
+    case 'REGISTRATION_DISABLED':
+      return { message: 'New registrations are currently closed. Existing accounts can still sign in.', fieldErrors: {} }
     case 'CSRF_TOKEN_INVALID':
       return { message: 'Your security token could not be renewed. Reload the page and try again.', fieldErrors: {} }
     case 'MALFORMED_REQUEST':
