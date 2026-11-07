@@ -1,0 +1,26 @@
+# Neon PostgreSQL (profile `neon`): `SPRING_PROFILES_ACTIVE=neon`. Overrides only the database
+# connection; everything else comes from application.yml and `.env`. Without the profile the backend
+# uses the local Docker database exactly as before. Procedure: docs/database.md, "Neon".
+spring:
+  config:
+    # Git-ignored file with the NEON_DB_* values (template: `.env.neon.example`), read from the
+    # repository root or backend/ like `.env`. Real environment variables take precedence.
+    import:
+      - optional:file:.env.neon[.properties]
+      - optional:file:../.env.neon[.properties]
+  datasource:
+    # No defaults on purpose: without the NEON_DB_* values the backend does not start, so it can
+    # never fall back to the local database while the profile is active.
+    # - The host is the DIRECT endpoint (no `-pooler`): Flyway takes a session-level advisory lock,
+    #   which Neon's transaction-mode pooler does not support.
+    # - TLS with certificate and host name verification against the JVM trust store (Neon uses a
+    #   publicly trusted Let's Encrypt certificate); SCRAM channel binding is required.
+    # - Credentials never go into the URL, so they cannot appear in Flyway's or Hikari's log lines.
+    url: jdbc:postgresql://${NEON_DB_HOST}/${NEON_DB_NAME}?sslmode=verify-full&sslfactory=org.postgresql.ssl.DefaultJavaSSLFactory&channelBinding=require
+    username: ${NEON_DB_USERNAME}
+    password: ${NEON_DB_PASSWORD}
+    hikari:
+      # A suspended Neon compute (scale to zero) takes a few seconds to wake up.
+      connection-timeout: 15000
+      # Fewer connections than locally: a 0.25 CU compute allows 97 for applications.
+      maximum-pool-size: 5

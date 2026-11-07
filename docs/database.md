@@ -1,6 +1,6 @@
 # Database
 
-PostgreSQL 17. The schema is owned exclusively by **Flyway**; Hibernate only validates entity
+PostgreSQL 17 locally (Docker Compose, Testcontainers); the Neon project runs PostgreSQL 18 (see [Neon](#neon)). The schema is owned exclusively by **Flyway**; Hibernate only validates entity
 mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 
 ## Migration conventions
@@ -206,3 +206,179 @@ docker exec -it casino-postgres psql -U <POSTGRES_USER> -d <POSTGRES_DB>   # SQL
 
 `docker compose down -v` **deletes the volume with all local data** (accounts, sessions). Use it
 only as a deliberate reset, not as a routine fix.
+
+## Neon
+
+The local Docker database stays the default. The backend connects to Neon (managed PostgreSQL 18,
+project `online-casino-simulator`, AWS Europe Central 1) only when the Spring profile `neon` is
+active. Nothing is copied between the two: Flyway creates an empty schema in Neon, and no local
+accounts, passwords or sessions go there.
+
+| | Local (default) | Neon (profile `neon`) |
+|---|---|---|
+| Activated by | — | `SPRING_PROFILES_ACTIVE=neon` |
+| Values from | `.env` | `.env.neon` (git-ignored, template `.env.neon.example`); everything else still from `.env` |
+| Connection variables | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | `NEON_DB_HOST`, `NEON_DB_NAME`, `NEON_DB_USERNAME`, `NEON_DB_PASSWORD` |
+| TLS | none (localhost only) | `verify-full` (certificate and host name) plus SCRAM channel binding |
+| Connection pool | 10 connections, 5 s timeout | 5 connections, 15 s timeout (compute wake-up) |
+| Configuration | `application.yml` | `application-neon.yml` (overrides only the data source) |
+
+**Current state (2026-11-07):**
+
+| Branch | State |
+|---|---|
+| `staging` | V1–V5 applied with the procedure below: 7 tables, 8 seeded interests, no accounts or sessions |
+| `production` | Empty and unused until the deployment (Week 12) |
+
+**Version difference:** Neon runs PostgreSQL 18.6, while the local database and the Testcontainers
+integration tests use 17.11.
+- Flyway 12.4.0 supports major versions up to 18, and the migrations use only features available
+  in both versions.
+- Integration tests still do not prove behaviour on 18. Aligning both on one major version is open
+  for the deployment review (Week 12).
+
+To check which branch `.env.neon` points to, compare `neon.branch_id` with the branch ID on the
+branch's page in the Console:
+
+```sql
+SELECT current_setting('neon.branch_id'), current_setting('neon.endpoint_id');
+```
+
+The pre-flight SQL alone does not identify the branch.
+
+### Connection configuration
+
+[`application-neon.yml`](../backend/src/main/resources/application-neon.yml) builds the JDBC URL
+from the variables:
+
+```text
+jdbc:postgresql://${NEON_DB_HOST}/${NEON_DB_NAME}?sslmode=verify-full&sslfactory=org.postgresql.ssl.DefaultJavaSSLFactory&channelBinding=require
+```
+
+- **Direct endpoint, not the pooler.** Neon's pooled hosts (`-pooler`) run PgBouncer in
+  transaction mode, which does not support session-level advisory locks, and Flyway takes one per
+  migration run. Neon recommends direct connections for migrations. Flyway and Spring Session JDBC
+  use the same direct connection; a 0.25 CU compute allows 97 application connections, and the
+  pool uses at most 5. If app traffic ever needs the pooler, Flyway must keep a direct URL
+  (`spring.flyway.url`); that is a deployment decision (Week 12).
+- **`sslmode=verify-full`** checks the certificate chain and that the certificate matches the host
+  name. Neon uses a Let's Encrypt certificate (ISRG Root X1).
+- **`DefaultJavaSSLFactory`** validates the chain against the JVM trust store, which already
+  contains ISRG Root X1 (JDK 21). The driver's default factory would instead require a
+  `root.crt` file in `%APPDATA%\postgresql\`. The host name check is done by the driver for
+  `verify-full` whichever factory is used.
+- **`channelBinding=require`**: SCRAM-SHA-256-PLUS binds the login to the TLS channel (supported
+  by the driver 42.7.14 that Spring Boot 4.1.2 manages).
+- **Credentials are separate properties**, never in the URL. Flyway logs the URL at start-up, so it
+  shows the host and database name, never the user or password. Do not use Neon's ready-made Java
+  connection string: it contains `user=` and `password=`.
+- **Values are not interchangeable with the local ones.** Without the `NEON_DB_*` values the
+  backend does not start: the connection fails with `UnknownHostException: ${NEON_DB_HOST}`. It
+  never falls back to the local database.
+
+### One-time setup (Neon Console)
+
+1. **Create a branch for the first tests** instead of using `production`: **Branches → Create
+   branch**, name `staging`, parent `production`. The branch has its own compute and the same
+   database `neondb` and roles. `production` stays unused until the deployment (Week 12).
+2. **Find the connection values:** on the dashboard, **Connect**, then choose branch `staging`,
+   database `neondb`, the role (for example `neondb_owner`) and switch **Connection pooling off**.
+   You need the host (`ep-….eu-central-1.aws.neon.tech`, without `-pooler`), the database, the role
+   and the password.
+3. **Store them privately in `.env.neon`** (repository root). Type or paste the values in your
+   editor, never in a chat, a prompt or a shell command:
+
+   ```bash
+   cp .env.neon.example .env.neon
+   code .env.neon                  # or any editor; values without quotes
+   git check-ignore -v .env.neon   # must print the .gitignore rule `.env.*`
+   grep -c '^NEON_DB_[A-Z]*=.' .env.neon   # 4 = all four values set (prints only the count)
+   ```
+
+### Migration procedure
+
+Flyway applies migrations automatically when the backend starts with the profile, so the backend is
+started against Neon only after the checks below.
+
+1. **Read-only pre-flight check.**
+   [`readonly-query.sh`](../infrastructure/neon/readonly-query.sh) runs SQL with `psql` from the
+   PostgreSQL Docker image (no local `psql` needed). It works like this:
+   - credentials go from `.env.neon` into the container environment only;
+   - TLS is `verify-full` with channel binding;
+   - everything runs in one `READ ONLY` transaction that is rolled back.
+
+   ```bash
+   bash infrastructure/neon/readonly-query.sh < infrastructure/neon/preflight.sql
+   ```
+
+   Expected:
+   - `\conninfo` names the `staging` endpoint's host, database `neondb` and an SSL connection;
+   - **no tables** outside the system schemas;
+   - `flyway_history_exists = f` and `can_create_in_public = t`.
+
+   **Stop if anything else appears**: it is the wrong branch or database.
+2. **What will run:** V1–V5 from [Applied migrations](#applied-migrations), in this order:
+   - V1: `set_updated_at()`;
+   - V2: `spring_session` and `spring_session_attributes`;
+   - V3: `users`;
+   - V4: `auth_throttle`;
+   - V5: `interests` (8 seeded rows) and `user_interests`.
+
+   Flyway adds `flyway_schema_history`. These Flyway defaults are safety nets:
+   - Flyway refuses a non-empty schema without history, because `baseline-on-migrate` is off;
+   - `clean` is disabled, so Flyway never drops anything.
+3. **Migrate** (only after the pre-flight check matches). From `backend/`, on a port that does not
+   clash with the local backend:
+
+   ```bash
+   SPRING_PROFILES_ACTIVE=neon SERVER_PORT=8081 ./mvnw spring-boot:run
+   ```
+
+   Expected log:
+   - `The following 1 profile is active: "neon"`;
+   - `Database: jdbc:postgresql://ep-…/neondb… (PostgreSQL 18.…)`;
+   - `Successfully applied 5 migrations to schema "public", now at version v5`;
+   - `Started CasinoSimulatorApplication`.
+
+   http://localhost:8081/api/v1/system/status then reports `schemaVersion` `5`. Stop with
+   `Ctrl+C`. Do not set `APP_BOOTSTRAP_ADMIN_*` for this run, and do not register accounts on the
+   branch unless you mean to.
+4. **Verify (read-only):**
+
+   ```bash
+   bash infrastructure/neon/readonly-query.sh < infrastructure/neon/verify-migrations.sql
+   ```
+
+   Expected:
+   - versions 1–5, each with `success = t`;
+   - the tables `auth_throttle`, `flyway_schema_history`, `interests`, `spring_session`,
+     `spring_session_attributes`, `user_interests` and `users`;
+   - 8 interests and no users, sessions or throttle rows.
+5. **Later starts** validate the checksums of the applied migrations and apply only new ones.
+
+### Browsing the tables in Neon Console
+
+Open project `online-casino-simulator` and select branch **`staging`** in the branch selector.
+**Tables** (left navigation) lists the tables of database `neondb`, schema `public`:
+- `flyway_schema_history` shows the applied versions;
+- `interests` shows the 8 seeded entries.
+
+The **SQL Editor** (same branch and database) runs queries as the selected role, with write access,
+so use it for `SELECT` only. Do not open `spring_session` rows: session ids are as sensitive as
+passwords.
+
+### Troubleshooting Neon connections
+
+| Symptom | Cause and fix |
+|---|---|
+| `UnknownHostException: ${NEON_DB_HOST}` | The profile is active but no value was found: `.env.neon` is missing, is not in the repository root, or the backend was started outside `backend/` or the root. |
+| `UnknownHostException: ep-…` | Typo in `NEON_DB_HOST`, or the branch or endpoint was deleted. Copy the host again from **Connect**. |
+| `password authentication failed for user` | Wrong role or password, quotes around a value, or the password was reset in the Console. Re-copy the values into `.env.neon`. |
+| `PKIX path building failed` / `SSLHandshakeException` | The certificate chain cannot be verified. Usual causes are an old JDK without ISRG Root X1, or antivirus or proxy software that intercepts TLS. Use JDK 21 and allow the connection. **Never lower `sslmode`** to get around it. |
+| `The hostname … could not be verified` | `NEON_DB_HOST` is not the endpoint name from **Connect** (for example an IP address or an alias). |
+| `channel binding required but not supported` | Something between you and Neon terminates TLS (corporate proxy). Use another network; do not disable channel binding. |
+| Connection timeout / `Couldn't connect to compute node` | The compute is waking up from scale-to-zero (retry after a few seconds), or the network blocks outbound port 5432. Check the compute state on the branch page, and try another network. |
+| `terminating connection due to administrator command` | The compute was suspended while a pooled connection was idle. The pool replaces the connection; retry the request. |
+| `Found non-empty schema(s) "public" without schema history table` | The database is not empty. **Stop**: it is probably the wrong branch or database. Never enable `baseline-on-migrate` to get past it. |
+| `Validate failed: Migrations have failed validation` | An applied migration file was changed locally. Restore it; changes go into a new migration. |
+| `readonly-query.sh` prints a validation message | It names the problem (missing file, empty value, quotes, `-pooler` host) without showing any value. |

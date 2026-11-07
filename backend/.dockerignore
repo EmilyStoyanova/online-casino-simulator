@@ -1,0 +1,30 @@
+# Docker build context = backend/ (see Dockerfile). Only the Maven wrapper, the POM and src/ are
+# needed; everything else stays out of the context and therefore out of the image.
+
+# Secrets and local configuration: never sent to the build.
+**/.env
+**/.env.*
+**/*.local
+**/*.pem
+**/*.key
+**/*.p12
+**/*.jks
+
+# Build output and caches (the image builds its own jar).
+target/
+**/*.class
+hs_err_pid*
+*.log
+
+# IDE, OS and VCS files
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+.git
+.gitignore
+
+# The image definition itself
+Dockerfile
+.dockerignore

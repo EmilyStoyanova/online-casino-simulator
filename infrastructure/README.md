@@ -1,8 +1,10 @@
 # Infrastructure
 
-| Directory | Contents | Week |
+| Location | Contents | Stage |
 |---|---|---|
-| `docker/` | Production Dockerfile for the Spring Boot backend (multi-stage, non-root, JRE 21) | 12 |
-| `deployment/` | Deployment configuration and runbooks for Cloudflare Pages (frontend), Render (backend) and Neon (PostgreSQL), plus a documented portable alternative | 12 |
+| `neon/` | Read-only checks against the Neon database: `readonly-query.sh` (psql in Docker, verified TLS, credentials from `.env.neon`), `preflight.sql` before and `verify-migrations.sql` after the first migration ([docs/database.md](../docs/database.md#neon)) | Deployment foundation |
+| `render/` | Runbook for the backend staging service on Render: settings, environment variables, browser steps, verification, Free plan limits, public security configuration ([render/README.md](render/README.md)) | Deployment foundation |
+| [`../backend/Dockerfile`](../backend/Dockerfile) | Backend image: multi-stage Maven build, Temurin 21 JRE (Alpine), non-root, pinned base images; build context `backend/` | Deployment foundation |
+| frontend hosting | Frontend deployment and the final routing decision (ADR-0007) | 12 |
 
 Local development infrastructure lives in the repository-root `docker-compose.yml` (PostgreSQL).
