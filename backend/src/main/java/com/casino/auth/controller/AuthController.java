@@ -66,7 +66,7 @@ class AuthController {
     @ApiResponse(responseCode = "201", description = "Account created; the user is signed in")
     @ApiResponse(responseCode = "400", description = "Invalid request",
             content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(ref = PROBLEM_DETAIL)))
-    @ApiResponse(responseCode = "403", description = "Missing or invalid CSRF token",
+    @ApiResponse(responseCode = "403", description = "Missing or invalid CSRF token, or registration is closed",
             content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(ref = PROBLEM_DETAIL)))
     @ApiResponse(responseCode = "409", description = "The email is already registered",
             content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(ref = PROBLEM_DETAIL)))

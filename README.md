@@ -350,6 +350,7 @@ and in the hosting provider's secret store in production.
 | `SERVER_FORWARD_HEADERS_STRATEGY` | Backend | no | `none` | `none` ignores `X-Forwarded-*`. `native` requires `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES`, and `framework` is rejected at start-up. |
 | `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` | Backend | with `native` only | — | Regular expression matching only the hosting platform's proxies (Week 12) |
 | `APP_BOOTSTRAP_ADMIN_EMAIL` / `APP_BOOTSTRAP_ADMIN_PASSWORD` | Backend | no (both or neither) | empty = disabled | First administrator; password = secret; remove after the first start |
+| `APP_REGISTRATION_ENABLED` | Backend | no | `true`; `false` with profile `render` | `false` closes registration (`403 REGISTRATION_DISABLED`); login is unaffected. Opening it on Render: [runbook](infrastructure/render/README.md#registrations-on-a-public-url) |
 | `VITE_API_BASE_URL` | Frontend build | no | empty (same origin) | Backend base URL for production builds |
 | `VITE_DEV_PROXY_TARGET` | Frontend dev server | no | `http://localhost:8080` | Target of the Vite `/api` proxy |
 

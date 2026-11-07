@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import com.casino.auth.config.RegistrationProperties;
 import com.casino.common.config.CorsProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.Banner;
@@ -66,6 +67,23 @@ class RenderProfileTest {
     }
 
     @Test
+    void registrationIsClosedOnRenderUnlessOpenedOnPurposeAndOpenLocally() throws Exception {
+        // Defaults read from the files: a developer's .env (imported in tests) may set the variable.
+        assertThat(load("application-render.yml").getProperty("app.registration.enabled"))
+                .hasToString("${APP_REGISTRATION_ENABLED:false}");
+        assertThat(load("application.yml").getProperty("app.registration.enabled"))
+                .hasToString("${APP_REGISTRATION_ENABLED:true}");
+
+        for (String[] variant : new String[][] {{"--APP_REGISTRATION_ENABLED=false", "false"},
+                {"--APP_REGISTRATION_ENABLED=true", "true"}}) {
+            try (ConfigurableApplicationContext context = start(true, variant[0])) {
+                assertThat(Binder.get(context.getEnvironment()).bind("app.registration", RegistrationProperties.class)
+                        .map(RegistrationProperties::enabled).get()).hasToString(variant[1]);
+            }
+        }
+    }
+
+    @Test
     void withoutTheProfileTheLocalDefaultsAreUnchanged() {
         try (ConfigurableApplicationContext context = start(false, "--PORT=10000")) {
             Environment env = context.getEnvironment();
@@ -76,6 +94,10 @@ class RenderProfileTest {
             assertThat(env.getProperty("server.servlet.session.cookie.secure")).isEqualTo("false");
             assertThat(env.getProperty("springdoc.swagger-ui.enabled")).isNull();
         }
+    }
+
+    private static PropertySource<?> load(String file) throws Exception {
+        return new YamlPropertySourceLoader().load(file, new ClassPathResource(file)).getFirst();
     }
 
     private static List<String> corsOrigins(ConfigurableApplicationContext context) {

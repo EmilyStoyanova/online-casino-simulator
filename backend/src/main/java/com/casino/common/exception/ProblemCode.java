@@ -20,6 +20,7 @@ public enum ProblemCode {
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "The email or password is incorrect."),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "You are not allowed to perform this action."),
     CSRF_TOKEN_INVALID(HttpStatus.FORBIDDEN, "The CSRF token is missing or invalid."),
+    REGISTRATION_DISABLED(HttpStatus.FORBIDDEN, "New registrations are currently closed."),
     NOT_FOUND(HttpStatus.NOT_FOUND, "The requested resource does not exist."),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "The HTTP method is not supported by this resource."),
     NOT_ACCEPTABLE(HttpStatus.NOT_ACCEPTABLE, "None of the requested media types can be produced."),

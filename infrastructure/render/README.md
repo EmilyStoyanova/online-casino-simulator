@@ -12,7 +12,7 @@ result. Nothing here deploys automatically.
 |---|---|
 | [`backend/Dockerfile`](../../backend/Dockerfile) | Multi-stage image: Maven build on Temurin 21 JDK, runtime on Temurin 21 JRE (Alpine), non-root user `10001`, base images pinned by version and digest |
 | [`backend/.dockerignore`](../../backend/.dockerignore) | Keeps `.env*`, keys, `target/` and IDE files out of the build context |
-| [`application-render.yml`](../../backend/src/main/resources/application-render.yml) | Profile `render`: `PORT`, trusted proxy, `__Host-SESSION` + `Secure`, no default CORS origin, Swagger UI off, 20 s shutdown phase |
+| [`application-render.yml`](../../backend/src/main/resources/application-render.yml) | Profile `render`: `PORT`, trusted proxy, `__Host-SESSION` + `Secure`, no default CORS origin, registration closed unless `APP_REGISTRATION_ENABLED=true`, Swagger UI off, 20 s shutdown phase |
 | [`application-neon.yml`](../../backend/src/main/resources/application-neon.yml) | Profile `neon`: verified TLS to the Neon direct endpoint |
 
 The image contains **no configuration values**. Profiles, database and secrets come from Render's
@@ -54,6 +54,7 @@ each value directly from its source, never through a chat, a ticket, a commit or
 | `NEON_DB_USERNAME` | The staging role (for example `neondb_owner`) | no |
 | `NEON_DB_PASSWORD` | That role's password | **yes** |
 | `APP_SECURITY_THROTTLE_SECRET` | A **new** value, different from every local one (see below) | **yes** |
+| `APP_REGISTRATION_ENABLED` | `false` until the deployment is verified ([registrations](#registrations-on-a-public-url)) | no |
 
 Do not set the following:
 - `PORT`: Render provides it (10000).
@@ -87,7 +88,8 @@ applied, stop the service: it is pointing at a different database.
 3. Fill in the [settings](#render-settings): name (for example `casino-backend-staging`, which
    becomes the URL `https://casino-backend-staging.onrender.com`), language Docker, branch, region,
    Root Directory, instance type Free.
-4. **Environment Variables:** add the six [variables](#environment-variables).
+4. **Environment Variables:** add the seven [variables](#environment-variables), including
+   `APP_REGISTRATION_ENABLED=false`.
 5. **Advanced:**
    - Health Check Path `/actuator/health/readiness`;
    - Dockerfile Path `./Dockerfile`;
@@ -97,6 +99,7 @@ applied, stop the service: it is pointing at a different database.
    and starting on a Free instance takes about 2 min more.
 7. Follow **Logs**. Expected:
    - `The following 2 profiles are active: "neon", "render"`;
+   - `Registration is closed (APP_REGISTRATION_ENABLED=false): POST /api/v1/auth/register answers 403`;
    - `Schema "public" is up to date. No migration necessary.`;
    - `Tomcat started on port 10000`;
    - `Started CasinoSimulatorApplication`.
@@ -154,6 +157,21 @@ curl -s -o /dev/null -w '%{http_code}\n' $B/actuator/env                        
 curl -s -o /dev/null -w '%{http_code}\n' http://<service>.onrender.com/actuator/health   # 3xx redirect to HTTPS
 ```
 
+**Registration is closed.** The request carries a CSRF token from a temporary cookie jar and an
+empty body, so it can never create an account:
+
+```bash
+J=$(mktemp)
+curl -s -c "$J" -o /dev/null $B/api/v1/auth/csrf
+curl -s -b "$J" -H "X-XSRF-TOKEN: $(awk '$6=="XSRF-TOKEN"{print $7}' "$J")" \
+  -H 'Content-Type: application/json' -d '{}' $B/api/v1/auth/register; echo
+rm -f "$J"
+```
+
+Expected while closed: `403` with `"code":"REGISTRATION_DISABLED"`. Once registration has been
+opened, the same request gets `400 VALIDATION_FAILED`: the empty body is rejected and no account is
+created.
+
 ## Free plan: limits and measurements
 
 Render's Free web service:
@@ -210,16 +228,31 @@ Tomcat runs at most 50 request threads, and the Neon pool has 5 connections.
 | Errors | Problem Details without stack traces or internal details (`server.error.include-stacktrace=never`). The log has no passwords, emails or session ids (checked in the test run). |
 | Actuator | Only `health` (status only, no details) and `info` (empty) are exposed; everything else is `401`. |
 | API docs | Swagger UI and `/v3/api-docs` off; the contract `/openapi.yaml` stays public. |
+| Registration | Closed on Render by default (`APP_REGISTRATION_ENABLED`, [below](#registrations-on-a-public-url)): `403 REGISTRATION_DISABLED`, after the CSRF check and before any throttling or body parsing. |
 | Start-up validation | Missing throttling secret, missing Neon values or a forwarded-header strategy of `framework`: the backend refuses to start (tested). |
 
 ### Registrations on a public URL
 
-Registration is part of the API and stays reachable on the staging URL: there is no frontend, but
-anyone who finds the URL can call it with a CSRF token. It is throttled (10 attempts per hour per
-client address, which here is a Cloudflare edge address).
+New accounts are controlled by `APP_REGISTRATION_ENABLED`. It is server configuration only: no
+request, header or frontend can change it.
 
-**Do not share the URL or invite real users** until staging has been validated. The repository has
-no switch to turn registration off; adding one would be a small code change and needs a decision.
+- **Closed** (`false`, and the default of the profile `render` when the variable is missing): every
+  `POST /api/v1/auth/register` gets `403 REGISTRATION_DISABLED`, still after the CSRF check. Nothing
+  is read, counted or stored. Login, logout, sessions and login throttling are unchanged.
+- **Open** (`true`, the local default): registration as before, throttled at 10 attempts per hour per
+  client address (here a Cloudflare edge address).
+
+**Open registration after the deployment has been verified.** The value is read at start-up, so a
+change needs a deploy, but no rebuild:
+1. Run every [verification](#verify-after-a-deploy) step with registration closed.
+2. Render → service → **Environment** → `APP_REGISTRATION_ENABLED` → change the value to `true` →
+   **Save and deploy**.
+3. Wait for the deploy to finish. The log no longer shows `Registration is closed`.
+4. Check: the [registration probe](#verify-after-a-deploy) now gets `400 VALIDATION_FAILED`.
+
+**Close it again** the same way with `false`. Existing accounts and sessions stay valid.
+
+Until registration is opened on purpose, do not share the URL or invite real users.
 
 ## Same-origin `/api` proxy for the future frontend (Vercel)
 

@@ -18,7 +18,7 @@ openapi: 3.1.0
 
 info:
   title: Online Casino Simulator API
-  version: 0.2.0
+  version: 0.3.0
   summary: Casino rules and probabilities with virtual currency only.
   description: |
     REST API of the Online Casino Simulator.
@@ -164,6 +164,11 @@ paths:
         every request that passes the CSRF check counts, whatever its outcome (`201`, `400`, `409`).
         The limit is checked before the body is read, so a throttled client gets `429` even for an
         invalid request.
+
+        Registration can be closed by server configuration (for example on a staging deployment);
+        no request can open it. While it is closed, every request that passes the CSRF check gets
+        `403 REGISTRATION_DISABLED`: before the body is read and without counting an attempt. Login,
+        logout and existing sessions are not affected.
       security:
         - csrfHeader: []
       requestBody:
@@ -198,7 +203,31 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
-          $ref: '#/components/responses/CsrfTokenInvalid'
+          description: |
+            The `X-XSRF-TOKEN` header is missing or does not match the `XSRF-TOKEN` cookie
+            (`CSRF_TOKEN_INVALID`), or registration is closed (`REGISTRATION_DISABLED`).
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                csrfTokenInvalid:
+                  value:
+                    title: Forbidden
+                    status: 403
+                    code: CSRF_TOKEN_INVALID
+                    detail: The CSRF token is missing or invalid.
+                    instance: /api/v1/auth/register
+                registrationDisabled:
+                  value:
+                    title: Forbidden
+                    status: 403
+                    code: REGISTRATION_DISABLED
+                    detail: New registrations are currently closed.
+                    instance: /api/v1/auth/register
         '409':
           description: The email is already registered
           headers:
@@ -871,7 +900,7 @@ components:
             |---|---|
             | `VALIDATION_FAILED`, `MALFORMED_REQUEST` | 400 |
             | `AUTHENTICATION_REQUIRED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS` | 401 |
-            | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID` | 403 |
+            | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID`, `REGISTRATION_DISABLED` | 403 |
             | `NOT_FOUND` | 404 |
             | `METHOD_NOT_ALLOWED` | 405 |
             | `NOT_ACCEPTABLE` | 406 |
@@ -895,6 +924,7 @@ components:
             - INVALID_CREDENTIALS
             - ACCESS_DENIED
             - CSRF_TOKEN_INVALID
+            - REGISTRATION_DISABLED
             - NOT_FOUND
             - METHOD_NOT_ALLOWED
             - NOT_ACCEPTABLE

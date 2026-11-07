@@ -12,8 +12,9 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * body, so requests that end in {@code 400} count too and a throttled client gets {@code 429} first.
  *
  * <p>Runs after the security filter chain: a request without a valid CSRF token is rejected with
- * {@code 403} before it is counted, so a foreign page cannot use up a visitor's limit. A
- * {@code TooManyAttemptsException} thrown here is rendered by {@code GlobalExceptionHandler}.
+ * {@code 403} before it is counted, so a foreign page cannot use up a visitor's limit. While
+ * registration is closed, the request is rejected here with {@code 403 REGISTRATION_DISABLED}, before
+ * it is counted or its body is read. Exceptions thrown here are rendered by {@code GlobalExceptionHandler}.
  */
 public class RegistrationAttemptInterceptor implements HandlerInterceptor {
 

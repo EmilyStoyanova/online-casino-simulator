@@ -15,10 +15,13 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.casino.auth.config.RegistrationProperties;
 import com.casino.auth.config.ThrottleProperties;
 import com.casino.auth.config.ThrottleProperties.Limit;
 import com.casino.auth.dto.RegisterRequest;
+import com.casino.auth.exception.RegistrationDisabledException;
 import com.casino.auth.exception.TooManyAttemptsException;
+import com.casino.common.exception.ProblemCode;
 import com.casino.user.dto.NewAccount;
 import com.casino.user.dto.UserProfileResponse;
 import com.casino.user.dto.UserRole;
@@ -41,7 +44,8 @@ class RegistrationServiceTest {
             new Limit(50, Duration.ofMinutes(15)), new Limit(10, Duration.ofHours(1)), null, true));
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
     private final UserAccountService accounts = mock(UserAccountService.class);
-    private final RegistrationService service = new RegistrationService(throttle, keys, passwordEncoder, accounts);
+    private final RegistrationService service = new RegistrationService(throttle, keys, passwordEncoder, accounts,
+            new RegistrationProperties(true));
 
     @Test
     void anAttemptIsCountedForTheRegisterScopeOfTheClientIp() {
@@ -82,5 +86,17 @@ class RegistrationServiceTest {
         when(accounts.createAccount(any())).thenThrow(new EmailAlreadyRegisteredException());
 
         assertThatThrownBy(() -> service.register(REQUEST)).isInstanceOf(EmailAlreadyRegisteredException.class);
+    }
+
+    @Test
+    void closedRegistrationRejectsBeforeCountingOrCreatingAnything() {
+        RegistrationService closed = new RegistrationService(throttle, keys, passwordEncoder, accounts,
+                new RegistrationProperties(false));
+
+        assertThatThrownBy(() -> closed.countAttempt(IP)).isInstanceOf(RegistrationDisabledException.class)
+                .extracting(error -> ((RegistrationDisabledException) error).code())
+                .isEqualTo(ProblemCode.REGISTRATION_DISABLED);
+        assertThatThrownBy(() -> closed.register(REQUEST)).isInstanceOf(RegistrationDisabledException.class);
+        verifyNoInteractions(throttle, passwordEncoder, accounts);
     }
 }
