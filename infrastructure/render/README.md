@@ -12,7 +12,7 @@ result. Nothing here deploys automatically.
 |---|---|
 | [`backend/Dockerfile`](../../backend/Dockerfile) | Multi-stage image: Maven build on Temurin 21 JDK, runtime on Temurin 21 JRE (Alpine), non-root user `10001`, base images pinned by version and digest |
 | [`backend/.dockerignore`](../../backend/.dockerignore) | Keeps `.env*`, keys, `target/` and IDE files out of the build context |
-| [`application-render.yml`](../../backend/src/main/resources/application-render.yml) | Profile `render`: `PORT`, trusted proxy, `__Host-SESSION` + `Secure`, no default CORS origin, registration closed unless `APP_REGISTRATION_ENABLED=true`, Swagger UI off, 20 s shutdown phase |
+| [`application-render.yml`](../../backend/src/main/resources/application-render.yml) | Profile `render`: `PORT`, HTTPS-only (HSTS + `Secure` cookies) without trusting forwarded headers, `__Host-SESSION`, no default CORS origin, registration closed unless `APP_REGISTRATION_ENABLED=true`, Swagger UI off, 20 s shutdown phase |
 | [`application-neon.yml`](../../backend/src/main/resources/application-neon.yml) | Profile `neon`: verified TLS to the Neon direct endpoint |
 
 The image contains **no configuration values**. Profiles, database and secrets come from Render's
@@ -64,8 +64,8 @@ Do not set the following:
 
 Optional, only when needed:
 - `JDK_JAVA_OPTIONS`: JVM flags (memory notes below).
-- `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES`: only if the proxy check below shows that Render's
-  load balancer is not in `10.0.0.0/8`.
+- `SERVER_FORWARD_HEADERS_STRATEGY` and `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES`: only after the
+  [client address](#client-address) has been verified.
 
 **Generate the throttling secret without displaying it.** In Git Bash this copies the value
 straight to the clipboard; paste it into Render, then copy something else:
@@ -115,35 +115,28 @@ curl -s --max-time 300 $B/actuator/health/readiness   # {"status":"UP"}; up to ~
 curl -s $B/api/v1/system/status                       # "database":{"status":"UP","schemaVersion":"5"}
 ```
 
-**Proxy and HTTPS handling.** This is the check that matters most:
+**HTTPS: HSTS and cookie flags.** This is the check that matters most. Cookie values are masked:
 
 ```bash
-curl -s -D - -o /dev/null $B/api/v1/auth/csrf | grep -i -E 'strict-transport-security|set-cookie' | sed -E 's/=[^;]*/=<value>/'
+curl -s -D - -o /dev/null $B/api/v1/auth/csrf | tr -d '\r' \
+  | grep -i -E '^(strict-transport-security|set-cookie):' | sed -E 's/(XSRF-TOKEN|SESSION)=[^;]*/\1=<value>/'
 ```
 
-Expected: a `strict-transport-security` header, and `set-cookie: XSRF-TOKEN=<value>; Path=/; Secure`.
-Both appear only when the application trusts Render's load balancer and sees the original HTTPS
-request.
+Expected:
+- `strict-transport-security: max-age=31536000 ; includeSubDomains`;
+- `set-cookie: XSRF-TOKEN=<value>; Path=/; Secure` (no `HttpOnly`: the frontend must read it).
 
-If both are missing, the load balancer's address is not in `10.0.0.0/8`:
-- Security is not weakened: forwarded headers are simply ignored, and the session cookie is still
-  `__Host-SESSION; Secure`.
-- HSTS is missing, and every client shares the load balancer's address for throttling.
-- To see the real address, add these variables (Save and deploy), make one request, and read the
-  `access peer=…` line in the log:
+Both come from the profile `render` (`app.security.https-only`) and do not depend on forwarded
+headers. If they are missing, the deployed version predates this setting, or the profile is not
+active: check `The following 2 profiles are active: "neon", "render"` in the log.
 
-  ```text
-  SERVER_TOMCAT_ACCESSLOG_ENABLED=true
-  SERVER_TOMCAT_ACCESSLOG_DIRECTORY=/dev
-  SERVER_TOMCAT_ACCESSLOG_PREFIX=stdout
-  SERVER_TOMCAT_ACCESSLOG_SUFFIX=
-  SERVER_TOMCAT_ACCESSLOG_FILE_DATE_FORMAT=
-  SERVER_TOMCAT_ACCESSLOG_BUFFERED=false
-  SERVER_TOMCAT_ACCESSLOG_PATTERN=access peer=%h xff="%{X-Forwarded-For}i" proto="%{X-Forwarded-Proto}i" %r %s
-  ```
+To check in a browser, open `$B/api/v1/auth/csrf`, then **DevTools → Application → Cookies**:
+`XSRF-TOKEN` must show ✓ in the **Secure** column.
 
-  Then set `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` to a regular expression for **only** that
-  range, and remove the access-log variables again: the log would contain client IP addresses.
+The session cookie (`__Host-SESSION; Path=/; Secure; HttpOnly; SameSite=Lax`) only appears after a
+sign-in. While registration is closed there is no account to sign in with, so it is covered by the
+automated tests (`RenderProxyIT`). Once an account exists, check it the same way in DevTools after
+signing in.
 
 **Security regression checks** (each must give the shown status):
 
@@ -171,6 +164,63 @@ rm -f "$J"
 Expected while closed: `403` with `"code":"REGISTRATION_DISABLED"`. Once registration has been
 opened, the same request gets `400 VALIDATION_FAILED`: the empty body is rejected and no account is
 created.
+
+## Client address
+
+Login and registration throttling count attempts per client address (`request.getRemoteAddr()`).
+Behind Render, the profile `render` **ignores every forwarded header**:
+- `X-Forwarded-For`, `X-Forwarded-Proto`, `Forwarded`;
+- vendor headers such as `X-Real-IP`, `CF-Connecting-IP` and `True-Client-IP`.
+
+The address is therefore the TCP peer, Render's proxy, and **all clients share it**:
+- **Safe:** no client can choose its address or escape a limit. This is tested with forged headers
+  in `RenderProxyIT` and `ClientAddressIT`.
+- **Limitation:**
+  - 50 failed logins per 15 minutes from anyone block logins for everyone;
+  - 5 failed logins for one account block that account for everyone;
+  - registrations share the limit of 10 per hour.
+
+  This is acceptable for a staging service with closed registration, **not for real users**.
+
+**Why the address is not taken from the headers:**
+- Render does not document its proxy addresses, and it does not remove a client-supplied
+  `X-Forwarded-For`; it only appends to it.
+- Trusting a guessed range would let clients choose their address. On the first deployment, the
+  range assumed earlier (`10.0.0.0/8`) had no effect.
+
+**Safe procedure to use the real client address.** It needs a short diagnostic deploy (a Render
+settings change, so it needs separate approval):
+
+1. Add these variables temporarily (Save and deploy). They log one line per request with the TCP
+   peer and the forwarded headers. These contain client IP addresses, so remove them again
+   afterwards.
+
+   ```text
+   SERVER_TOMCAT_ACCESSLOG_ENABLED=true
+   SERVER_TOMCAT_ACCESSLOG_DIRECTORY=/dev
+   SERVER_TOMCAT_ACCESSLOG_PREFIX=stdout
+   SERVER_TOMCAT_ACCESSLOG_SUFFIX=
+   SERVER_TOMCAT_ACCESSLOG_FILE_DATE_FORMAT=
+   SERVER_TOMCAT_ACCESSLOG_BUFFERED=false
+   SERVER_TOMCAT_ACCESSLOG_PATTERN=access peer=%h xff="%{X-Forwarded-For}i" proto="%{X-Forwarded-Proto}i" %r %s
+   ```
+
+2. Send a few requests from two different networks, once with a forged header
+   (`curl -H 'X-Forwarded-For: 6.6.6.6' $B/api/v1/system/status`). Note for every `access` line:
+   - the `peer` range: is it stable, and private or public?
+   - the `xff` chain: which entries Render appends, for example a Cloudflare edge address after
+     your own address, and where the forged value ends up.
+3. Remove the access-log variables again (Save and deploy).
+4. Only if the peer range is stable and exclusive to Render's proxy, set:
+   - `SERVER_FORWARD_HEADERS_STRATEGY=native`;
+   - `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` = a regular expression for exactly that range.
+
+   If Render appends a Cloudflare edge address, the client address is then that edge address. To
+   reach the real client, also set `SERVER_TOMCAT_REMOTEIP_TRUSTED_PROXIES` to Cloudflare's published
+   ranges. Never use a pattern that matches every address: Tomcat would then take the left-most,
+   client-written entry.
+5. Verify with forged headers that the throttle still blocks after 5 failed logins
+   (`RenderProxyIT` shows the procedure). Then record the result in this runbook.
 
 ## Free plan: limits and measurements
 
@@ -219,11 +269,11 @@ Tomcat runs at most 50 request threads, and the Neon pool has 5 connections.
 
 | Concern | Configuration |
 |---|---|
-| TLS | Render terminates HTTPS and redirects HTTP. Spring sends HSTS once the proxy is trusted (see the verification above). |
-| Reverse proxy | `forward-headers-strategy=native`, trusted peers only `10.0.0.0/8`. Tomcat takes the right-most `X-Forwarded-For` entry not added by a trusted proxy, so a client-supplied entry is ignored. This was tested: a spoofed left entry did not escape the throttle. |
-| Client IP for throttling | Render appends the Cloudflare edge address, so the client IP the app sees is a **Cloudflare edge address**: users behind the same edge share the IP-based limits. Per-user IPs would need Cloudflare's ranges as trusted proxies after verifying the chain (Week 12). |
+| TLS | Render terminates HTTPS and redirects HTTP (301) before forwarding. `app.security.https-only` sends HSTS on every response, because requests arrive as plain HTTP and `request.isSecure()` is false. |
+| Reverse proxy | `forward-headers-strategy=none`: no forwarded header is trusted ([client address](#client-address)). `framework` is rejected at start-up; `native` needs an exact proxy list. |
+| Client IP for throttling | The TCP peer (Render's proxy), shared by all clients until the proxy chain has been verified ([client address](#client-address)). Forged headers do not change it (tested). |
 | Session cookie | `__Host-SESSION`, `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain` (tested in the container). Sessions in Neon survive restarts (tested). |
-| CSRF | Unchanged (`csrf.spa()`, ADR-0006). The `XSRF-TOKEN` cookie becomes `Secure` behind the trusted proxy. |
+| CSRF | Unchanged (`csrf.spa()`, ADR-0006). The `XSRF-TOKEN` cookie is always `Secure` with `app.security.https-only` (tested). |
 | CORS | No origin allowed by default on Render, and `localhost` is rejected (tested). Set `APP_CORS_ALLOWED_ORIGINS` to the exact frontend origin when one exists. |
 | Errors | Problem Details without stack traces or internal details (`server.error.include-stacktrace=never`). The log has no passwords, emails or session ids (checked in the test run). |
 | Actuator | Only `health` (status only, no details) and `info` (empty) are exposed; everything else is `401`. |
@@ -240,7 +290,7 @@ request, header or frontend can change it.
   `POST /api/v1/auth/register` gets `403 REGISTRATION_DISABLED`, still after the CSRF check. Nothing
   is read, counted or stored. Login, logout, sessions and login throttling are unchanged.
 - **Open** (`true`, the local default): registration as before, throttled at 10 attempts per hour per
-  client address (here a Cloudflare edge address).
+  client address (on Render currently the proxy's address, shared by all clients; see [client address](#client-address)).
 
 **Open registration after the deployment has been verified.** The value is read at start-up, so a
 change needs a deploy, but no rebuild:
