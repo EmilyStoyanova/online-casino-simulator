@@ -3,7 +3,6 @@ package com.casino;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
-import java.util.regex.Pattern;
 
 import com.casino.auth.config.RegistrationProperties;
 import com.casino.common.config.CorsProperties;
@@ -27,27 +26,23 @@ import org.springframework.core.io.ClassPathResource;
 class RenderProfileTest {
 
     @Test
-    void behindRendersProxyCookiesAreHttpsOnlyAndOnlyTheInternalLoadBalancerIsTrusted() {
+    void behindRendersProxyEverythingIsHttpsOnlyAndNoForwardedHeaderIsTrusted() {
         try (ConfigurableApplicationContext context = start(true, "--PORT=10000")) {
             Environment env = context.getEnvironment();
 
             assertThat(env.getProperty("server.port")).isEqualTo("10000");
-            assertThat(env.getProperty("server.forward-headers-strategy")).isEqualTo("native");
+            assertThat(env.getProperty("app.security.https-only")).isEqualTo("true");
             assertThat(env.getProperty("server.servlet.session.cookie.name")).isEqualTo("__Host-SESSION");
             assertThat(env.getProperty("server.servlet.session.cookie.secure")).isEqualTo("true");
             assertThat(env.getProperty("server.servlet.session.cookie.same-site")).isEqualTo("lax");
             assertThat(env.getProperty("springdoc.api-docs.enabled")).isEqualTo("false");
             assertThat(env.getProperty("springdoc.swagger-ui.enabled")).isEqualTo("false");
             assertThat(env.getProperty("spring.lifecycle.timeout-per-shutdown-phase")).isEqualTo("20s");
-
-            Pattern proxies = Pattern.compile(env.getProperty("server.tomcat.remoteip.internal-proxies"));
-            assertThat(proxies.matcher("10.21.157.68").matches()).isTrue();
-            // Not trusted: other private ranges, loopback, Cloudflare edges, anything public.
-            for (String address : new String[] {"192.168.1.10", "172.17.0.1", "127.0.0.1", "104.22.17.40",
-                    "8.8.8.8", "110.1.2.3", "10.1.2.3.4"}) {
-                assertThat(proxies.matcher(address).matches()).as(address).isFalse();
-            }
         }
+        // Read from the file itself: a developer's .env (imported in tests) may set the strategy.
+        assertThatProfileFile("server.forward-headers-strategy", "none");
+        assertThatProfileFile("server.tomcat.remoteip.internal-proxies", null);
+        assertThatProfileFile("server.tomcat.remoteip.trusted-proxies", null);
     }
 
     @Test
@@ -93,11 +88,22 @@ class RenderProfileTest {
             assertThat(env.getProperty("server.servlet.session.cookie.name")).isEqualTo("SESSION");
             assertThat(env.getProperty("server.servlet.session.cookie.secure")).isEqualTo("false");
             assertThat(env.getProperty("springdoc.swagger-ui.enabled")).isNull();
+            // Local HTTP: HSTS and Secure CSRF cookies only for secure requests.
+            assertThat(Binder.get(env).bind("app.security.https-only", Boolean.class).orElse(false)).isFalse();
         }
     }
 
     private static PropertySource<?> load(String file) throws Exception {
         return new YamlPropertySourceLoader().load(file, new ClassPathResource(file)).getFirst();
+    }
+
+    private static void assertThatProfileFile(String property, String expected) {
+        try {
+            Object value = load("application-render.yml").getProperty(property);
+            assertThat(value == null ? null : value.toString()).as(property).isEqualTo(expected);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 
     private static List<String> corsOrigins(ConfigurableApplicationContext context) {

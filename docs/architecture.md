@@ -222,8 +222,9 @@ fast feedback loop. The Spring profile `neon` points a local backend at a Neon b
 The configuration exists already; the checklist makes sure production uses it (from
 `docs/plans/week-02.md` §7.4, §7.8 and §13). All values live in the hosting provider's secret store,
 never in the repository. On Render, the profile `render` (`application-render.yml`) already sets
-items 1, 5 and the Swagger part of 8; items 2–4 and 6 remain per environment
-([infrastructure/render](../infrastructure/render/README.md)).
+item 1, HTTPS-only (HSTS and `Secure` cookies without trusting forwarded headers) and the Swagger
+part of 8. Items 2–4 remain per environment, and items 5–6 wait for the verified proxy chain
+([infrastructure/render](../infrastructure/render/README.md#client-address)).
 
 1. `APP_SESSION_COOKIE_NAME=__Host-SESSION` and `APP_SESSION_COOKIE_SECURE=true` (HTTPS only).
 2. `APP_SECURITY_THROTTLE_SECRET`: a new production value, different from every local one.
@@ -235,8 +236,8 @@ items 1, 5 and the Swagger part of 8; items 2–4 and 6 remain per environment
 5. `SERVER_FORWARD_HEADERS_STRATEGY=native` together with an explicit
    `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` that matches only the platform's proxies. Spring Boot's
    default would trust all private address ranges, and the backend refuses to start without the list.
-   Render: `10.0.0.0/8` (its internal load balancer); the client IP the app sees is then a Cloudflare
-   edge address until Cloudflare's ranges are trusted too.
+   Render does not document its proxy addresses: until they have been verified from its logs, the
+   profile `render` uses `none`, and all clients share the proxy's address for throttling.
 6. Verify behind the proxy: the client IP is the right-most untrusted `X-Forwarded-For` entry,
    `request.isSecure()` is `true`, and the cookies carry `Secure`; add a smoke test for the cookie
    attributes over HTTPS.

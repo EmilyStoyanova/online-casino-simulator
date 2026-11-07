@@ -7,6 +7,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.Map;
 
 import com.casino.TestcontainersConfiguration;
 import jakarta.servlet.FilterChain;
@@ -28,7 +29,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
  * The client address that the application sees ({@code request.getRemoteAddr()}, used for throttling)
- * over real HTTP with the embedded Tomcat: a client cannot choose it with {@code X-Forwarded-For}.
+ * over real HTTP with the embedded Tomcat: a client cannot choose it with {@code X-Forwarded-For},
+ * {@code Forwarded} or vendor headers such as {@code X-Real-IP} and {@code CF-Connecting-IP}.
  * The probe filter runs last, so it sees the request exactly as controllers do.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -95,14 +97,40 @@ class ClientAddressIT {
             assertThat(proxiedProbe.remoteAddr).isEqualTo("203.0.113.5");
             assertThat(proxiedProbe.secure).isTrue();
         }
+
+        @Test
+        void aForgedProxyAddressLeftOfTheProxysEntryDoesNotMoveTheClient() throws Exception {
+            // The client claims to be the trusted proxy itself; the proxy still appended the real address.
+            send(proxiedPort, "6.6.6.6, 127.0.0.1, 203.0.113.6");
+
+            assertThat(proxiedProbe.remoteAddr).isEqualTo("203.0.113.6");
+        }
+
+        @Test
+        void onlyXForwardedForAndProtoAreRead() throws Exception {
+            // RFC 7239 Forwarded and vendor headers are not used, even from a trusted proxy.
+            send(proxiedPort, null, Map.of("Forwarded", "for=6.6.6.7;proto=https", "X-Real-IP", "6.6.6.8",
+                    "CF-Connecting-IP", "6.6.6.9", "True-Client-IP", "6.6.6.10"));
+
+            assertThat(proxiedProbe.remoteAddr).isEqualTo(LOOPBACK);
+            assertThat(proxiedProbe.secure).isFalse();
+        }
     }
 
     private static void send(int port, String forwardedFor) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://" + LOOPBACK + ":" + port + "/api/v1/system/status"))
-                .header("X-Forwarded-For", forwardedFor)
-                .header("X-Forwarded-Proto", "https")
-                .GET()
-                .build();
+        send(port, forwardedFor, Map.of("X-Forwarded-Proto", "https", "Forwarded", "for=6.6.6.7;proto=https",
+                "X-Real-IP", "6.6.6.8", "CF-Connecting-IP", "6.6.6.9"));
+    }
+
+    /** A request with an optional {@code X-Forwarded-For} and further headers, as a proxy or a client would send it. */
+    private static void send(int port, String forwardedFor, Map<String, String> headers) throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create("http://" + LOOPBACK + ":" + port + "/api/v1/system/status"))
+                .GET();
+        if (forwardedFor != null) {
+            builder.header("X-Forwarded-For", forwardedFor);
+        }
+        headers.forEach(builder::header);
+        HttpRequest request = builder.build();
         try (HttpClient client = HttpClient.newHttpClient()) {
             assertThat(client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(200);
         }

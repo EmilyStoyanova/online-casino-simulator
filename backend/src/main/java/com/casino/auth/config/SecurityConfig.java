@@ -26,6 +26,7 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
 import org.springframework.security.web.savedrequest.NullRequestCache;
+import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 import org.springframework.web.servlet.HandlerExceptionResolver;
 
 /**
@@ -92,14 +93,28 @@ public class SecurityConfig {
                         .authenticationEntryPoint(new ProblemAuthenticationEntryPoint(exceptionResolver))
                         .accessDeniedHandler(new ProblemAccessDeniedHandler(exceptionResolver)))
                 // Spring Security's default headers (nosniff, DENY framing, no-store, HSTS on HTTPS) + no referrer.
-                .headers(headers -> headers.referrerPolicy(referrer -> referrer.policy(ReferrerPolicy.NO_REFERRER)));
+                .headers(headers -> {
+                    headers.referrerPolicy(referrer -> referrer.policy(ReferrerPolicy.NO_REFERRER));
+                    if (properties.httpsOnly()) {
+                        // Behind a TLS-terminating proxy the request arrives as HTTP, so the default (HSTS
+                        // only when request.isSecure()) would never send it. Browsers ignore HSTS over HTTP.
+                        headers.httpStrictTransportSecurity(hsts -> hsts.requestMatcher(AnyRequestMatcher.INSTANCE));
+                    }
+                });
         return http.build();
     }
 
-    /** The {@code XSRF-TOKEN} cookie, readable by JavaScript ({@code csrf.spa()}'s repository). */
+    /**
+     * The {@code XSRF-TOKEN} cookie, readable by JavaScript ({@code csrf.spa()}'s repository). It is
+     * {@code Secure} when the request is secure, and always with {@code app.security.https-only}.
+     */
     @Bean
-    CsrfTokenRepository csrfTokenRepository() {
-        return CookieCsrfTokenRepository.withHttpOnlyFalse();
+    CsrfTokenRepository csrfTokenRepository(SecurityProperties properties) {
+        CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        if (properties.httpsOnly()) {
+            repository.setCookieCustomizer(cookie -> cookie.secure(true));
+        }
+        return repository;
     }
 
     /** Spring Security's default: the request (for this request) and the HTTP session (Spring Session). */
