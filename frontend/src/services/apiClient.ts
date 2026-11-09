@@ -9,9 +9,18 @@
  * - Unsafe methods send the CSRF token in `X-XSRF-TOKEN` and retry once with a new token when the
  *   server answers `403 CSRF_TOKEN_INVALID`.
  * - Error responses become an {@link ApiError} carrying the Problem Details body.
+ * - A proxy in front of the backend (the Vercel rewrite, Render's load balancer) can answer instead of
+ *   it, e.g. while a Render Free instance starts (about a minute) or after Vercel's 120-second proxy
+ *   timeout; such errors are {@link ApiError.isUnavailable}.
  */
 import type { ProblemDetail } from '../types/problem'
 import { CSRF_HEADER, CSRF_PATH, readCsrfToken } from './csrf'
+
+/** Statuses of a proxy that could not get an answer from the backend. */
+const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504])
+
+const UNAVAILABLE_MESSAGE =
+  'The server is starting up or temporarily unavailable. This can take about a minute; please try again shortly.'
 
 /** Error raised for non-2xx responses and network failures. */
 export class ApiError extends Error {
@@ -20,7 +29,10 @@ export class ApiError extends Error {
   /** Seconds from the `Retry-After` header (e.g. `429 TOO_MANY_ATTEMPTS`), if the server sent one. */
   readonly retryAfterSeconds: number | undefined
 
-  /** @param status HTTP status code, or `0` when the request did not reach the server. */
+  /**
+   * @param status HTTP status code, or `0` when the request did not reach the server or the answer
+   *   did not come from the API.
+   */
   constructor(message: string, status: number, body: unknown = undefined, retryAfterSeconds?: number) {
     super(message)
     this.name = 'ApiError'
@@ -31,6 +43,14 @@ export class ApiError extends Error {
 
   get isNetworkError(): boolean {
     return this.status === 0
+  }
+
+  /**
+   * The backend did not answer: a network failure, or a gateway status without Problem Details (the
+   * backend's own errors always carry them). {@link message} then explains this to the user.
+   */
+  get isUnavailable(): boolean {
+    return this.isNetworkError || (GATEWAY_STATUSES.has(this.status) && this.problem === undefined)
   }
 
   /** The Problem Details body (RFC 9457), if the server sent one. */
@@ -99,9 +119,12 @@ export function sessionChanged(): void {
   sessionGeneration += 1
 }
 
+function isJson(response: Response): boolean {
+  return (response.headers.get('Content-Type') ?? '').includes('json')
+}
+
 async function parseBody(response: Response): Promise<unknown> {
-  const contentType = response.headers.get('Content-Type') ?? ''
-  if (contentType.includes('json')) {
+  if (isJson(response)) {
     try {
       return await response.json()
     } catch {
@@ -146,10 +169,16 @@ async function request<T>(
 
   const responseBody = await parseBody(response)
   if (response.ok) {
+    if (responseBody !== undefined && !isJson(response)) {
+      // Every API answer is JSON or empty: this is a page instead (a proxy's start-up page, or a
+      // rewrite that served the SPA), so the request did not reach the API.
+      throw new ApiError(UNAVAILABLE_MESSAGE, 0, responseBody)
+    }
     return responseBody as T
   }
+  const fromGateway = GATEWAY_STATUSES.has(response.status) && !isProblemDetail(responseBody)
   const error = new ApiError(
-    `Request failed with status ${response.status}`,
+    fromGateway ? UNAVAILABLE_MESSAGE : `Request failed with status ${response.status}`,
     response.status,
     responseBody,
     parseRetryAfter(response.headers.get('Retry-After')),

@@ -47,7 +47,7 @@ export function describeSaveFailure(error: unknown): SaveFailure {
   if (!(error instanceof ApiError)) {
     return { kind: 'error', message: `Something unexpected happened. ${KEPT}`, retry: true }
   }
-  if (error.isNetworkError) {
+  if (error.isUnavailable) {
     return { kind: 'error', message: `${error.message} ${KEPT}`, retry: true }
   }
   switch (error.code) {

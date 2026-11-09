@@ -21,7 +21,7 @@ export function useInterests(): { catalog: InterestCatalog; reload: () => void }
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         const message =
-          error instanceof ApiError && error.isNetworkError
+          error instanceof ApiError && error.isUnavailable
             ? error.message
             : 'The list of interests could not be loaded.'
         setCatalog({ status: 'failed', message })

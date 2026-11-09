@@ -156,17 +156,35 @@ describe('Registration', () => {
     expect(within(screen.getByRole('alert')).getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/login')
   })
 
-  it('explains closed registration, links to sign in and does not retry like a CSRF error', async () => {
+  it('replaces the form when registration is closed, links to sign in and does not retry like a CSRF error', async () => {
     const api = backend(() => problemResponse(403, 'REGISTRATION_DISABLED'))
     renderApp('/register')
 
     const user = await fillIn()
     await user.click(screen.getByRole('button', { name: 'Create account' }))
 
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('New registrations are currently closed. Existing accounts can still sign in.')
-    expect(within(alert).getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/login')
+    const closed = await screen.findByRole('region', { name: 'Registration is closed' })
+    expect(closed).toHaveTextContent('New registrations are currently closed. Existing accounts can still sign in.')
+    expect(within(closed).getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/login')
+    // Focus is not lost with the removed button, and nobody fills in the form again.
+    expect(screen.getByRole('heading', { name: 'Registration is closed' })).toHaveFocus()
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Create account' })).not.toBeInTheDocument()
     expect(api.requestsTo(REGISTER)).toHaveLength(1)
+
+    await user.click(within(closed).getByRole('link', { name: 'Go to sign in' }))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeInTheDocument()
+  })
+
+  it('explains a backend that is still starting behind the proxy instead of a generic error', async () => {
+    backend(() => new Response('<!doctype html><title>Bad gateway</title>', { status: 502, headers: { 'Content-Type': 'text/html' } }))
+    renderApp('/register')
+
+    const user = await fillIn()
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The server is starting up or temporarily unavailable.')
+    expect(screen.getByRole('button', { name: 'Create account' })).toBeEnabled()
   })
 
   it('shows the waiting time of 429 and disables the form meanwhile', async () => {

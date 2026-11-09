@@ -22,7 +22,7 @@ function describe(error: unknown, action: 'login' | 'register'): FormFailure {
   if (!(error instanceof ApiError)) {
     return { message: 'Something unexpected happened. Please try again.', fieldErrors: {} }
   }
-  if (error.isNetworkError) {
+  if (error.isUnavailable) {
     return { message: error.message, fieldErrors: {} }
   }
   switch (error.code) {

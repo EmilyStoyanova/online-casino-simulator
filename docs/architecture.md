@@ -146,6 +146,12 @@ frontend/src
   See `docs/plans/week-02.md` §7.10. In that fallback the SPA cannot read the API host's
   `XSRF-TOKEN` cookie unless the cookie is shared with the frontend host; this is part of the
   Week 12 decision.
+- Staging: Vercel serves the build and rewrites `/api/*` to the Render backend
+  ([`frontend/vercel.json`](../frontend/vercel.json), [runbook](../infrastructure/vercel/README.md)).
+  This is the preferred same-site setup; `VITE_API_BASE_URL` stays empty. Answers from a proxy
+  instead of the backend are shown as "starting up or temporarily unavailable"
+  (`ApiError.isUnavailable`): 502/503/504 without Problem Details, or a 2xx that is not JSON. This
+  covers a Render Free cold start that exceeds Vercel's 120 s proxy timeout.
 
 ## 5. Cross-cutting concerns
 
@@ -209,7 +215,7 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
 
 | Component | Host |
 |---|---|
-| Frontend (static build) | Cloudflare Pages (Vercel with a same-origin `/api` rewrite is proposed; decided in ADR-0007) |
+| Frontend (static build) | Vercel with a same-origin `/api` rewrite, prepared for staging ([infrastructure/vercel](../infrastructure/vercel/README.md)); Cloudflare Pages was the original plan; the final choice is ADR-0007 |
 | Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render, Frankfurt; staging prepared ([infrastructure/render](../infrastructure/render/README.md)) |
 | Database | Neon (managed PostgreSQL 18; local development and tests use 17) |
 
@@ -232,7 +238,8 @@ part of 8. Items 2–4 remain per environment, and items 5–6 wait for the veri
    direct endpoint (verified TLS, channel binding; [database.md → Neon](database.md#neon)).
    Check the Neon plan's compute hours: Spring Session's cleanup job (every minute by default) keeps
    a scale-to-zero compute awake.
-4. `APP_CORS_ALLOWED_ORIGINS`: the production frontend origin only.
+4. `APP_CORS_ALLOWED_ORIGINS`: the production frontend origin only. Also required behind the Vercel
+   rewrite, because the browser's `Origin` differs from the backend's `Host` (`VercelProxyIT`).
 5. `SERVER_FORWARD_HEADERS_STRATEGY=native` together with an explicit
    `SERVER_TOMCAT_REMOTEIP_INTERNAL_PROXIES` that matches only the platform's proxies. Spring Boot's
    default would trust all private address ranges, and the backend refuses to start without the list.

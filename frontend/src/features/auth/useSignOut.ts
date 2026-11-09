@@ -18,7 +18,7 @@ export function useSignOut() {
       await logout()
     } catch (failure) {
       setError(
-        failure instanceof ApiError && failure.isNetworkError
+        failure instanceof ApiError && failure.isUnavailable
           ? failure.message
           : 'Signing out failed. Please try again.',
       )

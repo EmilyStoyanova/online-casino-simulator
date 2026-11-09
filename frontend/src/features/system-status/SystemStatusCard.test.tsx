@@ -52,4 +52,19 @@ describe('SystemStatusCard', () => {
     expect(await screen.findByText('0.1.0-SNAPSHOT')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+
+  it('explains a backend that is still starting when the proxy gives up (Vercel 502)', async () => {
+    const fetchMock = stubFetch()
+    fetchMock
+      .mockResolvedValueOnce(new Response('An error occurred with your deployment', { status: 502, headers: { 'Content-Type': 'text/plain' } }))
+      .mockResolvedValue(jsonResponse(upStatus))
+
+    render(<SystemStatusCard />)
+
+    expect(await screen.findByText(/The server is starting up or temporarily unavailable/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+
+    expect(await screen.findByText('0.1.0-SNAPSHOT')).toBeInTheDocument()
+  })
 })

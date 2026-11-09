@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { CheckboxField } from '../../components/form/CheckboxField'
 import { FormAlert } from '../../components/form/FormAlert'
@@ -31,12 +31,16 @@ export function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
     })
   }
 
+  if (failureCode === 'REGISTRATION_DISABLED' && message) {
+    return <RegistrationClosed message={message} />
+  }
+
   return (
     <form ref={formRef} onSubmit={handleSubmit} noValidate aria-busy={submitting} className="space-y-5">
       {message && (
         <FormAlert tone="error">
           {message}{' '}
-          {(failureCode === 'EMAIL_ALREADY_REGISTERED' || failureCode === 'REGISTRATION_DISABLED') && (
+          {failureCode === 'EMAIL_ALREADY_REGISTERED' && (
             <Link to="/login" className="font-semibold text-rose-100 underline underline-offset-2">
               Go to sign in
             </Link>
@@ -102,5 +106,32 @@ export function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
         {submitting ? 'Creating account…' : 'Create account'}
       </button>
     </form>
+  )
+}
+
+/**
+ * Replaces the form after `403 REGISTRATION_DISABLED` (a server setting, e.g. on the staging deployment),
+ * so nobody fills it in again. Focus moves to the heading, because the button that had it is gone.
+ */
+function RegistrationClosed({ message }: { message: string }) {
+  const headingRef = useRef<HTMLHeadingElement>(null)
+
+  useEffect(() => {
+    headingRef.current?.focus()
+  }, [])
+
+  return (
+    <section
+      aria-labelledby="registration-closed-heading"
+      className="space-y-4 rounded-lg border border-sky-500/40 bg-sky-500/10 px-4 py-4 text-sm leading-relaxed text-sky-100"
+    >
+      <h2 id="registration-closed-heading" ref={headingRef} tabIndex={-1} className="text-base font-semibold outline-none">
+        Registration is closed
+      </h2>
+      <p>{message}</p>
+      <Link to="/login" className={`${primaryButton} w-full`}>
+        Go to sign in
+      </Link>
+    </section>
   )
 }

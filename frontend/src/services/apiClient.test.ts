@@ -95,6 +95,48 @@ describe('Problem Details', () => {
   })
 })
 
+describe('a proxy answering instead of the backend', () => {
+  const STARTING = 'The server is starting up or temporarily unavailable.'
+
+  it.each([502, 503, 504])('explains %i without Problem Details (e.g. Vercel timeout, Render start-up)', async (status) => {
+    stubFetch().mockResolvedValue(new Response('<html>gateway</html>', { status, headers: { 'Content-Type': 'text/html' } }))
+
+    const error = (await apiGet('/api/v1/test').catch((e: unknown) => e)) as ApiError
+
+    expect(error.status).toBe(status)
+    expect(error.isUnavailable).toBe(true)
+    expect(error.isNetworkError).toBe(false)
+    expect(error.message).toContain(STARTING)
+  })
+
+  it('keeps the backend’s own 503 with Problem Details as it is', async () => {
+    stubFetch().mockResolvedValue(problemResponse(503, 'SERVICE_UNAVAILABLE'))
+
+    const error = (await apiGet('/api/v1/test').catch((e: unknown) => e)) as ApiError
+
+    expect(error.isUnavailable).toBe(false)
+    expect(error.code).toBe('SERVICE_UNAVAILABLE')
+  })
+
+  it('rejects a 2xx page that is not JSON instead of returning it as data', async () => {
+    // E.g. index.html of a rewrite that sent /api to the SPA, or a start-up page.
+    stubFetch().mockResolvedValue(new Response('<!doctype html><div id="root"></div>', { status: 200, headers: { 'Content-Type': 'text/html' } }))
+
+    const error = (await apiGet('/api/v1/users/me').catch((e: unknown) => e)) as ApiError
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.isNetworkError).toBe(true)
+    expect(error.isUnavailable).toBe(true)
+    expect(error.message).toContain(STARTING)
+  })
+
+  it('still accepts empty 2xx answers such as 204', async () => {
+    stubFetch().mockResolvedValue(noContent())
+
+    await expect(apiGet('/api/v1/auth/csrf')).resolves.toBeUndefined()
+  })
+})
+
 describe('parseRetryAfter', () => {
   it('accepts delta-seconds and HTTP dates', () => {
     const now = Date.parse('2026-11-03T10:00:00Z')
