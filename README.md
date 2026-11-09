@@ -25,7 +25,7 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 |---|---|---|---|
 | 1 — Foundation | 1 | Repository, tooling, database, CI, documentation | ✅ Done |
 | | 2 | Authentication, users, roles, profile & interests | ✅ Done |
-| Deployment foundation | — | Neon staging database, Render backend staging | 🚧 In progress (branch `feature/deployment-foundation`): Neon staging migrated; Render prepared, not deployed |
+| Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | 🚧 In progress: Neon staging migrated; Render backend deployed and verified (registration closed); Vercel frontend prepared, not deployed |
 | 2 — Virtual currency & game logic | 3–4 | Wallet ledger, roulette engine | Planned |
 | 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | Planned |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
@@ -52,8 +52,9 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 ### Not implemented yet
 
 Virtual wallet and balances, roulette and every other game, learning modules, quizzes, rewards,
-statistics, play limits and the admin panel are **planned** (see the table above). The deployment
-is being prepared: the backend image and the Render staging runbook exist, but nothing is deployed.
+statistics, play limits and the admin panel are **planned** (see the table above). The backend runs
+as a staging service on Render with the Neon staging database and closed registration; the frontend
+is prepared for Vercel ([runbook](infrastructure/vercel/README.md)) but not deployed.
 Nothing in the current application handles coins or game rounds.
 
 ## Architecture at a glance
@@ -94,7 +95,7 @@ Exact versions and the reasons for them: [ADR-0002](docs/decisions/0002-technolo
 ├── backend/                 Spring Boot application (Maven Wrapper: ./mvnw)
 │   └── src/main/java/com/casino/<module>/   one package per module (common, auth, user)
 ├── frontend/                React + Vite single-page application
-├── infrastructure/          Deployment assets: Neon read-only check scripts (neon/); Docker and hosting in Weeks 11–12
+├── infrastructure/          Deployment runbooks: Neon read-only checks (neon/), Render backend (render/), Vercel frontend (vercel/)
 ├── docs/                    Architecture, API, database, plans, ADRs
 ├── .github/workflows/       CI pipeline
 ├── docker-compose.yml       Local PostgreSQL
@@ -260,6 +261,24 @@ database. Pass them with `--env-file` so values never appear on the command line
 Render, its settings and the Free plan's limits are described in
 [infrastructure/render/README.md](infrastructure/render/README.md).
 
+### 9. Optional: the frontend as Vercel serves it
+
+Vercel builds `frontend/` with [`vercel.json`](frontend/vercel.json): the same `npm run build`, plus a
+rewrite of `/api/*` to the Render backend and a fallback to `index.html` for client-side routes.
+Local development is unchanged: the Vite dev server proxies `/api` to `VITE_DEV_PROXY_TARGET`.
+
+| Vercel setting | Value |
+|---|---|
+| Root Directory | `frontend` |
+| Framework Preset | Vite (build, install and output come from `vercel.json`) |
+| Node.js Version | 24.x |
+| Environment Variables | none (`VITE_API_BASE_URL` stays unset: same origin) |
+
+The backend must allow the exact Vercel origin in `APP_CORS_ALLOWED_ORIGINS`, otherwise sign-in
+through the rewrite fails with `403 Invalid CORS request`. The steps, verification and limits
+(Render Free cold starts versus Vercel's 120-second proxy timeout) are in
+[infrastructure/vercel/README.md](infrastructure/vercel/README.md).
+
 ### Useful URLs
 
 | URL | Purpose |
@@ -340,7 +359,7 @@ and in the hosting provider's secret store in production.
 | `SERVER_PORT` | Backend | no | `8080` | HTTP port (also change `VITE_DEV_PROXY_TARGET`) |
 | `PORT` | Backend with profile `render` | set by Render | `8080` | Port Render routes traffic to (10000 on Render) |
 | `JDK_JAVA_OPTIONS` | Backend image | no | memory flags for 512 MB (see `backend/Dockerfile`) | JVM options of the container |
-| `APP_CORS_ALLOWED_ORIGINS` | Backend | no | `http://localhost:5173` | Comma-separated browser origins allowed to call the API |
+| `APP_CORS_ALLOWED_ORIGINS` | Backend | no | `http://localhost:5173`; empty with profile `render` | Comma-separated exact browser origins allowed to send unsafe requests. On Render: the exact Vercel production origin ([runbook](infrastructure/vercel/README.md#backend-setting-required-app_cors_allowed_origins)); never a wildcard or a preview origin |
 | `APP_SESSION_COOKIE_NAME` | Backend | no | `SESSION` | Production: `__Host-SESSION` |
 | `APP_SESSION_COOKIE_SECURE` | Backend | no | `false` | Production: `true` (HTTPS) |
 | `APP_SESSION_COOKIE_SAME_SITE` | Backend | no | `lax` | `SameSite` of the session cookie |
@@ -352,7 +371,7 @@ and in the hosting provider's secret store in production.
 | `APP_SECURITY_HTTPS_ONLY` | Backend | no | `false`; `true` with profile `render` | Behind a TLS-terminating proxy that redirects HTTP (Render): HSTS on every response and a `Secure` CSRF cookie, without trusting forwarded headers. Never `true` where plain HTTP reaches the backend |
 | `APP_BOOTSTRAP_ADMIN_EMAIL` / `APP_BOOTSTRAP_ADMIN_PASSWORD` | Backend | no (both or neither) | empty = disabled | First administrator; password = secret; remove after the first start |
 | `APP_REGISTRATION_ENABLED` | Backend | no | `true`; `false` with profile `render` | `false` closes registration (`403 REGISTRATION_DISABLED`); login is unaffected. Opening it on Render: [runbook](infrastructure/render/README.md#registrations-on-a-public-url) |
-| `VITE_API_BASE_URL` | Frontend build | no | empty (same origin) | Backend base URL for production builds |
+| `VITE_API_BASE_URL` | Frontend build | no | empty (same origin) | Leave empty: the API is on the page's own origin (Vite proxy locally, Vercel rewrite on staging). A backend on another site would break cookie sign-in (ADR-0006) |
 | `VITE_DEV_PROXY_TARGET` | Frontend dev server | no | `http://localhost:8080` | Target of the Vite `/api` proxy |
 
 Frontend variables go into `frontend/.env.local` (git-ignored, template
@@ -380,7 +399,8 @@ The diagnostic commands below only read state; none of them prints secret values
 | Backend uses unexpected settings | It was not started from `backend/` or the repository root, so `.env` was not found, or an exported variable overrides `.env`. | `env \| cut -d= -f1 \| grep -E '^(DB_\|APP_\|SERVER_\|POSTGRES_)'` (names only) |
 | Vite: `http proxy error … ECONNREFUSED` | The backend is not running, or `VITE_DEV_PROXY_TARGET` points to the wrong port. | `curl -s http://localhost:8080/api/v1/system/status` |
 | Vite: `Port 5173 is already in use` | Another dev server is running; the port is fixed (`strictPort`). Stop the other one. | `netstat -ano \| grep LISTENING \| grep ':5173 '` |
-| `403` with body `Invalid CORS request` | The page's origin is not in `APP_CORS_ALLOWED_ORIGINS`, e.g. the app was opened at `http://127.0.0.1:5173`. Use `http://localhost:5173`. | browser address bar |
+| `403` with body `Invalid CORS request` | The page's origin is not in `APP_CORS_ALLOWED_ORIGINS`, e.g. the app was opened at `http://127.0.0.1:5173`. Use `http://localhost:5173`. On Vercel: set the exact production origin on Render; preview deployments are rejected by design. | browser address bar |
+| Vercel: `502` / "The server is starting up…" | The Render Free backend was asleep and its start took longer than Vercel's 120 s proxy timeout. Wait a moment and try again. | `curl -s --max-time 150 <vercel-url>/api/v1/system/status` |
 | `403 CSRF_TOKEN_INVALID` | Unsafe requests need the `XSRF-TOKEN` cookie value in the `X-XSRF-TOKEN` header. The SPA handles this; with curl or Swagger UI, call `GET /api/v1/auth/csrf` first and again after login, registration and logout ([api.md](docs/api.md#authentication-and-csrf-for-clients)). | browser DevTools → Network |
 | `401 SESSION_EXPIRED` / signed out unexpectedly | The session ended after 30 min of inactivity or 12 h after sign-in, or the backend database was reset. Sign in again. | — |
 | `429 TOO_MANY_ATTEMPTS` | Too many failed logins (5 per account and IP, 50 per IP in 15 min) or registrations (10 per IP and hour). Wait for `Retry-After`. | response header `Retry-After` |
@@ -401,7 +421,9 @@ Limitations:
   feature for that yet (Week 10). The manual runbook is in
   [`docs/database.md`](docs/database.md#session-revocation-runbook).
 - No email verification, password reset or MFA (post-MVP).
-- Local development only; no deployment yet (Week 12).
+- Staging only: the Render Free backend spins down when idle, and its first request afterwards
+  can take about 2 minutes (through Vercel possibly a `502`; try again). Throttling sees one shared
+  proxy address for all clients. Not for real users yet (Week 12).
 
 Next milestones:
 

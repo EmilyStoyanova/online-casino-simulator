@@ -42,7 +42,9 @@ app:
     enabled: ${APP_REGISTRATION_ENABLED:false}
   cors:
     # No browser origin is allowed until a frontend exists. Then set APP_CORS_ALLOWED_ORIGINS to its
-    # exact HTTPS origin. Never localhost on a public deployment.
+    # exact HTTPS origin. Never localhost on a public deployment. Also needed behind the Vercel
+    # rewrite (frontend/vercel.json): the browser sends its Origin on unsafe requests, and the Host
+    # here is Render's, so login and logout are CORS requests (VercelProxyIT).
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:}
 
 springdoc:

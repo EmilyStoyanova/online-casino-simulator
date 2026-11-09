@@ -1,7 +1,8 @@
 # Render: backend staging deployment
 
 The Spring Boot backend runs as a Docker web service on Render. It uses the Neon `staging` branch
-(see [docs/database.md → Neon](../../docs/database.md#neon)). The frontend is not deployed yet.
+(see [docs/database.md → Neon](../../docs/database.md#neon)). The frontend is prepared for Vercel
+([vercel/README.md](../vercel/README.md)); it reaches this service through a same-origin rewrite.
 
 This page is the runbook: what is configured where, the browser steps, and how to verify the
 result. Nothing here deploys automatically.
@@ -55,11 +56,11 @@ each value directly from its source, never through a chat, a ticket, a commit or
 | `NEON_DB_PASSWORD` | That role's password | **yes** |
 | `APP_SECURITY_THROTTLE_SECRET` | A **new** value, different from every local one (see below) | **yes** |
 | `APP_REGISTRATION_ENABLED` | `false` until the deployment is verified ([registrations](#registrations-on-a-public-url)) | no |
+| `APP_CORS_ALLOWED_ORIGINS` | Only once the Vercel project exists: its exact production origin, e.g. `https://online-casino-simulator.vercel.app` ([frontend](#frontend-on-vercel-same-origin-api-rewrite)) | no |
 
 Do not set the following:
 - `PORT`: Render provides it (10000).
 - `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`: the local database settings.
-- `APP_CORS_ALLOWED_ORIGINS`: no browser origin until a frontend exists.
 - `APP_BOOTSTRAP_ADMIN_*`: no administrator on staging unless decided separately.
 
 Optional, only when needed:
@@ -88,8 +89,8 @@ applied, stop the service: it is pointing at a different database.
 3. Fill in the [settings](#render-settings): name (for example `casino-backend-staging`, which
    becomes the URL `https://casino-backend-staging.onrender.com`), language Docker, branch, region,
    Root Directory, instance type Free.
-4. **Environment Variables:** add the seven [variables](#environment-variables), including
-   `APP_REGISTRATION_ENABLED=false`.
+4. **Environment Variables:** add the first seven [variables](#environment-variables), including
+   `APP_REGISTRATION_ENABLED=false`. `APP_CORS_ALLOWED_ORIGINS` follows once the frontend exists.
 5. **Advanced:**
    - Health Check Path `/actuator/health/readiness`;
    - Dockerfile Path `./Dockerfile`;
@@ -274,7 +275,7 @@ Tomcat runs at most 50 request threads, and the Neon pool has 5 connections.
 | Client IP for throttling | The TCP peer (Render's proxy), shared by all clients until the proxy chain has been verified ([client address](#client-address)). Forged headers do not change it (tested). |
 | Session cookie | `__Host-SESSION`, `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain` (tested in the container). Sessions in Neon survive restarts (tested). |
 | CSRF | Unchanged (`csrf.spa()`, ADR-0006). The `XSRF-TOKEN` cookie is always `Secure` with `app.security.https-only` (tested). |
-| CORS | No origin allowed by default on Render, and `localhost` is rejected (tested). Set `APP_CORS_ALLOWED_ORIGINS` to the exact frontend origin when one exists. |
+| CORS | No origin allowed by default on Render, and `localhost` is rejected (tested). `APP_CORS_ALLOWED_ORIGINS` = the exact Vercel production origin, needed for sign-in through the rewrite; preview origins and wildcards are never added (`VercelProxyIT`). |
 | Errors | Problem Details without stack traces or internal details (`server.error.include-stacktrace=never`). The log has no passwords, emails or session ids (checked in the test run). |
 | Actuator | Only `health` (status only, no details) and `info` (empty) are exposed; everything else is `401`. |
 | API docs | Swagger UI and `/v3/api-docs` off; the contract `/openapi.yaml` stays public. |
@@ -304,21 +305,18 @@ change needs a deploy, but no rebuild:
 
 Until registration is opened on purpose, do not share the URL or invite real users.
 
-## Same-origin `/api` proxy for the future frontend (Vercel)
+## Frontend on Vercel (same-origin `/api` rewrite)
 
-The proposal is to serve the frontend on Vercel and route `/api/*` to this backend with a Vercel
-rewrite, so the browser sees a single origin. The architecture currently names Cloudflare Pages;
-the final choice belongs to the deployment decision (ADR-0007, Week 12). Feasibility:
+The frontend is prepared for Vercel. A rewrite forwards `/api/*` to this service, so the browser
+sees a single origin and the cookies stay first-party. The runbook is
+[vercel/README.md](../vercel/README.md). The final hosting decision remains ADR-0007 (Week 12).
 
-- **Works:**
-  - external rewrites proxy requests and responses, including cookies, so `__Host-SESSION` and the
-    CSRF cookie stay first-party with `SameSite=Lax`;
-  - Vercel honours the backend's `Cache-Control: no-store`, so API responses are not cached.
-- **Must be configured:** `APP_CORS_ALLOWED_ORIGINS` = the exact Vercel origin. Browsers send
-  `Origin` on unsafe requests, as with the Vite proxy in development.
-- **Limitation, client IP:** requests reach Render from Vercel, so throttling would see Vercel or
-  Cloudflare addresses for all users. Vercel forwards the visitor IP (`x-real-ip`, `x-forwarded-for`)
-  and can add a secret header to prove that a request came through it. Using that safely needs a
-  small backend change. Decide this before the frontend goes public.
-- **Risk, cold start:** a rewrite waiting about 2 minutes for a spun-down Free instance may time out
-  on Vercel's side; this has not been verified. A paid instance does not spin down.
+For this service, it means:
+- **Required:** `APP_CORS_ALLOWED_ORIGINS` = the exact Vercel production origin. Without it, sign-in
+  and sign-out through the rewrite get `403 Invalid CORS request`, because the browser's `Origin`
+  differs from Render's `Host` (`VercelProxyIT`).
+- **Client IP:** unchanged. Throttling still sees one shared address
+  ([client address](#client-address)).
+- **Cold start:** Vercel waits at most 120 s for this service. A cold start on the Free instance can
+  take longer, so the first request after a spin-down may get a `502` from Vercel
+  ([details](../vercel/README.md#render-free-cold-starts-and-vercels-proxy-timeout)).
