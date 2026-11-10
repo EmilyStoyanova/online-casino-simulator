@@ -101,6 +101,11 @@ app:
   version: '@project.version@'
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  wallet:
+    # Longest wait for a wallet's row lock; then the balance change fails (503) without changes.
+    lock-timeout: ${APP_WALLET_LOCK_TIMEOUT:5s}
+    # Coins of a new player's wallet (1 to 2^53 - 1); affects only wallets opened afterwards.
+    starting-balance: ${APP_WALLET_STARTING_BALANCE:1000}
   registration:
     # `false` closes POST /api/v1/auth/register (403 REGISTRATION_DISABLED); login is unaffected.
     # Server configuration only. The profile `render` defaults to false (RegistrationProperties).

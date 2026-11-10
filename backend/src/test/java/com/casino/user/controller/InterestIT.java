@@ -12,6 +12,7 @@ import java.util.List;
 
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
 import com.casino.contract.OpenApiContract;
@@ -54,11 +55,14 @@ class InterestIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @AfterEach
     void deleteRows() {
-        new TestAccounts(jdbcTemplate, passwordEncoder).deleteAll();
+        testDatabase.reset();
         jdbcTemplate.update("DELETE FROM interests WHERE code LIKE 'TEST\\_%'");
     }
 

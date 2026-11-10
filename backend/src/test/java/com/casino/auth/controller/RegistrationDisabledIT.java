@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
 import com.casino.contract.OpenApiContract;
@@ -56,6 +57,9 @@ class RegistrationDisabledIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     private TestAccounts accounts;
@@ -69,7 +73,7 @@ class RegistrationDisabledIT {
 
     @AfterEach
     void deleteRows() {
-        accounts.deleteAll();
+        testDatabase.reset();
     }
 
     @Test
@@ -84,6 +88,7 @@ class RegistrationDisabledIT {
         assertThat(json(response).path("detail").asText()).isEqualTo("New registrations are currently closed.");
         assertThat(response.getHeaders(HttpHeaders.SET_COOKIE)).noneMatch(header -> header.startsWith("SESSION="));
         assertThat(count("users")).isZero();
+        assertThat(count("wallets")).isZero();
         assertThat(count("spring_session")).isEqualTo(sessions);
         // Not counted: closed registration cannot be used to fill the throttle table.
         assertThat(count("auth_throttle")).isZero();

@@ -31,12 +31,13 @@ The API is **design-first**. The contract
   | `VALIDATION_FAILED` | 400 | Bean Validation failures; `errors` lists `{field, message}` sorted by field, never the rejected value |
   | `MALFORMED_REQUEST` | 400 | Unreadable JSON, wrong JSON types, missing body, missing or unconvertible parameter |
   | `AUTHENTICATION_REQUIRED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS` | 401 | No session, ended session, failed login |
-  | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID`, `REGISTRATION_DISABLED` | 403 | Missing role (`/api/v1/admin/**`), missing or invalid CSRF token, registration closed by configuration |
+  | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID`, `REGISTRATION_DISABLED` | 403 | Missing role (`/api/v1/admin/**`; `/api/v1/wallet/**` for non-players from W3-07), missing or invalid CSRF token, registration closed by configuration |
   | `NOT_FOUND` | 404 | Unknown path or resource |
   | `METHOD_NOT_ALLOWED` | 405 | Unsupported method (`Allow` header) |
   | `NOT_ACCEPTABLE` | 406 | No representation matches the `Accept` header (the problem itself is still JSON) |
   | `CONFLICT` | 409 | Generic conflict (e.g. a framework `409`) |
   | `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION` | 409 | Registration with an existing email; overlapping profile update |
+  | `INSUFFICIENT_FUNDS`, `IDEMPOTENCY_KEY_REUSED`, `BALANCE_LIMIT_EXCEEDED` | 409 | Wallet rules of balance-changing operations (from Week 4; [wallet](#wallet-designed-planned-until-w3-07-and-w3-08)) |
   | `CONTENT_TOO_LARGE` | 413 | Request too large |
   | `UNSUPPORTED_MEDIA_TYPE` | 415 | Unsupported request `Content-Type` (`Accept` header lists the supported types) |
   | `TOO_MANY_ATTEMPTS` | 429 | Login and registration throttling; `Retry-After` = whole seconds until the window ends |
@@ -77,6 +78,7 @@ JavaScript never sees it. The SPA keeps nothing about the session in browser sto
 | `POST /api/v1/auth/register`, `/login`, `/logout` | ✅ | not needed | **required** |
 | `GET /api/v1/users/me` | `401` | required | not needed |
 | `PATCH /api/v1/users/me` | `401` | required | **required** |
+| `GET /api/v1/wallet`, `GET /api/v1/wallet/transactions` (planned) | `401` | `PLAYER` role, otherwise `403 ACCESS_DENIED` | not needed |
 | `/api/v1/admin/**` (no endpoints yet) | `401` | `ADMIN` role, otherwise `403 ACCESS_DENIED` | for unsafe methods |
 | `/actuator/health/**`, `/actuator/info`, Swagger UI, `/openapi.yaml`, `/v3/api-docs` | ✅ | not needed | — |
 
@@ -287,10 +289,65 @@ Week 2 operation is implemented now. The design rationale is in
 [`docs/plans/week-02.md`](plans/week-02.md) §5. Contract version 0.3.0 (deployment foundation) adds
 the error code `REGISTRATION_DISABLED` to `POST /api/v1/auth/register`.
 
+Contract version **0.4.0** (W3-02) adds the two wallet operations below as `planned`, their schemas
+and three wallet error codes. The design rationale is in [`docs/plans/week-03.md`](plans/week-03.md)
+§5.
+
+### Wallet (designed, `planned` until W3-07 and W3-08)
+
+| Method | Path | Responses | Description |
+|---|---|---|---|
+| GET | `/api/v1/wallet` | `200` `Wallet`, `401`, `403`, `500` `ProblemDetail` | Balance of the signed-in player's wallet |
+| GET | `/api/v1/wallet/transactions?limit=&cursor=` | `200` `WalletTransactionPage`, `400`, `401`, `403`, `500` `ProblemDetail` | Ledger entries of that wallet, newest first, in pages |
+
+- **Whose wallet:** always the session user's. No operation takes a wallet or user id, so there is
+  nothing to guess (no path parameters, no id parameters).
+- **Players only:** session required (`401 AUTHENTICATION_REQUIRED`/`SESSION_EXPIRED`); a signed-in
+  administrator gets `403 ACCESS_DENIED`, because administrators have no wallet. Safe methods: no
+  CSRF token. Responses carry `Cache-Control: no-store`.
+- **Read-only:** no operation credits or debits a wallet. Balances change on the server only, as the
+  result of game, learning or reward rules (from Week 4).
+- **Coins** are JSON integers (`int64`) from `0` to `9007199254740991` (2^53 − 1), exact in
+  JavaScript. A ledger entry has `id`, `type`, `amount` (positive = credit, negative = debit, never
+  `0`), `balanceAfter` and `createdAt`; it never contains the idempotency key, the wallet id or the
+  user id. Types: `STARTING_BALANCE` (credit, once per wallet). Later versions add types; clients
+  treat unknown types as generic entries and use the sign of `amount`.
+- **Pagination (keyset):** `limit` 1–100 (default 20). The first request has no `cursor`; each next
+  page is requested with the previous response's `nextCursor` (`null` on the last page). Entries
+  are ordered by `id` descending and new entries always get higher ids, so following the cursor
+  never repeats or skips entries, also while new ones are added. The cursor is opaque (URL-safe
+  Base64, at most 64 characters) and only selects entries of the session user's wallet.
+- **Errors:** `400 VALIDATION_FAILED` for `limit` outside 1–100 or a cursor not issued by the API
+  (`errors[].field` = `limit`/`cursor`), `400 MALFORMED_REQUEST` for a non-integer `limit`,
+  `500 INTERNAL_ERROR` also for a player account without a wallet (a data error; a read never
+  creates a wallet).
+
+```json
+{ "balance": 1000, "updatedAt": "2026-11-12T09:15:00Z" }
+```
+
+```json
+{
+  "items": [
+    { "id": 1, "type": "STARTING_BALANCE", "amount": 1000, "balanceAfter": 1000, "createdAt": "2026-11-12T09:15:00Z" }
+  ],
+  "nextCursor": null
+}
+```
+
+**Wallet error codes for balance-changing operations (from Week 4).** No 0.4.0 operation returns them;
+they are defined now so the wallet service uses stable codes from the start:
+
+| `code` | Status | When |
+|---|---|---|
+| `INSUFFICIENT_FUNDS` | 409 | A debit larger than the balance; nothing changes |
+| `IDEMPOTENCY_KEY_REUSED` | 409 | An operation key reused with different values; nothing changes |
+| `BALANCE_LIMIT_EXCEEDED` | 409 | A credit would exceed 2^53 − 1; nothing changes |
+
+### Later weeks
+
 | Method | Endpoint | Purpose | Week |
 |---|---|---|---|
-| GET | `/api/v1/wallet` | Current virtual balance | 3 |
-| GET | `/api/v1/wallet/transactions` | Transaction history | 3 |
 | POST | `/api/v1/games/roulette/spins` | Place bets and play a round (idempotency key) | 4 |
 | GET | `/api/v1/games/roulette/history` | Roulette history | 6 |
 | GET | `/api/v1/learning/modules` | Educational modules | 7 |

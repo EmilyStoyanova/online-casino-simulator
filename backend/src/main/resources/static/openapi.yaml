@@ -18,7 +18,7 @@ openapi: 3.1.0
 
 info:
   title: Online Casino Simulator API
-  version: 0.3.0
+  version: 0.4.0
   summary: Casino rules and probabilities with virtual currency only.
   description: |
     REST API of the Online Casino Simulator.
@@ -44,6 +44,8 @@ info:
       SQL or class names. Only a cross-origin request from an origin that is not allowed is
       rejected by the CORS check with a plain-text `403` (`Invalid CORS request`).
     - Timestamps are ISO-8601 in UTC (`date-time`).
+    - Virtual coins are JSON integers (`int64`), never fractions. Balances are between `0` and
+      `9007199254740991` (2^53 − 1), so every value is exact in JavaScript (`Number.MAX_SAFE_INTEGER`).
     - Operations whose summary ends with "(planned)" (`x-implementation-status: planned`) are
       designed and reviewed, but not available yet.
 
@@ -62,7 +64,17 @@ info:
       created from server configuration. The role is taken from the account when signing in, never
       from a request. Administrative operations under `/api/v1/admin/**` (from Week 10) require
       `ADMIN`: other signed-in users get `403 ACCESS_DENIED` for every path there, also unknown
-      ones. A role change applies from the next sign-in.
+      ones. Player operations under `/api/v1/wallet/**` require `PLAYER`: administrators have no
+      wallet and get `403 ACCESS_DENIED`. A role change applies from the next sign-in.
+
+    ## Virtual wallet
+    - Every player has exactly one wallet, opened with the starting balance when the account is
+      registered. The wallet is always the one of the session's user: no operation takes a wallet
+      or user id, so no client can read another user's wallet.
+    - The API only **reads** wallets. Balances change on the server alone, as the result of game,
+      learning or reward rules (from Week 4); there is no operation that credits or debits a wallet.
+    - Every balance change is an entry in an append-only ledger (`WalletTransaction`). Entries are
+      never changed or deleted.
   license:
     name: Proprietary — SAP mentorship project
 
@@ -79,6 +91,8 @@ tags:
     description: Profile of the signed-in user
   - name: Interests
     description: Catalog of educational interests
+  - name: Wallet
+    description: Virtual-coin balance and transaction history of the signed-in player (read-only)
   - name: Operations
     description: Infrastructure health probes provided by Spring Boot Actuator
 
@@ -453,6 +467,147 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/wallet:
+    get:
+      tags: [Wallet]
+      operationId: getWallet
+      summary: Get the signed-in player's wallet (planned)
+      x-implementation-status: planned
+      description: |
+        Returns the current virtual-coin balance of the wallet that belongs to the session's user.
+        The wallet is identified only by the session, never by a request value. Read-only: it never
+        creates or changes a wallet. Players only: an administrator gets `403 ACCESS_DENIED`.
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Wallet of the signed-in player
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+              example:
+                balance: 1000
+                updatedAt: '2026-11-12T09:15:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PlayerRoleRequired'
+        '500':
+          $ref: '#/components/responses/WalletInternalError'
+
+  /api/v1/wallet/transactions:
+    get:
+      tags: [Wallet]
+      operationId: listWalletTransactions
+      summary: List the signed-in player's wallet transactions (planned)
+      x-implementation-status: planned
+      description: |
+        Ledger entries of the session user's wallet, newest first, in pages (keyset pagination).
+        The first request has no `cursor`; each further page is requested with the `nextCursor` of
+        the previous response, and the same `limit`. `nextCursor` is `null` on the last page.
+
+        The order is stable: entries are ordered by `id`, descending, and new entries only ever
+        get higher ids. Following `nextCursor` therefore never repeats or skips an entry, also when
+        new entries are added between two requests (they appear on a new first page). Ids can
+        have gaps; they are not consecutive.
+
+        The cursor is opaque: clients pass it back unchanged and never build or parse it. It only
+        selects entries of the session user's wallet. Players only: an administrator gets
+        `403 ACCESS_DENIED`.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of entries in the page.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          description: The `nextCursor` of the previous page; omitted for the first page.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+            pattern: '^[A-Za-z0-9_-]+$'
+      responses:
+        '200':
+          description: One page of ledger entries, newest first
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletTransactionPage'
+              examples:
+                firstPage:
+                  summary: A new player's only entry
+                  value:
+                    items:
+                      - id: 1
+                        type: STARTING_BALANCE
+                        amount: 1000
+                        balanceAfter: 1000
+                        createdAt: '2026-11-12T09:15:00Z'
+                    nextCursor: null
+        '400':
+          description: |
+            Invalid page request. `VALIDATION_FAILED`: `limit` is outside 1–100, or `cursor` is not a
+            cursor issued by this API (the field is named in `errors`). `MALFORMED_REQUEST`: `limit`
+            is not an integer.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                limitOutOfRange:
+                  value:
+                    title: Bad Request
+                    status: 400
+                    code: VALIDATION_FAILED
+                    detail: The request contains invalid values.
+                    instance: /api/v1/wallet/transactions
+                    errors:
+                      - field: limit
+                        message: must be less than or equal to 100
+                invalidCursor:
+                  value:
+                    title: Bad Request
+                    status: 400
+                    code: VALIDATION_FAILED
+                    detail: The request contains invalid values.
+                    instance: /api/v1/wallet/transactions
+                    errors:
+                      - field: cursor
+                        message: is not a valid cursor
+                malformedLimit:
+                  value:
+                    title: Bad Request
+                    status: 400
+                    code: MALFORMED_REQUEST
+                    detail: The request could not be read.
+                    instance: /api/v1/wallet/transactions
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PlayerRoleRequired'
+        '500':
+          $ref: '#/components/responses/WalletInternalError'
+
   /actuator/health:
     get:
       tags: [Operations]
@@ -696,6 +851,40 @@ components:
             code: TOO_MANY_ATTEMPTS
             detail: Too many attempts. Try again later.
             instance: /api/v1/auth/login
+    PlayerRoleRequired:
+      description: |
+        Signed in, but not as a player (`ACCESS_DENIED`): administrators have no wallet.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            title: Forbidden
+            status: 403
+            code: ACCESS_DENIED
+            detail: You are not allowed to perform this action.
+            instance: /api/v1/wallet
+    WalletInternalError:
+      description: |
+        Unexpected error; the details are only logged on the server. This includes a player
+        account without a wallet, which the server treats as a data error: a read never creates a
+        wallet.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            title: Internal Server Error
+            status: 500
+            code: INTERNAL_ERROR
+            detail: An unexpected error occurred. Please try again later.
+            instance: /api/v1/wallet
 
   schemas:
     ComponentStatus:
@@ -865,6 +1054,90 @@ components:
           type: string
           examples: [How likely outcomes are and how odds are expressed]
 
+    Wallet:
+      type: object
+      description: Virtual-coin wallet of the signed-in player. Coins have no monetary value.
+      required: [balance, updatedAt]
+      properties:
+        balance:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+          description: Current balance in whole virtual coins
+          examples: [1000]
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the balance last changed (UTC)
+
+    WalletTransaction:
+      type: object
+      description: |
+        One entry of the append-only wallet ledger. Entries are never changed or deleted. The sum of
+        all `amount`s of a wallet equals its balance, and `balanceAfter` of the newest entry equals
+        the current balance.
+      required: [id, type, amount, balanceAfter, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Entry id; higher ids are newer. Ids can have gaps.
+          examples: [1]
+        type:
+          $ref: '#/components/schemas/WalletTransactionType'
+        amount:
+          type: integer
+          format: int64
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+          description: Change in whole virtual coins; positive for a credit, negative for a debit, never `0`.
+          examples: [1000]
+        balanceAfter:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+          description: Balance right after this entry
+          examples: [1000]
+        createdAt:
+          type: string
+          format: date-time
+          description: When the entry was recorded (UTC). Entries of one operation share it; order by `id`.
+
+    WalletTransactionType:
+      type: string
+      description: |
+        Reason for a ledger entry:
+
+        | Value | Direction | Meaning |
+        |---|---|---|
+        | `STARTING_BALANCE` | credit | Starting coins, granted exactly once when the wallet is opened |
+
+        Later versions add values for game stakes and payouts and for learning rewards. Clients
+        treat an unknown value as a generic entry and use the sign of `amount`.
+      enum: [STARTING_BALANCE]
+
+    WalletTransactionPage:
+      type: object
+      description: One page of ledger entries, newest first.
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          description: At most `limit` entries, ordered by `id` descending. Empty for an empty wallet history.
+          items:
+            $ref: '#/components/schemas/WalletTransaction'
+        nextCursor:
+          type: [string, 'null']
+          maxLength: 64
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: |
+            Opaque cursor for the next (older) page, passed back unchanged as `cursor`; `null` when
+            this is the last page.
+
     ProblemDetail:
       type: object
       description: |
@@ -904,7 +1177,7 @@ components:
             | `NOT_FOUND` | 404 |
             | `METHOD_NOT_ALLOWED` | 405 |
             | `NOT_ACCEPTABLE` | 406 |
-            | `CONFLICT`, `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION` | 409 |
+            | `CONFLICT`, `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION`, `INSUFFICIENT_FUNDS`, `IDEMPOTENCY_KEY_REUSED`, `BALANCE_LIMIT_EXCEEDED` | 409 |
             | `CONTENT_TOO_LARGE` | 413 |
             | `UNSUPPORTED_MEDIA_TYPE` | 415 |
             | `TOO_MANY_ATTEMPTS` | 429 |
@@ -914,6 +1187,10 @@ components:
             | `SERVER_ERROR` | any other `5xx` (e.g. 501, 502) |
 
             `CONFLICT` and `SERVICE_UNAVAILABLE` are generic; operations document their specific codes.
+            The wallet codes `INSUFFICIENT_FUNDS` (debit larger than the balance),
+            `IDEMPOTENCY_KEY_REUSED` (an operation key reused with different values) and
+            `BALANCE_LIMIT_EXCEEDED` (a credit beyond 2^53 − 1) belong to balance-changing
+            operations, the first of which arrive in Week 4; no operation of this version returns them.
             New specific codes may be added in later versions, so clients treat an unknown code like
             the generic code of its status class.
           enum:
@@ -931,6 +1208,9 @@ components:
             - CONFLICT
             - EMAIL_ALREADY_REGISTERED
             - CONCURRENT_MODIFICATION
+            - INSUFFICIENT_FUNDS
+            - IDEMPOTENCY_KEY_REUSED
+            - BALANCE_LIMIT_EXCEEDED
             - CONTENT_TOO_LARGE
             - UNSUPPORTED_MEDIA_TYPE
             - TOO_MANY_ATTEMPTS

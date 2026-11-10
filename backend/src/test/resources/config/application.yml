@@ -5,3 +5,9 @@ app:
       # No secret in the repository: without APP_SECURITY_THROTTLE_SECRET, every test application
       # context uses a random throttling secret.
       ephemeral-secret: true
+
+spring:
+  flyway:
+    # db/test-callbacks/afterMigrate.sql allows the test-only wallet transaction types TEST_CREDIT and
+    # TEST_DEBIT in test databases (docs/plans/week-03.md §6.2). Production migrations are unchanged.
+    locations: classpath:db/migration,classpath:db/test-callbacks

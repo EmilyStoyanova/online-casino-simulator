@@ -31,7 +31,11 @@ public final class TestAccounts {
         return create(email, password, "DISABLED");
     }
 
-    /** Deletes the rows that login tests create. */
+    /**
+     * Deletes the rows that login tests create, for tests with the {@code render} profile only: there the
+     * guarded {@link TestDatabase#reset()} refuses (G4). Fails on users with a wallet
+     * ({@code fk_wallets_user}); every other test cleans up with {@link TestDatabase#reset()}.
+     */
     public void deleteAll() {
         jdbcTemplate.update("DELETE FROM spring_session");
         jdbcTemplate.update("DELETE FROM users");

@@ -4,14 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import com.casino.common.exception.ProblemCode;
+import io.swagger.v3.oas.models.Operation;
+import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.media.Schema;
+import io.swagger.v3.oas.models.parameters.Parameter;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import org.junit.jupiter.api.Test;
 
@@ -20,6 +25,8 @@ class OpenApiContractTest {
 
     private static final String STATUS_PATH = "/api/v1/system/status";
     private static final String JSON = "application/json";
+    private static final String WALLET_PATH = "/api/v1/wallet";
+    private static final String WALLET_TRANSACTIONS_PATH = "/api/v1/wallet/transactions";
 
     private static final String VALID_UP = """
             {"application":"online-casino-simulator","version":"0.1.0","status":"UP",
@@ -162,14 +169,131 @@ class OpenApiContractTest {
     // ------------------------------------------------------------------ planned elements
 
     @Test
-    void everyWeek2OperationIsImplemented() {
-        assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.3.0");
+    void everyWeek2OperationIsImplementedAndTheWeek3WalletOperationsArePlanned() {
+        assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.4.0");
         // GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08),
-        // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10). The planned marker stays
-        // available for later weeks; the tests below use a minimal specification for it.
-        assertThat(contract.plannedOperations()).isEmpty();
+        // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10).
         assertThat(contract.implementedOperations()).contains("GET " + STATUS_PATH, "GET /api/v1/users/me",
                 "PATCH /api/v1/users/me");
+        // Designed in W3-02; implemented in W3-07 and W3-08, which remove the marker.
+        assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
+                "GET " + WALLET_PATH, "GET " + WALLET_TRANSACTIONS_PATH);
+    }
+
+    // ------------------------------------------------------------------ wallet (Week 3)
+
+    @Test
+    void walletOperationsOnlyReadTheSessionUsersWalletAndRequireAPlayer() {
+        Map<String, PathItem> walletPaths = contract.spec().getPaths().entrySet().stream()
+                .filter(path -> path.getKey().startsWith(WALLET_PATH))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        assertThat(walletPaths).containsOnlyKeys(WALLET_PATH, WALLET_TRANSACTIONS_PATH);
+
+        walletPaths.forEach((path, item) -> {
+            // Read-only: no operation that credits or debits a wallet (P-W3-9).
+            assertThat(item.readOperationsMap()).as(path).containsOnlyKeys(PathItem.HttpMethod.GET);
+            Operation operation = item.getGet();
+            assertThat(operation.getRequestBody()).as(path).isNull();
+            // The wallet is the session user's: no path parameter, no id in a query parameter.
+            assertThat(path).doesNotContain("{");
+            assertThat(Objects.requireNonNullElse(operation.getParameters(), List.<Parameter>of())).as(path)
+                    .allSatisfy(parameter -> assertThat(parameter.getIn()).isEqualTo("query"))
+                    .extracting(Parameter::getName).doesNotContain("userId", "walletId", "id");
+            assertThat(operation.getSecurity()).as(path).containsExactly(new SecurityRequirement().addList("sessionCookie"));
+            assertThat(operation.getResponses()).as(path).containsKeys("200", "401", "403", "500");
+            assertThat(operation.getResponses().get("403").get$ref()).isEqualTo("#/components/responses/PlayerRoleRequired");
+        });
+        // Paging parameters of the history.
+        assertThat(walletPaths.get(WALLET_TRANSACTIONS_PATH).getGet().getParameters())
+                .extracting(Parameter::getName).containsExactly("limit", "cursor");
+    }
+
+    @Test
+    void coinValuesAreJavaScriptSafeIntegers() {
+        String max = "9007199254740991";
+        assertThat(contract.validateSchema("Wallet", "{\"balance\":" + max + ",\"updatedAt\":\"2026-11-12T09:15:00Z\"}"))
+                .isEmpty();
+        assertThat(contract.validateSchema("Wallet", "{\"balance\":0,\"updatedAt\":\"2026-11-12T09:15:00Z\"}")).isEmpty();
+        assertThat(contract.validateSchema("Wallet", """
+                {"balance":-1,"updatedAt":"2026-11-12T09:15:00Z"}""")).containsExactly("$.balance: -1 is less than the minimum 0");
+        assertThat(contract.validateSchema("Wallet", """
+                {"balance":9007199254740992,"updatedAt":"2026-11-12T09:15:00Z"}""")).containsExactly(
+                "$.balance: 9007199254740992 is greater than the maximum " + max);
+        assertThat(contract.validateSchema("Wallet", """
+                {"balance":10.5,"updatedAt":"2026-11-12T09:15:00Z"}""")).containsExactly(
+                "$.balance: expected type [integer] but was NUMBER");
+        assertThat(contract.validateSchema("Wallet", """
+                {"balance":1000}""")).containsExactly("$: missing required property 'updatedAt'");
+    }
+
+    @Test
+    void transactionPagesCarryLedgerEntriesAndAnOpaqueCursor() {
+        String entry = """
+                {"id":1,"type":"STARTING_BALANCE","amount":1000,"balanceAfter":1000,"createdAt":"2026-11-12T09:15:00Z"}""";
+        assertThat(contract.validateSchema("WalletTransactionPage", "{\"items\":[" + entry + "],\"nextCursor\":null}")).isEmpty();
+        assertThat(contract.validateSchema("WalletTransactionPage", "{\"items\":[],\"nextCursor\":\"djE6MQ\"}")).isEmpty();
+        // nextCursor is required (null on the last page) and opaque, URL-safe Base64.
+        assertThat(contract.validateSchema("WalletTransactionPage", "{\"items\":[]}"))
+                .containsExactly("$: missing required property 'nextCursor'");
+        assertThat(contract.validateSchema("WalletTransactionPage", "{\"items\":[],\"nextCursor\":\"a/b+c=\"}"))
+                .containsExactly("$.nextCursor: 'a/b+c=' does not match ^[A-Za-z0-9_-]+$");
+        assertThat(contract.validateSchema("WalletTransactionPage",
+                "{\"items\":[" + String.join(",", Collections.nCopies(101, entry)) + "],\"nextCursor\":null}"))
+                .containsExactly("$.items: more than 100 items");
+        // Entries expose no idempotency key, wallet id or user id, and only documented types.
+        assertThat(contract.validateSchema("WalletTransaction", """
+                {"id":1,"type":"STARTING_BALANCE","amount":1000,"balanceAfter":1000,"createdAt":"2026-11-12T09:15:00Z",
+                 "idempotencyKey":"starting-balance"}""")).containsExactly("$: undocumented property 'idempotencyKey'");
+        assertThat(contract.validateSchema("WalletTransaction", """
+                {"id":2,"type":"ADMIN_GIFT","amount":5,"balanceAfter":1005,"createdAt":"2026-11-12T09:15:00Z"}"""))
+                .containsExactly("$.type: value 'ADMIN_GIFT' is not one of [STARTING_BALANCE]");
+        assertThat(contract.validateSchema("WalletTransaction", """
+                {"id":3,"type":"STARTING_BALANCE","amount":1000,"balanceAfter":-1,"createdAt":"2026-11-12T09:15:00Z"}"""))
+                .containsExactly("$.balanceAfter: -1 is less than the minimum 0");
+    }
+
+    @Test
+    void walletErrorCodesHaveTheirFixedStatus() {
+        for (ProblemCode code : List.of(ProblemCode.INSUFFICIENT_FUNDS, ProblemCode.IDEMPOTENCY_KEY_REUSED,
+                ProblemCode.BALANCE_LIMIT_EXCEEDED)) {
+            assertThat(code.status().value()).as(code.name()).isEqualTo(409);
+            assertThat(contract.validateSchema("ProblemDetail",
+                    "{\"title\":\"Conflict\",\"status\":409,\"code\":\"" + code.name() + "\"}")).as(code.name()).isEmpty();
+        }
+    }
+
+    @Test
+    void valueConstraintsAreValidated() {
+        String yaml = """
+                openapi: 3.1.0
+                info: {title: t, version: '1'}
+                paths: {}
+                components:
+                  schemas:
+                    Item:
+                      type: object
+                      properties:
+                        count: {type: integer, format: int64, minimum: 1, maximum: 5}
+                        small: {type: integer, format: int32}
+                        code: {type: string, minLength: 2, maxLength: 3, pattern: '^[A-Z]+$'}
+                        list: {type: array, minItems: 1, maxItems: 2, items: {type: string}}""";
+        OpenApiContract constrained = OpenApiContract.fromYaml(yaml);
+
+        assertThat(constrained.validateSchema("Item", """
+                {"count":5,"small":7,"code":"ÄB","list":["a","b"]}""")).containsExactly(
+                "$.code: 'ÄB' does not match ^[A-Z]+$");
+        assertThat(constrained.validateSchema("Item", """
+                {"count":0,"small":2147483648,"code":"A","list":[]}""")).containsExactly(
+                "$.count: 0 is less than the minimum 1",
+                "$.small: 2147483648 does not fit into int32",
+                "$.code: shorter than 2 characters",
+                "$.list: fewer than 1 items");
+        assertThat(constrained.validateSchema("Item", """
+                {"count":99999999999999999999,"code":"ABCD","list":["a","b","c"]}""")).containsExactly(
+                "$.count: 99999999999999999999 does not fit into int64",
+                "$.count: 99999999999999999999 is greater than the maximum 5",
+                "$.code: longer than 3 characters",
+                "$.list: more than 2 items");
     }
 
     @Test

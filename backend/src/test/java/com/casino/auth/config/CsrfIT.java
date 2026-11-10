@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import io.swagger.v3.core.util.Json31;
 import jakarta.servlet.http.Cookie;
@@ -49,6 +50,9 @@ class CsrfIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     private TestAccounts accounts;
@@ -61,7 +65,7 @@ class CsrfIT {
 
     @AfterEach
     void deleteRows() {
-        accounts.deleteAll();
+        testDatabase.reset();
     }
 
     @Test

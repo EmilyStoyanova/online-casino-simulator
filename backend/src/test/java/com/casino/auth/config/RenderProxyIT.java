@@ -1,6 +1,7 @@
 package com.casino.auth.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import java.io.IOException;
 import java.net.URI;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -58,8 +60,13 @@ class RenderProxyIT {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private TestDatabase testDatabase;
+
     @AfterEach
     void deleteRows() {
+        // The render profile is active, so TestDatabase.reset() refuses (G4). Registration is closed under
+        // render and these users are inserted directly, so none has a wallet and DELETE still works.
         new TestAccounts(jdbcTemplate, passwordEncoder).deleteAll();
     }
 
@@ -122,6 +129,17 @@ class RenderProxyIT {
         assertThat(register.statusCode()).isEqualTo(403);
         assertThat(register.body()).contains("\"code\":\"REGISTRATION_DISABLED\"");
         assertThat(register.headers().firstValue("Strict-Transport-Security")).hasValue(HSTS);
+    }
+
+    @Test
+    void theGuardedTestCleanupRefusesToRunWithTheRenderProfile() {
+        // G4 in a real context: the profile of a deployed environment is active, so TRUNCATE never runs,
+        // even though this database is a Testcontainers container.
+        new TestAccounts(jdbcTemplate, passwordEncoder).active("olivia@example.com", PASSWORD);
+
+        assertThatIllegalStateException().isThrownBy(testDatabase::reset)
+                .withMessageStartingWith("Test database cleanup refused (G4)");
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM users", Integer.class)).isOne();
     }
 
     // ------------------------------------------------------------------ helpers

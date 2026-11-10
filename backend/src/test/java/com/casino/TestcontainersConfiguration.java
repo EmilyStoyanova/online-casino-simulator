@@ -1,8 +1,11 @@
 package com.casino;
 
+import javax.sql.DataSource;
+
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
@@ -19,5 +22,11 @@ public class TestcontainersConfiguration {
     @ServiceConnection
     PostgreSQLContainer postgresContainer() {
         return new PostgreSQLContainer(POSTGRES_IMAGE);
+    }
+
+    /** Guarded cleanup of this container's database (only where the container exists, G5). */
+    @Bean
+    TestDatabase testDatabase(DataSource dataSource, PostgreSQLContainer postgresContainer, Environment environment) {
+        return new TestDatabase(dataSource, postgresContainer, environment);
     }
 }

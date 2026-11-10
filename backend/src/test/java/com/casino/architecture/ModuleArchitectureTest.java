@@ -49,4 +49,13 @@ class ModuleArchitectureTest {
 
     @ArchTest
     static final ArchRule classesResideInLayerPackages = RULES.classesResideInLayerPackages();
+
+    @ArchTest
+    static final ArchRule walletServiceIsUsedOnlyByModulesThatChangeBalances = RULES.walletServiceIsUsedOnlyByModulesThatChangeBalances();
+
+    @ArchTest
+    static final ArchRule walletUsesUserOnlyThroughDtos = RULES.walletUsesUserOnlyThroughDtos();
+
+    @ArchTest
+    static final ArchRule testLedgerTypesAreNotUsedByProductionCode = RULES.testLedgerTypesAreNotUsedByProductionCode();
 }

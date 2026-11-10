@@ -3,6 +3,7 @@ package com.casino.contract;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
@@ -17,6 +18,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,8 +43,9 @@ import io.swagger.v3.oas.models.security.SecurityRequirement;
  *   <li>{@link #differencesTo} — structural comparison with another specification, e.g. the one
  *       springdoc generates from the controllers;</li>
  *   <li>{@link #validateResponse} — validation of an actual HTTP response against the documented
- *       status code, media type and schema. Undocumented properties are reported unless the schema
- *       explicitly allows additional properties. {@link #validateSchema} applies the same check
+ *       status code, media type and schema (types, enums, formats incl. {@code int32}/{@code int64},
+ *       numeric bounds, string lengths and patterns, array sizes). Undocumented properties are
+ *       reported unless the schema explicitly allows additional properties. {@link #validateSchema} applies the same check
  *       against a component schema, e.g. {@code ProblemDetail}.</li>
  * </ul>
  *
@@ -288,6 +291,7 @@ public final class OpenApiContract {
             errors.add(loc + ": value '" + node.asText() + "' is not one of " + allowed);
         }
         validateFormat(loc, node, schema.getFormat(), errors);
+        validateConstraints(loc, node, schema, errors);
 
         if (node.isObject()) {
             for (String required : orEmpty(schema.getRequired())) {
@@ -332,6 +336,11 @@ public final class OpenApiContract {
                     errors.add(loc + ": " + node + " does not fit into int32");
                 }
             }
+            case "int64" -> {
+                if (!node.canConvertToLong()) {
+                    errors.add(loc + ": " + node + " does not fit into int64");
+                }
+            }
             case "uri", "uri-reference" -> {
                 try {
                     URI.create(node.asText());
@@ -341,6 +350,44 @@ public final class OpenApiContract {
             }
             default -> {
                 // Other formats are informational only.
+            }
+        }
+    }
+
+    /**
+     * The JSON Schema keywords the contract uses for values: {@code minimum}/{@code maximum} (e.g. coin
+     * amounts), {@code minLength}/{@code maxLength} in characters and {@code pattern} (unanchored, as in
+     * JSON Schema), and {@code minItems}/{@code maxItems}.
+     */
+    private static void validateConstraints(String loc, JsonNode node, Schema<?> schema, List<String> errors) {
+        if (node.isNumber()) {
+            BigDecimal value = node.decimalValue();
+            if (schema.getMinimum() != null && value.compareTo(schema.getMinimum()) < 0) {
+                errors.add(loc + ": " + node + " is less than the minimum " + schema.getMinimum());
+            }
+            if (schema.getMaximum() != null && value.compareTo(schema.getMaximum()) > 0) {
+                errors.add(loc + ": " + node + " is greater than the maximum " + schema.getMaximum());
+            }
+        }
+        if (node.isTextual()) {
+            String text = node.asText();
+            int length = text.codePointCount(0, text.length());
+            if (schema.getMinLength() != null && length < schema.getMinLength()) {
+                errors.add(loc + ": shorter than " + schema.getMinLength() + " characters");
+            }
+            if (schema.getMaxLength() != null && length > schema.getMaxLength()) {
+                errors.add(loc + ": longer than " + schema.getMaxLength() + " characters");
+            }
+            if (schema.getPattern() != null && !Pattern.compile(schema.getPattern()).matcher(text).find()) {
+                errors.add(loc + ": '" + text + "' does not match " + schema.getPattern());
+            }
+        }
+        if (node.isArray()) {
+            if (schema.getMinItems() != null && node.size() < schema.getMinItems()) {
+                errors.add(loc + ": fewer than " + schema.getMinItems() + " items");
+            }
+            if (schema.getMaxItems() != null && node.size() > schema.getMaxItems()) {
+                errors.add(loc + ": more than " + schema.getMaxItems() + " items");
             }
         }
     }

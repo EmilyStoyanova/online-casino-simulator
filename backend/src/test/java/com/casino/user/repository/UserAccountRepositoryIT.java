@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.user.entity.Role;
 import com.casino.user.entity.UserAccount;
@@ -41,9 +42,12 @@ class UserAccountRepositoryIT {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private TestDatabase testDatabase;
+
     @AfterEach
     void deleteAccounts() {
-        jdbcTemplate.update("DELETE FROM users");
+        testDatabase.reset();
     }
 
     @Test

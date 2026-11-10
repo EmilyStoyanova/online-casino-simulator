@@ -64,6 +64,8 @@ class VercelProxyIT {
 
     @AfterEach
     void deleteRows() {
+        // The render profile is active, so TestDatabase.reset() refuses (G4). Registration is closed under
+        // render and these users are inserted directly, so none has a wallet and DELETE still works.
         new TestAccounts(jdbcTemplate, passwordEncoder).deleteAll();
     }
 

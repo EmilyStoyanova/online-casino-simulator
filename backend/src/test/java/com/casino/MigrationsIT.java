@@ -24,7 +24,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * The Flyway schema in PostgreSQL itself (independent of JPA): defaults, required columns, constraints
  * and triggers of {@code users} (V3), {@code auth_throttle} (V4) and {@code interests} /
  * {@code user_interests} with the seeded catalogue (V5), and that the migrations apply to a database
- * with existing data.
+ * with existing data. The wallet schema (V6) is checked on PostgreSQL 17 and 18 by
+ * {@code MigrationCompatibilityIT}, and through JPA by {@code WalletRepositoryIT}.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -48,13 +49,15 @@ class MigrationsIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private DataSource dataSource;
 
     @AfterEach
     void deleteRows() {
-        // Deletes the users' interests too (ON DELETE CASCADE); the seeded catalogue stays.
-        jdbcTemplate.update("DELETE FROM users");
-        jdbcTemplate.update("DELETE FROM auth_throttle");
+        // Empties the user tables (also user_interests and wallets); the seeded catalogue stays.
+        testDatabase.reset();
         jdbcTemplate.update("DELETE FROM interests WHERE code LIKE 'TEST\\_%'");
     }
 
@@ -225,11 +228,11 @@ class MigrationsIT {
             assertThat(latest.info().applied()).filteredOn(info -> info.getVersion() != null)
                     .allMatch(info -> info.getState().isApplied() && !info.getState().isFailed())
                     .extracting(info -> info.getVersion().getVersion())
-                    .containsExactly("1", "2", "3", "4", "5");
+                    .containsExactly("1", "2", "3", "4", "5", "6");
             // Existing data is untouched, and the new tables are there.
             assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM " + COMPAT_SCHEMA + ".spring_session", Integer.class))
                     .isOne();
-            for (String table : List.of("users", "auth_throttle", "user_interests")) {
+            for (String table : List.of("users", "auth_throttle", "user_interests", "wallets", "wallet_transactions")) {
                 assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM " + COMPAT_SCHEMA + "." + table, Integer.class))
                         .as(table)
                         .isZero();

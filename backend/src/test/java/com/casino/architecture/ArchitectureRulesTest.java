@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.Arrays;
 
 import archfixture.auth.service.OtherModuleRepositoryAccess;
+import archfixture.auth.service.WalletUseOutsideAllowedModules;
 import archfixture.common.exception.CommonDependsOnModule;
 import archfixture.game.service.CredentialsOutsideAuth;
 import archfixture.game.service.GameCycle;
@@ -16,6 +17,8 @@ import archfixture.user.repository.ReverseLayerAccess;
 import archfixture.user.service.FieldInjection;
 import archfixture.user.service.MisplacedController;
 import archfixture.user.util.OutsideLayerPackage;
+import archfixture.wallet.service.AccountManagementFromWallet;
+import archfixture.wallet.service.TestTypesInProduction;
 import archfixture.wallet.service.WalletCycle;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -91,6 +94,21 @@ class ArchitectureRulesTest {
     @Test
     void r12DetectsClassesOutsideLayerPackages() {
         assertViolatedOnlyBy(RULES.classesResideInLayerPackages(), UnknownModule.class, OutsideLayerPackage.class);
+    }
+
+    @Test
+    void r13DetectsWalletServiceUseOutsideTheModulesThatChangeBalances() {
+        assertViolatedOnlyBy(RULES.walletServiceIsUsedOnlyByModulesThatChangeBalances(), WalletUseOutsideAllowedModules.class);
+    }
+
+    @Test
+    void r14DetectsTheWalletUsingUserInternalsButAllowsUserDtos() {
+        assertViolatedOnlyBy(RULES.walletUsesUserOnlyThroughDtos(), AccountManagementFromWallet.class);
+    }
+
+    @Test
+    void r15DetectsTestLedgerTypesInProductionCodeButAllowsTheEnumsThemselves() {
+        assertViolatedOnlyBy(RULES.testLedgerTypesAreNotUsedByProductionCode(), TestTypesInProduction.class);
     }
 
     /** The rule fails, and every reported violation names one of the expected classes. */

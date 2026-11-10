@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import com.casino.RealCsrfToken;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -66,6 +67,9 @@ class OpenApiContractIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Test
@@ -94,8 +98,11 @@ class OpenApiContractIT {
                 "GET /actuator/health/readiness",
                 "GET /actuator/info");
         // Planned operations cannot be verified at runtime (validateResponse rejects them). When one is
-        // implemented, its marker is removed and it moves to the list above. Empty since W2-10.
-        assertThat(contract.plannedOperations()).isEmpty();
+        // implemented, its marker is removed and it moves to the list above with a runtime check.
+        // The wallet operations were designed in W3-02 and are implemented in W3-07 and W3-08.
+        assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
+                "GET /api/v1/wallet",
+                "GET /api/v1/wallet/transactions");
     }
 
     @Test
@@ -122,9 +129,7 @@ class OpenApiContractIT {
             assertThat(perform(post(LOGOUT).cookie(session).with(csrf)).getStatus()).isEqualTo(204);
             assertConformsToContract(PROFILE, get(PROFILE).cookie(session), 401);
         } finally {
-            jdbcTemplate.update("DELETE FROM spring_session");
-            jdbcTemplate.update("DELETE FROM users");
-            jdbcTemplate.update("DELETE FROM auth_throttle");
+            testDatabase.reset();
         }
     }
 
@@ -171,8 +176,7 @@ class OpenApiContractIT {
                     assertConformsToContract(REGISTER, "POST", register(valid, "192.0.2.10").with(csrf), 429);
             assertThat(throttled.getHeader(HttpHeaders.RETRY_AFTER)).matches("[1-9][0-9]*");
         } finally {
-            jdbcTemplate.update("DELETE FROM users");
-            jdbcTemplate.update("DELETE FROM auth_throttle");
+            testDatabase.reset();
         }
     }
 
@@ -201,9 +205,7 @@ class OpenApiContractIT {
             assertConformsToContract(LOGOUT, "POST", post(LOGOUT).cookie(session), 403);
             assertConformsToContract(LOGOUT, "POST", post(LOGOUT).cookie(session).with(csrf), 204);
         } finally {
-            jdbcTemplate.update("DELETE FROM spring_session");
-            jdbcTemplate.update("DELETE FROM users");
-            jdbcTemplate.update("DELETE FROM auth_throttle");
+            testDatabase.reset();
         }
     }
 
