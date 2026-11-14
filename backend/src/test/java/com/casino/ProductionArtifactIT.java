@@ -29,9 +29,11 @@ class ProductionArtifactIT {
         try (JarFile jar = new JarFile(executableJar().toFile())) {
             List<String> names = jar.stream().map(JarEntry::getName).toList();
 
+            // Exactly these migrations, each once. Any order: the jar keeps the build file system's directory
+            // order (alphabetical on NTFS, hash order on Linux CI), and Flyway sorts by version anyway.
             assertThat(names).filteredOn(name -> name.startsWith(CLASSES + "db/migration/") && name.endsWith(".sql"))
                     .extracting(name -> name.substring((CLASSES + "db/migration/").length(), name.indexOf("__")))
-                    .containsExactly("V1", "V2", "V3", "V4", "V5", "V6", "V7");
+                    .containsExactlyInAnyOrder("V1", "V2", "V3", "V4", "V5", "V6", "V7");
             assertThat(names).noneMatch(name -> name.contains("test-callbacks") || name.contains("archfixture")
                     || name.endsWith("IT.class") || name.endsWith("Test.class") || name.contains("TestDatabase")
                     || name.contains("TestAccounts") || name.contains("TestcontainersConfiguration"));
