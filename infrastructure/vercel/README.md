@@ -13,8 +13,13 @@ Browser ──HTTPS──▶ https://<project>.vercel.app
 ```
 
 This page is the runbook: what the repository configures, the exact dashboard settings, the one
-backend setting the rewrite needs, and how to verify the result. Nothing here deploys
-automatically. The final hosting decision is still ADR-0007 (Week 12); this setup is for staging.
+backend setting the rewrite needs, and how to verify the result. The final hosting decision is still
+ADR-0007 (Week 12); this setup is for staging.
+
+**Current state:** deployed and verified at `https://online-casino-simulator.vercel.app`. The
+project's Git integration deploys `main` **automatically** (production branch `main`), so merging
+into `main` updates the frontend. Week 3 does not change the frontend; its backend rollout is
+[wallet-rollout.md](../wallet-rollout.md).
 
 ## What the repository provides
 

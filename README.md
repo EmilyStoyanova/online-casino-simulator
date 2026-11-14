@@ -25,8 +25,9 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 |---|---|---|---|
 | 1 — Foundation | 1 | Repository, tooling, database, CI, documentation | ✅ Done |
 | | 2 | Authentication, users, roles, profile & interests | ✅ Done |
-| Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | 🚧 In progress: Neon staging migrated; Render backend deployed and verified (registration closed); Vercel frontend prepared, not deployed |
-| 2 — Virtual currency & game logic | 3–4 | Wallet ledger, roulette engine | Planned |
+| Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | ✅ Done: Neon `staging` at V5; Render backend and Vercel frontend deployed and verified (registration closed) |
+| 2 — Virtual currency & game logic | 3 | Virtual wallet and immutable ledger | 🚧 Implemented and verified on `feature/week-03-wallet` (W3-01 … W3-11), in review; **not deployed** (schema V7 locally, V5 on staging) |
+| | 4 | Roulette engine | Planned |
 | 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | Planned |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
 | 5 — Statistics & responsible play | 9–10 | Dashboard, limits, admin panel | Planned |
@@ -49,20 +50,31 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
   educational interests.
 - **Platform status:** a page and an endpoint showing backend, database and schema version.
 
+On the branch `feature/week-03-wallet` (Week 3, in review, not deployed yet):
+
+- **Virtual wallet:** every player gets a wallet with 1,000 virtual coins at registration, in the
+  same transaction as the account; players who existed before receive theirs from a one-time
+  migration (V7). Administrators have no wallet.
+- **Immutable ledger:** every balance change is one append-only ledger entry; balances never go
+  below 0 or above 2⁵³ − 1, and repeated operations (idempotency keys) never apply twice.
+- **Read-only API for players:** `GET /api/v1/wallet` (balance) and `GET /api/v1/wallet/transactions`
+  (history in pages). There is no endpoint that adds or removes coins, and no wallet UI yet
+  (Week 5).
+
 ### Not implemented yet
 
-Virtual wallet and balances, roulette and every other game, learning modules, quizzes, rewards,
-statistics, play limits and the admin panel are **planned** (see the table above). The backend runs
-as a staging service on Render with the Neon staging database and closed registration; the frontend
-is prepared for Vercel ([runbook](infrastructure/vercel/README.md)) but not deployed.
-Nothing in the current application handles coins or game rounds.
+Roulette and every other game, the wallet UI, learning modules, quizzes, rewards, statistics, play
+limits and the admin panel are **planned** (see the table above). Staging runs `main` (Weeks 1–2):
+the backend on Render with the Neon `staging` branch and closed registration, the frontend on Vercel
+([runbook](infrastructure/vercel/README.md)). The wallet reaches staging only through the separately
+approved [Week 3 rollout](infrastructure/wallet-rollout.md). Nothing handles game rounds yet.
 
 ## Architecture at a glance
 
 ```
  Browser ──► React + TypeScript (Vite) ──/api/v1──► Spring Boot modular monolith ──► PostgreSQL
-             renders server results only            common · auth · user            Flyway-managed
-                                                    (+ wallet · game · learning ·   schema
+             renders server results only            common · auth · user · wallet   Flyway-managed
+                                                    (+ game · learning ·            schema
                                                      responsibleplay · admin later)
 ```
 
@@ -70,8 +82,8 @@ Nothing in the current application handles coins or game rounds.
 - The API is **design-first**: [`openapi.yaml`](backend/src/main/resources/static/openapi.yaml) is
   the source of truth, and contract tests keep the code in sync with it.
 - Authentication uses session cookies and CSRF tokens, with no tokens in browser storage.
-- From Week 3 the backend will be **authoritative** for every game outcome, payout and balance; the
-  frontend only renders server-confirmed results.
+- The backend is **authoritative** for every balance (Week 3) and, from Week 4, for every game
+  outcome and payout; the frontend only renders server-confirmed results.
 
 Details: [`docs/architecture.md`](docs/architecture.md).
 
@@ -83,9 +95,10 @@ Details: [`docs/architecture.md`](docs/architecture.md).
 | Database | PostgreSQL 17 locally, 18 on Neon; Flyway migrations |
 | API | Design-first OpenAPI 3.1 contract, springdoc-openapi / Swagger UI |
 | Frontend | React 19, TypeScript 6, Vite 8, React Router 8, Tailwind CSS 4 |
-| Testing | JUnit Jupiter, Mockito, Spring Security Test, Testcontainers, ArchUnit, Vitest, React Testing Library |
+| Testing | JUnit Jupiter, Mockito, Spring Security Test, Testcontainers, ArchUnit, JaCoCo, Vitest, React Testing Library, Playwright (local) |
 | Tooling | Maven Wrapper (Maven 3.9), Docker Compose, GitHub Actions |
-| Later stages | Phaser (Week 6), Playwright (Week 11), Cloudflare Pages / Render / Neon (Week 12) |
+| Hosting (staging) | Vercel (frontend), Render (backend, Docker), Neon (PostgreSQL); final hosting decision in Week 12 (ADR-0007) |
+| Later stages | Phaser (Week 6), Playwright in CI (Week 11) |
 
 Exact versions and the reasons for them: [ADR-0002](docs/decisions/0002-technology-baseline.md).
 
@@ -93,9 +106,9 @@ Exact versions and the reasons for them: [ADR-0002](docs/decisions/0002-technolo
 
 ```
 ├── backend/                 Spring Boot application (Maven Wrapper: ./mvnw)
-│   └── src/main/java/com/casino/<module>/   one package per module (common, auth, user)
+│   └── src/main/java/com/casino/<module>/   one package per module (common, auth, user, wallet)
 ├── frontend/                React + Vite single-page application
-├── infrastructure/          Deployment runbooks: Neon read-only checks (neon/), Render backend (render/), Vercel frontend (vercel/)
+├── infrastructure/          Deployment runbooks: Neon read-only checks (neon/), Render (render/), Vercel (vercel/), Week 3 rollout
 ├── docs/                    Architecture, API, database, plans, ADRs
 ├── .github/workflows/       CI pipeline
 ├── docker-compose.yml       Local PostgreSQL
@@ -196,6 +209,8 @@ cd backend
 ```
 
 On start-up Flyway applies pending migrations; the log ends with `Started CasinoSimulatorApplication`.
+On the Week 3 branch the first start applies V6 and V7 to your local database: every local player
+account gets a wallet with 1,000 coins (once; [database.md](docs/database.md#v7-wallets-for-existing-players)).
 Stop it with `Ctrl+C`. In PowerShell or `cmd.exe` the wrapper is `mvnw.cmd` instead of `./mvnw`.
 
 ### 5. Start the frontend (http://localhost:5173)
@@ -313,6 +328,13 @@ npm run build
   to `main` and on every pull request.
 - Test reports: `backend/target/surefire-reports/` (unit) and `backend/target/failsafe-reports/`
   (integration).
+- **Coverage (JaCoCo):** `./mvnw verify` fails if `com.casino.wallet.service` drops below 80 % lines
+  or 70 % branches (measured: 100 % / 100 %). Reports: `backend/target/site/jacoco/index.html`
+  (unit + integration) and `backend/target/site/jacoco-unit/` (unit only).
+- **Docker resources:** each cached Spring test context runs its own PostgreSQL container; at most 6
+  are cached at a time (`backend/src/test/resources/spring.properties`). If other local Docker
+  stacks use most of Docker's memory, a container can miss its start-up wait: stop them yourself
+  before `./mvnw verify`, or give Docker Desktop more memory.
 
 ### Browser acceptance tests (Playwright)
 
@@ -371,6 +393,8 @@ and in the hosting provider's secret store in production.
 | `APP_SECURITY_HTTPS_ONLY` | Backend | no | `false`; `true` with profile `render` | Behind a TLS-terminating proxy that redirects HTTP (Render): HSTS on every response and a `Secure` CSRF cookie, without trusting forwarded headers. Never `true` where plain HTTP reaches the backend |
 | `APP_BOOTSTRAP_ADMIN_EMAIL` / `APP_BOOTSTRAP_ADMIN_PASSWORD` | Backend | no (both or neither) | empty = disabled | First administrator; password = secret; remove after the first start |
 | `APP_REGISTRATION_ENABLED` | Backend | no | `true`; `false` with profile `render` | `false` closes registration (`403 REGISTRATION_DISABLED`); login is unaffected. Opening it on Render: [runbook](infrastructure/render/README.md#registrations-on-a-public-url) |
+| `APP_WALLET_STARTING_BALANCE` | Backend | no | `1000` | Coins of a new player's wallet (1 … 2⁵³ − 1; an invalid value stops the start). Affects only wallets opened afterwards; V7 always used 1,000. Week 3 branch |
+| `APP_WALLET_LOCK_TIMEOUT` | Backend | no | `5s` | Longest wait for a wallet's row lock (100 ms … 1 min); then `503`, nothing changed. Week 3 branch |
 | `VITE_API_BASE_URL` | Frontend build | no | empty (same origin) | Leave empty: the API is on the page's own origin (Vite proxy locally, Vercel rewrite on staging). A backend on another site would break cookie sign-in (ADR-0006) |
 | `VITE_DEV_PROXY_TARGET` | Frontend dev server | no | `http://localhost:8080` | Target of the Vite `/api` proxy |
 
@@ -415,8 +439,6 @@ in the volume. It is a last resort, not a routine fix.
 
 Limitations:
 
-- Week 2 is implemented but still **in review**: the manual browser walkthrough and the pull request
-  are open (W2-16).
 - Sessions of a user are not revoked automatically when their role or status changes; there is no
   feature for that yet (Week 10). The manual runbook is in
   [`docs/database.md`](docs/database.md#session-revocation-runbook).
@@ -427,17 +449,23 @@ Limitations:
 
 Next milestones:
 
-- **Week 3:** virtual wallet with an immutable ledger, and a starting balance on registration.
-- **Week 4:** server-side European roulette engine.
+- **Week 3:** virtual wallet with an immutable ledger and a starting balance on registration —
+  implemented and verified on `feature/week-03-wallet` (W3-01 … W3-11). Remaining: the pull request
+  and, separately approved, the [staging rollout](infrastructure/wallet-rollout.md).
+- **Week 4:** server-side European roulette engine (stakes and payouts through the wallet); it also
+  removes the test-only ledger types `TEST_CREDIT`/`TEST_DEBIT` (release gate, Week 3 plan §7.13).
+- **Week 5:** the balance in the user interface.
 
 ## Documentation
 
 - [Architecture](docs/architecture.md) — modules, layers, security, frontend, deployment checklist
-- [API](docs/api.md) — conventions, authentication and CSRF, every implemented operation
-- [Database](docs/database.md) — migrations, tables, session revocation runbook
+- [API](docs/api.md) — conventions, authentication and CSRF, every implemented operation (incl. the wallet)
+- [Database](docs/database.md) — migrations (V1–V7), tables incl. wallets and ledger, Neon, session revocation runbook
 - [User scenarios](docs/user-scenarios.md)
 - [Architecture decision records](docs/decisions/)
-- [Week 2 implementation plan](docs/plans/week-02.md)
+- [Week 2 implementation plan](docs/plans/week-02.md), [Week 3 implementation plan](docs/plans/week-03.md)
+- Deployment: [Render](infrastructure/render/README.md), [Vercel](infrastructure/vercel/README.md),
+  [Week 3 wallet rollout](infrastructure/wallet-rollout.md)
 
 ## Development workflow
 

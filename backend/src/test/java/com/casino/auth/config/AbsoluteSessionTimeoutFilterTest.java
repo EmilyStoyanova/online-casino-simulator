@@ -92,7 +92,7 @@ class AbsoluteSessionTimeoutFilterTest {
     }
 
     private static MockHttpServletRequest requestWith(MockHttpSession session) {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/wallet");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/unknown");
         request.setSession(session);
         return request;
     }

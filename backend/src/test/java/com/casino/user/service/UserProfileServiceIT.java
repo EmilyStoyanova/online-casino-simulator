@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.user.dto.UpdateProfileRequest;
 import com.casino.user.exception.ConcurrentModificationException;
@@ -48,6 +49,9 @@ class UserProfileServiceIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     private UUID id;
@@ -61,7 +65,7 @@ class UserProfileServiceIT {
 
     @AfterEach
     void deleteRows() {
-        jdbcTemplate.update("DELETE FROM users");
+        testDatabase.reset();
     }
 
     @Test

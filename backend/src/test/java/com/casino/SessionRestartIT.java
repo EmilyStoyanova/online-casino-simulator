@@ -22,6 +22,7 @@ import java.util.UUID;
 
 import com.casino.auth.service.MutableClock;
 import com.casino.auth.service.SessionSignInService;
+import com.casino.wallet.service.WalletService;
 import io.swagger.v3.core.util.Json31;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -55,7 +56,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class SessionRestartIT {
 
     private static final String PASSWORD = "correct-horse-battery-3e8f";
-    private static final String PROTECTED = "/api/v1/wallet";
+    private static final String PROTECTED = "/api/v1/unknown";
     private static final Duration ABSOLUTE_TIMEOUT = Duration.ofHours(12);
 
     /** Outlives both application instances; stopped only after the test. */
@@ -84,7 +85,8 @@ class SessionRestartIT {
             String primaryId;
             byte[] storedSignInTime;
             try (Instance first = Instance.start(client, new MutableClock(signedInAt), configuration)) {
-                userId = new TestAccounts(database, first.context().getBean(PasswordEncoder.class)).active("alice@example.com", PASSWORD);
+                userId = new TestAccounts(database, first.context().getBean(PasswordEncoder.class))
+                        .activePlayerWithWallet("alice@example.com", PASSWORD, first.context().getBean(WalletService.class));
                 setCookie = first.login("alice@example.com", PASSWORD);
                 assertThat(first.get(PROTECTED, setCookie).statusCode()).isEqualTo(404);
 
@@ -109,6 +111,14 @@ class SessionRestartIT {
                 assertThat(primaryId(database, setCookie)).isEqualTo(primaryId);
                 assertThat(principal(database, setCookie)).isEqualTo(userId.toString());
                 assertThat(signInTime(database, setCookie)).isEqualTo(storedSignInTime);
+                // The restored session still identifies the player's own wallet (W3-07).
+                HttpResponse<String> wallet = second.get("/api/v1/wallet", setCookie);
+                assertThat(wallet.statusCode()).as(wallet.body()).isEqualTo(200);
+                assertThat(wallet.body()).contains("\"balance\":1000");
+                // ... and the player's own history (W3-08).
+                HttpResponse<String> history = second.get("/api/v1/wallet/transactions", setCookie);
+                assertThat(history.statusCode()).as(history.body()).isEqualTo(200);
+                assertThat(history.body()).contains("\"type\":\"STARTING_BALANCE\"", "\"nextCursor\":null");
 
                 // The lifetime counts from the original sign-in, not from the restart.
                 clock.advance(Duration.ofSeconds(1));

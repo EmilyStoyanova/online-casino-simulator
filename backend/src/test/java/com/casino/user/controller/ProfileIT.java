@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 import com.casino.Concurrency;
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
 import com.casino.contract.OpenApiContract;
@@ -63,6 +64,9 @@ class ProfileIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     private TestAccounts accounts;
@@ -76,7 +80,7 @@ class ProfileIT {
 
     @AfterEach
     void deleteRows() {
-        accounts.deleteAll();
+        testDatabase.reset();
         jdbcTemplate.update("UPDATE interests SET active = TRUE");
     }
 

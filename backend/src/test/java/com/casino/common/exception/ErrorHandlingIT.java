@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.contract.OpenApiContract;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -54,6 +55,9 @@ class ErrorHandlingIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private TestDatabase testDatabase;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -122,7 +126,7 @@ class ErrorHandlingIT {
             assertThat(browser.send(withCsrf(browser, request("/api/v1/auth/logout")).POST(BodyPublishers.noBody()).build(),
                     UTF_8).statusCode()).isEqualTo(204);
         } finally {
-            accounts.deleteAll();
+            testDatabase.reset();
         }
     }
 

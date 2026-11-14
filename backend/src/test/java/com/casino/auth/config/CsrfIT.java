@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import io.swagger.v3.core.util.Json31;
 import jakarta.servlet.http.Cookie;
@@ -49,6 +50,9 @@ class CsrfIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     private TestAccounts accounts;
@@ -61,7 +65,7 @@ class CsrfIT {
 
     @AfterEach
     void deleteRows() {
-        accounts.deleteAll();
+        testDatabase.reset();
     }
 
     @Test
@@ -89,7 +93,7 @@ class CsrfIT {
         // Nothing happened: no account, no throttling attempt, the session is still signed in.
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM users", Integer.class)).isOne();
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM auth_throttle", Integer.class)).isZero();
-        assertThat(perform(get("/api/v1/wallet").cookie(session)).getStatus()).isEqualTo(404);
+        assertThat(perform(get("/api/v1/unknown").cookie(session)).getStatus()).isEqualTo(404);
     }
 
     @Test

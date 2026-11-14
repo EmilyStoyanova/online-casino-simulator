@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
 import com.casino.contract.OpenApiContract;
@@ -52,7 +53,7 @@ class LoginLogoutIT {
 
     private static final String LOGIN = "/api/v1/auth/login";
     private static final String LOGOUT = "/api/v1/auth/logout";
-    private static final String PROTECTED = "/api/v1/wallet";
+    private static final String PROTECTED = "/api/v1/unknown";
     private static final String PASSWORD = "correct-horse-battery-9c1e";
     private static final OpenApiContract CONTRACT = OpenApiContract.load();
 
@@ -61,6 +62,9 @@ class LoginLogoutIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private TestDatabase testDatabase;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -76,7 +80,7 @@ class LoginLogoutIT {
 
     @AfterEach
     void deleteRows() {
-        accounts.deleteAll();
+        testDatabase.reset();
     }
 
     @Test

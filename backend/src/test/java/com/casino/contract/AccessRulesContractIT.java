@@ -14,8 +14,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
+import com.casino.wallet.service.WalletService;
 import io.swagger.v3.core.util.Json31;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -66,7 +68,13 @@ class AccessRulesContractIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private WalletService walletService;
 
     private TestAccounts accounts;
     private RealCsrfToken csrf;
@@ -74,13 +82,14 @@ class AccessRulesContractIT {
     @BeforeEach
     void setUp() throws Exception {
         accounts = new TestAccounts(jdbcTemplate, passwordEncoder);
-        accounts.active("alice@example.com", PASSWORD);
+        // A player with a wallet, as after a registration, so player-only operations answer normally.
+        accounts.activePlayerWithWallet("alice@example.com", PASSWORD, walletService);
         csrf = RealCsrfToken.fetch(mockMvc);
     }
 
     @AfterEach
     void deleteRows() {
-        accounts.deleteAll();
+        testDatabase.reset();
     }
 
     @Test

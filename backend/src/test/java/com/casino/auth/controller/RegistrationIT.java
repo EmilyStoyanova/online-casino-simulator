@@ -1,6 +1,8 @@
 package com.casino.auth.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
@@ -21,10 +23,12 @@ import java.util.UUID;
 
 import com.casino.Concurrency;
 import com.casino.RealCsrfToken;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
 import com.casino.contract.OpenApiContract;
 import com.casino.user.dto.UserRegistered;
+import com.casino.wallet.service.WalletService;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.core.util.Json31;
 import jakarta.servlet.http.Cookie;
@@ -44,6 +48,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.web.servlet.MockMvc;
@@ -76,10 +81,17 @@ class RegistrationIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Autowired
     private ApplicationEvents events;
+
+    /** The real service; one test makes it fail after it has written the wallet. */
+    @MockitoSpyBean
+    private WalletService walletService;
 
     /** A real token from GET /api/v1/auth/csrf (see {@link RealCsrfToken}), sent by {@link #register}. */
     private RealCsrfToken csrf;
@@ -91,9 +103,7 @@ class RegistrationIT {
 
     @AfterEach
     void deleteRows() {
-        jdbcTemplate.update("DELETE FROM spring_session");
-        jdbcTemplate.update("DELETE FROM users");
-        jdbcTemplate.update("DELETE FROM auth_throttle");
+        testDatabase.reset();
     }
 
     @Test
@@ -143,8 +153,78 @@ class RegistrationIT {
             assertThat(new String(attribute, StandardCharsets.ISO_8859_1)).doesNotContain(PASSWORD, "{bcrypt}", hash);
         }
         // The session authenticates: an unknown protected path is 404 instead of 401.
-        assertThat(perform(get("/api/v1/wallet").cookie(new Cookie("SESSION", cookieValue(setCookie)))).getStatus())
+        assertThat(perform(get("/api/v1/unknown").cookie(new Cookie("SESSION", cookieValue(setCookie)))).getStatus())
                 .isEqualTo(404);
+    }
+
+    @Test
+    void aNewPlayerGetsExactlyOneWalletWithTheStartingBalanceInTheRegistrationTransaction() throws Exception {
+        MockHttpServletResponse response = perform(register(body("wallet@example.com", PASSWORD, "Wally", true), "192.0.2.13"));
+
+        assertThat(response.getStatus()).as(content(response)).isEqualTo(201);
+        UUID id = UUID.fromString(json(response).path("id").asText());
+        // W3-05 AC-1.1: one wallet with the default starting balance and one STARTING_BALANCE entry.
+        Map<String, Object> wallet = jdbcTemplate.queryForMap("SELECT * FROM wallets WHERE user_id = ?", id);
+        assertThat(wallet).containsEntry("balance", 1000L);
+        assertThat(jdbcTemplate.queryForList("SELECT * FROM wallet_transactions WHERE wallet_id = ?", wallet.get("id")))
+                .singleElement()
+                .satisfies(entry -> assertThat(entry).containsEntry("type", "STARTING_BALANCE").containsEntry("amount", 1000L)
+                        .containsEntry("balance_after", 1000L).containsEntry("idempotency_key", "starting-balance")
+                        .containsEntry("reference", null));
+        assertThat(walletRows()).isEqualTo("1 wallets, 1 entries");
+        // One physical transaction: PostgreSQL stamped the account, the wallet (its latest row version)
+        // and the entry with the same transaction id.
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT xmin::text FROM users WHERE id = ?
+                UNION SELECT xmin::text FROM wallets WHERE user_id = ?
+                UNION SELECT t.xmin::text FROM wallet_transactions t JOIN wallets w ON w.id = t.wallet_id WHERE w.user_id = ?""",
+                String.class, id, id, id)).hasSize(1);
+        // AC-1.6: the response is the unchanged profile, without wallet data.
+        assertThat(json(response).has("balance")).isFalse();
+        assertThat(json(response).has("wallet")).isFalse();
+        // W3-07: the session created by the registration reads exactly this wallet.
+        MockHttpServletResponse read = perform(get("/api/v1/wallet").cookie(new Cookie("SESSION", cookieValue(sessionCookie(response)))));
+        assertThat(read.getStatus()).as(content(read)).isEqualTo(200);
+        assertThat(json(read).path("balance").asLong()).isEqualTo(1000);
+    }
+
+    @Test
+    void aWalletFailureRollsTheWholeRegistrationBackWithoutSignIn() throws Exception {
+        // W3-05 AC-1.2: the failure comes after the wallet and its entry were written. They are visible
+        // inside the registration transaction (same connection), and none of the three rows may remain.
+        List<String> insideTheTransaction = new ArrayList<>();
+        doAnswer(invocation -> {
+            invocation.callRealMethod();
+            insideTheTransaction.add(jdbcTemplate.queryForObject("SELECT count(*) FROM users", Integer.class) + " users, " + walletRows());
+            throw new IllegalStateException("simulated failure after the starting entry");
+        }).when(walletService).openWallet(any());
+
+        MockHttpServletResponse response = perform(register(body("doomed@example.com", PASSWORD, "Doomed", true), "192.0.2.15"));
+
+        expectProblem(response, ProblemCode.INTERNAL_ERROR);
+        assertThat(content(response)).doesNotContain("simulated", "wallet", "doomed");
+        assertThat(insideTheTransaction).containsExactly("1 users, 1 wallets, 1 entries");
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM users", Integer.class)).isZero();
+        assertThat(walletRows()).isEqualTo("0 wallets, 0 entries");
+        // Not signed in: sign-in happens only after the account was created.
+        assertThat(response.getHeaders(HttpHeaders.SET_COOKIE)).noneMatch(cookie -> cookie.startsWith("SESSION="));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM spring_session WHERE principal_name IS NOT NULL", Integer.class))
+                .isZero();
+    }
+
+    @Test
+    void failedRegistrationsCreateNoWallet() throws Exception {
+        // W3-05 AC-1.3: a conflict, a validation error and a missing CSRF token leave the wallets alone.
+        assertThat(perform(register(body("alice@example.com", PASSWORD, "Alice", true), "192.0.2.14")).getStatus()).isEqualTo(201);
+
+        expectProblem(perform(register(body("alice@example.com", PASSWORD, "Alice 2", true), "192.0.2.14")),
+                ProblemCode.EMAIL_ALREADY_REGISTERED);
+        expectProblem(perform(register(body("bob@example.com", PASSWORD, "Bob", false), "192.0.2.14")), ProblemCode.VALIDATION_FAILED);
+        expectProblem(perform(post(REGISTER).contentType(MediaType.APPLICATION_JSON).content(body("carol@example.com", PASSWORD, "Carol", true))),
+                ProblemCode.CSRF_TOKEN_INVALID);
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM users", Integer.class)).isOne();
+        assertThat(walletRows()).isEqualTo("1 wallets, 1 entries");
     }
 
     @Test
@@ -186,6 +266,8 @@ class RegistrationIT {
         assertThat(statuses).containsOnly(201, 409).filteredOn(status -> status == 201).hasSize(1);
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM users WHERE email = 'race@example.com'", Integer.class))
                 .isOne();
+        // The losers' transactions rolled back before any wallet was opened.
+        assertThat(walletRows()).isEqualTo("1 wallets, 1 entries");
     }
 
     @Test
@@ -339,7 +421,7 @@ class RegistrationIT {
             assertThat(cookie(browser, "XSRF-TOKEN")).isNull();
 
             // 3. Without a token the next unsafe request is rejected, also when signed in.
-            HttpResponse<String> withoutToken = send(client, "POST", "/api/v1/wallet", null, "{}");
+            HttpResponse<String> withoutToken = send(client, "POST", "/api/v1/unknown", null, "{}");
             assertThat(withoutToken.statusCode()).isEqualTo(403);
             assertThat(Json31.mapper().readTree(withoutToken.body()).path("code").asText()).isEqualTo("CSRF_TOKEN_INVALID");
 
@@ -350,7 +432,7 @@ class RegistrationIT {
 
             // 5. The new token and the persisted session work together: CSRF passes and the user is
             // authenticated, so an unknown protected path is 404 (not 403 or 401).
-            HttpResponse<String> signedIn = send(client, "POST", "/api/v1/wallet", signedInToken, "{}");
+            HttpResponse<String> signedIn = send(client, "POST", "/api/v1/unknown", signedInToken, "{}");
             assertThat(signedIn.statusCode()).as(signedIn.body()).isEqualTo(404);
         }
     }
@@ -363,7 +445,7 @@ class RegistrationIT {
         String session = cookieValue(sessionCookie(perform(register(body("alice@example.com", PASSWORD, "Alice", true),
                 "192.0.2.15"))));
 
-        MockHttpServletResponse withOldToken = perform(post("/api/v1/wallet").contentType(MediaType.APPLICATION_JSON).content("{}")
+        MockHttpServletResponse withOldToken = perform(post("/api/v1/unknown").contentType(MediaType.APPLICATION_JSON).content("{}")
                 .cookie(new Cookie("SESSION", session)).with(csrf));
 
         assertThat(withOldToken.getStatus()).isEqualTo(404);
@@ -461,6 +543,12 @@ class RegistrationIT {
                 .map(HttpCookie::getValue)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private String walletRows() {
+        return jdbcTemplate.queryForObject("""
+                SELECT (SELECT count(*) FROM wallets) || ' wallets, ' || (SELECT count(*) FROM wallet_transactions) || ' entries'""",
+                String.class);
     }
 
     private static String body(String email, String password, String displayName, boolean adultConfirmed) {

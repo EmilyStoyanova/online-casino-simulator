@@ -13,6 +13,7 @@ import java.util.Map;
 
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
 import com.casino.contract.OpenApiContract;
@@ -65,6 +66,9 @@ class AdminAuthorizationIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Autowired
@@ -83,7 +87,7 @@ class AdminAuthorizationIT {
 
     @AfterEach
     void deleteRows() {
-        accounts.deleteAll();
+        testDatabase.reset();
     }
 
     @Test
@@ -92,6 +96,8 @@ class AdminAuthorizationIT {
         bootstrap.run(null);
         // AC-9.4: idempotent, the password is not reset.
         assertThat(jdbcTemplate.queryForList("SELECT role FROM users", String.class)).containsExactly("ADMIN");
+        // W3-05 AC-1.4: administrators have no wallet.
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM wallets", Integer.class)).isZero();
         assertThat(jdbcTemplate.queryForObject("SELECT password_hash FROM users", String.class)).isEqualTo(hash)
                 .startsWith("{bcrypt}$2a$12$").doesNotContain(ADMIN_PASSWORD);
 
@@ -110,6 +116,8 @@ class AdminAuthorizationIT {
         MockHttpServletResponse profile = perform(get("/api/v1/users/me").cookie(admin));
         assertThat(json(profile).path("role").asText()).isEqualTo("ADMIN");
         assertThat(json(profile).path("displayName").asText()).isEqualTo("Administrator");
+        // ... but not the player-only wallet (W3-07, P-W3-3).
+        expectProblem(perform(get("/api/v1/wallet").cookie(admin)), ProblemCode.ACCESS_DENIED);
     }
 
     @Test

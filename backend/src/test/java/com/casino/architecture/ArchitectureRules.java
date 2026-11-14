@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 /**
  * Architecture rules of the modular monolith: module boundaries (ADR-0001), layered packages inside
  * each module (ADR-0004) and their enforcement with ArchUnit (ADR-0005). The rule ids R1–R12 match
- * {@code docs/plans/week-02.md} §9.
+ * {@code docs/plans/week-02.md} §9; R13–R15 match {@code docs/plans/week-03.md} §9.
  *
  * <p>The rules are parameterised by the root package, so {@code ArchitectureRulesTest} can prove
  * against a small fixture that every rule actually detects its violation.
@@ -139,6 +139,43 @@ final class ArchitectureRules {
         return noClasses().that().resideOutsideOfPackage(layer("auth", "config"))
                 .should().dependOnClassesThat().resideInAPackage("org.springframework.security.config..")
                 .as("R9 the Spring Security configuration API is used only in auth.config");
+    }
+
+    /**
+     * R13: only the modules that may change balances use {@code wallet.service.WalletService}: the wallet
+     * itself and, from their weeks on, {@code game}, {@code learning} and {@code admin}
+     * ({@code docs/plans/week-03.md} §9). The API has no credit or debit operation of its own.
+     */
+    ArchRule walletServiceIsUsedOnlyByModulesThatChangeBalances() {
+        return noClasses().that().resideOutsideOfPackages(module("wallet"), module("game"), module("learning"), module("admin"))
+                .should().dependOnClassesThat().haveFullyQualifiedName(root + ".wallet.service.WalletService")
+                .as("R13 wallet.service.WalletService is used only by the wallet, game, learning and admin modules");
+    }
+
+    /**
+     * R14: {@code wallet} depends on {@code user} only through {@code user.dto} (the {@code UserRegistered}
+     * event), never through {@code user.service}, {@code user.exception} or internals, so wallet logic
+     * cannot reach account management ({@code docs/plans/week-03.md} §9). Narrower than R3 for this pair;
+     * the opposite direction ({@code user → wallet}) would be a cycle (R2).
+     */
+    ArchRule walletUsesUserOnlyThroughDtos() {
+        return noClasses().that().resideInAPackage(module("wallet"))
+                .should().dependOnClassesThat(resideInAPackage(module("user")).and(not(resideInAPackage(layer("user", "dto")))))
+                .as("R14 wallet depends on user only through user.dto");
+    }
+
+    /**
+     * R15: the test-only ledger types ({@code TEST_CREDIT}, {@code TEST_DEBIT}) are never used by
+     * production code. Test databases allow them (a test-only Flyway callback), the production schema
+     * rejects them, so a production use would pass the tests and fail only in production.
+     */
+    ArchRule testLedgerTypesAreNotUsedByProductionCode() {
+        String dtoType = root + ".wallet.dto.WalletTransactionType";
+        String entityType = root + ".wallet.entity.TransactionType";
+        return noClasses().that().doNotHaveFullyQualifiedName(dtoType).and().doNotHaveFullyQualifiedName(entityType)
+                .should().accessField(dtoType, "TEST_CREDIT").orShould().accessField(dtoType, "TEST_DEBIT")
+                .orShould().accessField(entityType, "TEST_CREDIT").orShould().accessField(entityType, "TEST_DEBIT")
+                .as("R15 the test-only ledger types TEST_CREDIT and TEST_DEBIT are not used by production code");
     }
 
     /** R10: dependencies are injected through constructors. */

@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.casino.Concurrency;
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
+import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.auth.service.ThrottleKeys;
 import io.swagger.v3.core.util.Json31;
@@ -55,6 +56,9 @@ class ThrottleIT {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
+    private TestDatabase testDatabase;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Autowired
@@ -71,7 +75,7 @@ class ThrottleIT {
 
     @AfterEach
     void deleteRows() {
-        accounts.deleteAll();
+        testDatabase.reset();
     }
 
     @Test
