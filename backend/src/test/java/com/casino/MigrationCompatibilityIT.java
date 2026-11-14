@@ -3,19 +3,28 @@ package com.casino;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.casino.wallet.repository.WalletRepository;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.Parameter;
@@ -25,7 +34,7 @@ import org.postgresql.util.PSQLException;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * The Flyway migrations and the wallet schema (V6) on PostgreSQL 17 (Docker Compose, Testcontainers,
+ * The Flyway migrations, the wallet schema (V6) and the wallet backfill (V7) on PostgreSQL 17 (Docker Compose, Testcontainers,
  * CI) **and** 18 (Neon runs 18.6; Render applies migrations at start-up, so a migration that only
  * works on 17 would break the next staging start). No Spring context.
  *
@@ -61,7 +70,7 @@ class MigrationCompatibilityIT {
         try (Connection connection = connect(schema)) {
             assertThat(queryString(connection, "SHOW server_version")).startsWith(image.substring("postgres:".length(), image.indexOf('.')));
             assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success"))
-                    .isEqualTo("6");
+                    .isEqualTo("7");
         }
     }
 
@@ -151,20 +160,165 @@ class MigrationCompatibilityIT {
     }
 
     @Test
-    void v6AddsEmptyTablesToADatabaseWithExistingAccounts() throws SQLException {
-        // A schema at V5 with accounts, as Neon staging is today.
+    void v6AddsEmptyTablesAndV7OpensTheWalletsOfAccountsFromV5() throws SQLException {
+        // A schema at V5 with accounts, as Neon staging is today; Render would apply V6 and V7 in one start.
         String schema = migrated("5");
         try (Connection connection = connect(schema)) {
-            insertUser(connection, "grace@example.com");
-            insertUser(connection, "heidi@example.com");
-            String before = queryString(connection, "SELECT string_agg(id || email || version || updated_at, ',' ORDER BY email) FROM users");
+            UUID grace = insertUser(connection, "grace@example.com");
+            UUID heidi = insertUser(connection, "heidi@example.com", "PLAYER", "DISABLED");
+            UUID admin = insertUser(connection, "admin@example.com", "ADMIN", "ACTIVE");
+            String users = rows(connection, "users");
+
+            flyway(schema, "6").migrate();
+
+            assertThat(queryString(connection, "SELECT count(*) || ':' || (SELECT count(*) FROM wallet_transactions) FROM wallets"))
+                    .isEqualTo("0:0");
 
             flyway(schema, null).migrate();
 
-            assertThat(queryString(connection, "SELECT string_agg(id || email || version || updated_at, ',' ORDER BY email) FROM users"))
-                    .isEqualTo(before);
-            assertThat(queryString(connection, "SELECT count(*) FROM wallets")).isEqualTo("0");
-            assertThat(queryString(connection, "SELECT count(*) FROM wallet_transactions")).isEqualTo("0");
+            assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("7");
+            assertThat(wallet(connection, grace)).isEqualTo(STARTING_WALLET);
+            assertThat(wallet(connection, heidi)).isEqualTo(STARTING_WALLET);
+            assertThat(wallet(connection, admin)).isEqualTo("no wallet");
+            assertThat(rows(connection, "users")).isEqualTo(users);
+            assertThat(verification(connection)).containsExactly("0,0,0,0", "2,1,2,2");
+        }
+    }
+
+    @Test
+    void theMigrationCheckRecognisesTheStagingStateBeforeAndAfterTheWalletRollout() throws SQLException {
+        // infrastructure/neon/verify-migrations.sql (W3-10), statements in file order:
+        // 0 location, 1 history, 2 state, 3 expected tables, 4 unexpected tables, 5 counts.
+        String schema = migrated("5");
+        try (Connection connection = connect(schema)) {
+            insertUser(connection, "grace@example.com");
+            insertUser(connection, "heidi@example.com", "PLAYER", "DISABLED");
+            insertUser(connection, "admin@example.com", "ADMIN", "ACTIVE");
+
+            List<String> before = readOnlyScript(connection, "verify-migrations.sql");
+
+            assertThat(before.get(0)).endsWith(",null"); // no Neon branch id outside Neon
+            // Every row succeeded; the test schema has one row more than staging: Flyway's schema creation.
+            assertThat(before.get(1).split("\\|")).allSatisfy(row -> assertThat(row).endsWith(",t"))
+                    .filteredOn(row -> row.contains(",SQL,")).hasSize(5);
+            assertThat(before.get(2)).isEqualTo("5,0,V5: before the Week 3 rollout");
+            assertThat(before.get(3)).doesNotContain(",f", "wallet").contains("user_interests,5,t");
+            assertThat(before.get(4)).isEqualTo("0");
+            // 8 interests, 2 players (1 disabled), 1 admin, no sessions or throttle rows, no wallet tables yet.
+            assertThat(before.get(5)).isEqualTo("8,2,1,1,0,0,null,null");
+
+            flyway(schema, null).migrate();
+            List<String> after = readOnlyScript(connection, "verify-migrations.sql");
+
+            assertThat(after.get(1).split("\\|")).allSatisfy(row -> assertThat(row).endsWith(",t"))
+                    .filteredOn(row -> row.contains(",SQL,")).hasSize(7);
+            assertThat(after.get(2)).isEqualTo("7,0,V7: Week 3 wallet schema");
+            assertThat(after.get(3)).doesNotContain(",f").contains("wallets,6,t", "wallet_transactions,6,t");
+            assertThat(after.get(4)).isEqualTo("0");
+            assertThat(after.get(5)).isEqualTo("8,2,1,1,0,0,2,2");
+        }
+    }
+
+    @Test
+    void v7GivesEveryExistingPlayerOneStartingWalletAndChangesNothingElse() throws SQLException {
+        String schema = migrated("6");
+        try (Connection connection = connect(schema)) {
+            UUID alice = insertUser(connection, "alice@example.com");
+            UUID bob = insertUser(connection, "bob@example.com", "PLAYER", "DISABLED");
+            UUID admin = insertUser(connection, "admin@example.com", "ADMIN", "ACTIVE");
+            // Many players at once (AC-9.1).
+            execute(connection, "INSERT INTO users (email, password_hash, display_name, adult_confirmed_at) "
+                    + "SELECT 'player' || i || '@example.com', '" + HASH + "', 'Player', now() FROM generate_series(1, 25) i");
+            // Registered between V6 and V7 (a developer database): the application opened the wallet, here
+            // with another configured starting balance. It must stay exactly as it is (AC-9.3).
+            UUID carol = insertUser(connection, "carol@example.com");
+            UUID carolWallet = insertWallet(connection, carol, 250);
+            insertEntry(connection, carolWallet, "STARTING_BALANCE", 250, 250, "starting-balance");
+            // Authentication data of the existing accounts.
+            execute(connection, "INSERT INTO spring_session (primary_id, session_id, creation_time, last_access_time, "
+                    + "max_inactive_interval, expiry_time, principal_name) VALUES ('00000000-0000-0000-0000-000000000001', "
+                    + "'00000000-0000-0000-0000-000000000002', 1, 1, 1800, 2, '" + alice + "')");
+            execute(connection, "INSERT INTO auth_throttle (throttle_key, attempt_count, window_started_at) "
+                    + "VALUES ('LOGIN_IP:" + "a".repeat(64) + "', 3, now())");
+            execute(connection, "INSERT INTO user_interests (user_id, interest_code) VALUES ('" + alice + "', 'HISTORY')");
+            Map<String, String> before = untouchedTables(connection);
+            String carolBefore = carolsWallet(connection, carol);
+
+            flyway(schema, null).migrate();
+
+            assertThat(wallet(connection, alice)).isEqualTo(STARTING_WALLET);
+            assertThat(wallet(connection, bob)).isEqualTo(STARTING_WALLET);
+            assertThat(wallet(connection, admin)).isEqualTo("no wallet");
+            assertThat(carolsWallet(connection, carol)).isEqualTo(carolBefore);
+            assertThat(untouchedTables(connection)).isEqualTo(before);
+            // 2 + 25 new wallets with 1,000 coins each, carol's with 250.
+            assertThat(queryString(connection, "SELECT count(*) || ':' || sum(balance) FROM wallets")).isEqualTo("28:27250");
+            assertThat(verification(connection)).containsExactly("0,0,0,0", "28,1,28,28");
+        }
+    }
+
+    @Test
+    void theBackfillRunAgainChangesNothing() throws SQLException, IOException {
+        String schema = migrated("6");
+        try (Connection connection = connect(schema)) {
+            insertUser(connection, "alice@example.com");
+            insertUser(connection, "bob@example.com");
+            insertUser(connection, "admin@example.com", "ADMIN", "ACTIVE");
+            flyway(schema, null).migrate();
+            String afterFirstRun = rows(connection, "wallets") + rows(connection, "wallet_transactions");
+
+            // AC-9.2: the statement itself is idempotent (and Flyway would never run V7 twice anyway).
+            execute(connection, backfillSql());
+            execute(connection, backfillSql());
+            assertThat(flyway(schema, null).migrate().migrationsExecuted).isZero();
+
+            assertThat(rows(connection, "wallets") + rows(connection, "wallet_transactions")).isEqualTo(afterFirstRun);
+            assertThat(verification(connection)).containsExactly("0,0,0,0", "2,1,2,2");
+            // Flyway applies V7 once per database: an account created afterwards gets no wallet from it.
+            // In the application, WalletOpener opens that wallet at registration (W3-05), never V7.
+            UUID dave = insertUser(connection, "dave@example.com");
+            assertThat(flyway(schema, null).migrate().migrationsExecuted).isZero();
+            assertThat(wallet(connection, dave)).isEqualTo("no wallet");
+            // Executed by hand (nothing in the application does this), the statement still serves only
+            // accounts without a wallet and leaves the existing ones alone.
+            execute(connection, backfillSql());
+            assertThat(wallet(connection, dave)).isEqualTo(STARTING_WALLET);
+            String others = "(SELECT * FROM wallets WHERE user_id <> '" + dave + "')";
+            assertThat(rows(connection, others) + rows(connection, "(SELECT t.* FROM wallet_transactions t JOIN " + others
+                    + " w ON w.id = t.wallet_id)")).isEqualTo(afterFirstRun);
+            assertThat(verification(connection)).containsExactly("0,0,0,0", "3,1,3,3");
+        }
+    }
+
+    @Test
+    void aFailedBackfillLeavesNoWalletAndCanBeRepeated() throws SQLException {
+        String schema = migrated("6");
+        try (Connection connection = connect(schema)) {
+            UUID alice = insertUser(connection, "alice@example.com");
+            insertUser(connection, "bob@example.com");
+            String before = rows(connection, "users") + rows(connection, "wallets") + rows(connection, "wallet_transactions");
+            // Fault injection in this throw-away schema only: every ledger insert fails, i.e. after V7 has
+            // already inserted the wallets in the same statement. No V6 rule is changed or disabled.
+            execute(connection, """
+                    CREATE FUNCTION injected_failure() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN RAISE EXCEPTION 'injected failure'; END $$""");
+            execute(connection, "CREATE TRIGGER trg_injected_failure BEFORE INSERT ON wallet_transactions "
+                    + "FOR EACH ROW EXECUTE FUNCTION injected_failure()");
+
+            assertThatThrownBy(() -> flyway(schema, null).migrate()).isInstanceOf(FlywayException.class)
+                    .hasMessageContaining("injected failure");
+
+            // Rolled back as a whole: no wallet without its entry, V7 not recorded, users unchanged.
+            assertThat(rows(connection, "users") + rows(connection, "wallets") + rows(connection, "wallet_transactions")).isEqualTo(before);
+            assertThat(queryString(connection, "SELECT count(*) FROM flyway_schema_history WHERE version = '7'")).isEqualTo("0");
+            assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("6");
+
+            // Once the cause is gone, the next start applies V7 normally.
+            execute(connection, "DROP TRIGGER trg_injected_failure ON wallet_transactions");
+            execute(connection, "DROP FUNCTION injected_failure()");
+            flyway(schema, null).migrate();
+            assertThat(wallet(connection, alice)).isEqualTo(STARTING_WALLET);
+            assertThat(verification(connection)).containsExactly("0,0,0,0", "2,0,2,2");
         }
     }
 
@@ -188,6 +342,97 @@ class MigrationCompatibilityIT {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /** {@link #wallet} of a player whose wallet was opened by V7 or by registration with 1,000 coins. */
+    private static final String STARTING_WALLET = "1000 coins: STARTING_BALANCE 1000 -> 1000, key starting-balance, reference null";
+
+    /** The V7 statement, exactly as Flyway runs it. */
+    private static String backfillSql() throws IOException {
+        try (InputStream sql = MigrationCompatibilityIT.class.getResourceAsStream("/db/migration/V7__backfill_existing_player_wallets.sql")) {
+            return new String(sql.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    /** The results of the read-only rollout check {@code infrastructure/neon/verify-wallets.sql}. */
+    private static List<String> verification(Connection connection) throws SQLException {
+        return readOnlyScript(connection, "verify-wallets.sql");
+    }
+
+    /**
+     * Runs a read-only check of {@code infrastructure/neon} (psql meta-commands and comments removed)
+     * and returns one result per statement: its rows separated by {@code |}, each row's values by
+     * {@code ,} ({@code null} for SQL NULL).
+     */
+    private static List<String> readOnlyScript(Connection connection, String file) throws SQLException {
+        String script;
+        try {
+            script = Files.readString(Path.of("..", "infrastructure", "neon", file), StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            throw new IllegalStateException(ex);
+        }
+        String sql = script.lines().filter(line -> !line.startsWith("\\") && !line.strip().startsWith("--"))
+                .reduce("", (all, line) -> all + line + "\n");
+        List<String> results = new ArrayList<>();
+        // As readonly-query.sh does: any write in the script would fail.
+        execute(connection, "SET default_transaction_read_only = on");
+        try {
+            for (String statement : sql.split(";")) {
+                if (statement.isBlank()) {
+                    continue;
+                }
+                try (Statement query = connection.createStatement(); ResultSet row = query.executeQuery(statement)) {
+                    List<String> rows = new ArrayList<>();
+                    while (row.next()) {
+                        List<String> values = new ArrayList<>();
+                        for (int column = 1; column <= row.getMetaData().getColumnCount(); column++) {
+                            values.add(row.getString(column));
+                        }
+                        rows.add(String.join(",", values));
+                    }
+                    results.add(String.join("|", rows));
+                }
+            }
+        } finally {
+            execute(connection, "SET default_transaction_read_only = off");
+        }
+        return results;
+    }
+
+    /** Balance and ledger entries of a user's wallet, or {@code "no wallet"}. */
+    private static String wallet(Connection connection, UUID user) throws SQLException {
+        return queryString(connection, """
+                SELECT coalesce((SELECT w.balance || ' coins: ' || string_agg(t.type || ' ' || t.amount || ' -> ' || t.balance_after
+                                        || ', key ' || t.idempotency_key || ', reference ' || coalesce(t.reference, 'null'), '; ' ORDER BY t.id)
+                                 FROM wallets w LEFT JOIN wallet_transactions t ON t.wallet_id = w.id
+                                 WHERE w.user_id = '%s' GROUP BY w.id, w.balance), 'no wallet')""".formatted(user));
+    }
+
+    /** Every column of a user's wallet and its entries, including ids and times. */
+    private static String carolsWallet(Connection connection, UUID user) throws SQLException {
+        return queryString(connection, """
+                SELECT w::text || ' / ' || (SELECT string_agg(t::text, '|' ORDER BY t.id) FROM wallet_transactions t WHERE t.wallet_id = w.id)
+                FROM wallets w WHERE w.user_id = '%s'""".formatted(user));
+    }
+
+    /** All rows of a table as text, in a stable order. */
+    private static String rows(Connection connection, String table) throws SQLException {
+        return queryString(connection, "SELECT coalesce(string_agg(t::text, '|' ORDER BY t::text), '') FROM " + table + " t");
+    }
+
+    /** Accounts, authentication and profile data, which V7 must not change. */
+    private static Map<String, String> untouchedTables(Connection connection) throws SQLException {
+        Map<String, String> tables = new LinkedHashMap<>();
+        for (String table : List.of("users", "spring_session", "spring_session_attributes", "auth_throttle", "user_interests", "interests")) {
+            tables.put(table, rows(connection, table));
+        }
+        return tables;
+    }
+
+    private static UUID insertUser(Connection connection, String email, String role, String status) throws SQLException {
+        UUID user = insertUser(connection, email);
+        execute(connection, "UPDATE users SET role = '" + role + "', status = '" + status + "' WHERE id = '" + user + "'");
+        return user;
+    }
 
     private static int update(Connection connection, String sql, UUID parameter) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {

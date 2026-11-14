@@ -16,9 +16,11 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import com.casino.RealCsrfToken;
+import com.casino.TestAccounts;
 import com.casino.TestDatabase;
 import com.casino.TestcontainersConfiguration;
 import com.casino.common.exception.ProblemCode;
+import com.casino.wallet.service.WalletService;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.core.util.Json31;
 import jakarta.servlet.http.Cookie;
@@ -54,6 +56,8 @@ class OpenApiContractIT {
     private static final String LOGIN = "/api/v1/auth/login";
     private static final String LOGOUT = "/api/v1/auth/logout";
     private static final String PROFILE = "/api/v1/users/me";
+    private static final String WALLET = "/api/v1/wallet";
+    private static final String TRANSACTIONS = "/api/v1/wallet/transactions";
 
     private final OpenApiContract contract = OpenApiContract.load();
 
@@ -72,6 +76,9 @@ class OpenApiContractIT {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private WalletService walletService;
+
     @Test
     void implementationMatchesContractForAllApiPaths() throws Exception {
         String generated = perform(get("/v3/api-docs")).getContentAsString(StandardCharsets.UTF_8);
@@ -79,6 +86,16 @@ class OpenApiContractIT {
         assertThat(contract.differencesTo(OpenApiContract.fromJson(generated), path -> path.startsWith("/api/")))
                 .as("Differences between openapi.yaml (contract) and the implementation")
                 .isEmpty();
+    }
+
+    @Test
+    void theGeneratedDocumentationNeverShowsTheTestOnlyLedgerTypes() throws Exception {
+        // W3-08: the published type is WalletEntryType (contract values only), never the command type.
+        String generated = perform(get("/v3/api-docs")).getContentAsString(StandardCharsets.UTF_8);
+        String contractFile = perform(get("/openapi.yaml")).getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(generated).contains("STARTING_BALANCE").doesNotContain("TEST_CREDIT", "TEST_DEBIT");
+        assertThat(contractFile).contains("STARTING_BALANCE").doesNotContain("TEST_CREDIT", "TEST_DEBIT");
     }
 
     @Test
@@ -93,16 +110,16 @@ class OpenApiContractIT {
                 "GET /api/v1/interests",
                 "GET /api/v1/users/me",
                 "PATCH /api/v1/users/me",
+                "GET /api/v1/wallet",
+                "GET /api/v1/wallet/transactions",
                 "GET /actuator/health",
                 "GET /actuator/health/liveness",
                 "GET /actuator/health/readiness",
                 "GET /actuator/info");
         // Planned operations cannot be verified at runtime (validateResponse rejects them). When one is
         // implemented, its marker is removed and it moves to the list above with a runtime check.
-        // The wallet operations were designed in W3-02 and are implemented in W3-07 and W3-08.
-        assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "GET /api/v1/wallet",
-                "GET /api/v1/wallet/transactions");
+        // The wallet operations designed in W3-02 are implemented (W3-07, W3-08): none is left.
+        assertThat(contract.plannedOperations()).isEmpty();
     }
 
     @Test
@@ -128,6 +145,48 @@ class OpenApiContractIT {
 
             assertThat(perform(post(LOGOUT).cookie(session).with(csrf)).getStatus()).isEqualTo(204);
             assertConformsToContract(PROFILE, get(PROFILE).cookie(session), 401);
+        } finally {
+            testDatabase.reset();
+        }
+    }
+
+    @Test
+    void walletRespondsAccordingToContract() throws Exception {
+        TestAccounts accounts = new TestAccounts(jdbcTemplate, passwordEncoder);
+        accounts.activePlayerWithWallet("wallet@example.com", "correct-horse-battery", walletService);
+        accounts.active("no-wallet@example.com", "correct-horse-battery");
+        accounts.activeAdministrator("wallet-admin@example.com", "correct-horse-battery");
+        RealCsrfToken csrf = RealCsrfToken.fetch(mockMvc);
+        try {
+            assertConformsToContract(WALLET, get(WALLET), 401);
+            MockHttpServletResponse wallet = assertConformsToContract(WALLET, get(WALLET).cookie(signIn("wallet@example.com", csrf)), 200);
+            assertThat(wallet.getHeader(HttpHeaders.CACHE_CONTROL)).contains("no-store");
+            assertConformsToContract(WALLET, get(WALLET).cookie(signIn("wallet-admin@example.com", csrf)), 403);
+            // A player without a wallet: a data error, never a wallet created by the read (AC-2.6).
+            assertConformsToContract(WALLET, get(WALLET).cookie(signIn("no-wallet@example.com", csrf)), 500);
+        } finally {
+            testDatabase.reset();
+        }
+    }
+
+    @Test
+    void walletTransactionsRespondAccordingToContract() throws Exception {
+        TestAccounts accounts = new TestAccounts(jdbcTemplate, passwordEncoder);
+        accounts.activePlayerWithWallet("history@example.com", "correct-horse-battery", walletService);
+        accounts.active("no-history@example.com", "correct-horse-battery");
+        accounts.activeAdministrator("history-admin@example.com", "correct-horse-battery");
+        RealCsrfToken csrf = RealCsrfToken.fetch(mockMvc);
+        try {
+            Cookie player = signIn("history@example.com", csrf);
+            assertConformsToContract(TRANSACTIONS, get(TRANSACTIONS), 401);
+            MockHttpServletResponse page = assertConformsToContract(TRANSACTIONS, get(TRANSACTIONS).cookie(player), 200);
+            assertThat(page.getHeader(HttpHeaders.CACHE_CONTROL)).contains("no-store");
+            assertConformsToContract(TRANSACTIONS, get(TRANSACTIONS).param("limit", "1").cookie(player), 200);
+            assertConformsToContract(TRANSACTIONS, get(TRANSACTIONS).param("limit", "101").cookie(player), 400);
+            assertConformsToContract(TRANSACTIONS, get(TRANSACTIONS).param("limit", "ten").cookie(player), 400);
+            assertConformsToContract(TRANSACTIONS, get(TRANSACTIONS).param("cursor", "not-a-cursor").cookie(player), 400);
+            assertConformsToContract(TRANSACTIONS, get(TRANSACTIONS).cookie(signIn("history-admin@example.com", csrf)), 403);
+            assertConformsToContract(TRANSACTIONS, get(TRANSACTIONS).cookie(signIn("no-history@example.com", csrf)), 500);
         } finally {
             testDatabase.reset();
         }
@@ -291,6 +350,14 @@ class OpenApiContractIT {
                     request.setRemoteAddr(clientIp);
                     return request;
                 });
+    }
+
+    /** Signs in from this test's client address and returns the session cookie. */
+    private Cookie signIn(String email, RealCsrfToken csrf) throws Exception {
+        MockHttpServletResponse login = perform(jsonPost(LOGIN, "{\"email\":\"" + email + "\",\"password\":\"correct-horse-battery\"}", "192.0.2.50")
+                .with(csrf));
+        assertThat(login.getStatus()).as(login.getContentAsString(StandardCharsets.UTF_8)).isEqualTo(200);
+        return new Cookie("SESSION", login.getCookie("SESSION").getValue());
     }
 
     private MockHttpServletResponse perform(MockHttpServletRequestBuilder request) throws Exception {

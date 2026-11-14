@@ -57,7 +57,7 @@ class WebSecurityIT {
 
     /** Test-only endpoint that creates a session; nothing in W2-04 signs users in yet. */
     static final String SESSION_PROBE = "/api/v1/test/session";
-    private static final String PROTECTED = "/api/v1/wallet";
+    private static final String PROTECTED = "/api/v1/unknown";
     private static final String DEV_ORIGIN = "http://localhost:5173";
     private static final OpenApiContract CONTRACT = OpenApiContract.load();
     private static final List<String> INTERNALS = List.of(

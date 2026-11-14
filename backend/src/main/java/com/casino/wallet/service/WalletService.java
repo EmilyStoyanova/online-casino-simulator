@@ -1,13 +1,18 @@
 package com.casino.wallet.service;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
 import com.casino.wallet.config.WalletProperties;
+import com.casino.wallet.dto.WalletEntryType;
 import com.casino.wallet.dto.WalletOperation;
 import com.casino.wallet.dto.WalletOperationResult;
+import com.casino.wallet.dto.WalletResponse;
+import com.casino.wallet.dto.WalletTransactionPage;
+import com.casino.wallet.dto.WalletTransactionResponse;
 import com.casino.wallet.dto.WalletTransactionType;
 import com.casino.wallet.entity.TransactionType;
 import com.casino.wallet.entity.Wallet;
@@ -15,11 +20,13 @@ import com.casino.wallet.entity.WalletTransaction;
 import com.casino.wallet.exception.BalanceLimitExceededException;
 import com.casino.wallet.exception.IdempotencyKeyReusedException;
 import com.casino.wallet.exception.InsufficientFundsException;
+import com.casino.wallet.exception.InvalidCursorException;
 import com.casino.wallet.exception.WalletBusyException;
 import com.casino.wallet.exception.WalletNotFoundException;
 import com.casino.wallet.repository.WalletRepository;
 import com.casino.wallet.repository.WalletTransactionRepository;
 import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +58,8 @@ public class WalletService {
     /** Same pattern as {@code ck_wallet_transactions_key}. */
     private static final Pattern IDEMPOTENCY_KEY = Pattern.compile("^[a-z0-9][a-z0-9:._-]{0,99}$");
     private static final int MAX_REFERENCE_LENGTH = 100;
+    /** Largest page of the transaction history (contract: {@code limit} maximum). */
+    static final int MAX_PAGE_SIZE = 100;
     /** Idempotency key of the starting entry; the same in V7 for wallets of existing accounts. */
     static final String STARTING_BALANCE_KEY = "starting-balance";
 
@@ -71,7 +80,73 @@ public class WalletService {
      */
     @Transactional(readOnly = true)
     public long getBalance(UUID userId) {
-        return wallets.findByUserId(userId).orElseThrow(() -> new WalletNotFoundException(userId)).getBalance();
+        return find(userId).getBalance();
+    }
+
+    /**
+     * The user's wallet for {@code GET /api/v1/wallet}: the last committed balance and its change time,
+     * read without a lock. A read never creates or changes a wallet.
+     *
+     * @throws WalletNotFoundException if the user has no wallet (a data error, answered with
+     *                                 {@code 500 INTERNAL_ERROR}, AC-2.6)
+     */
+    @Transactional(readOnly = true)
+    public WalletResponse getWallet(UUID userId) {
+        Wallet wallet = find(userId);
+        return new WalletResponse(wallet.getBalance(), wallet.getUpdatedAt());
+    }
+
+    /**
+     * One page of the user's ledger for {@code GET /api/v1/wallet/transactions}, newest first (keyset
+     * pagination by id, {@code docs/plans/week-03.md} §6.3). Entries of a wallet get increasing ids in
+     * commit order, so following {@code nextCursor} never repeats or skips an entry, also when entries
+     * are added in between. Read-only, without a lock.
+     *
+     * <p>Only the session's wallet is ever queried; a cursor is a position within it. An entry whose
+     * stored type is not part of the public contract ({@link WalletEntryType}) is never shown: the
+     * request fails as a server error instead. The production schema cannot hold such an entry
+     * ({@code ck_wallet_transactions_type}); only test databases can.
+     *
+     * @param cursor {@code nextCursor} of the previous page, or {@code null} for the first page
+     * @param limit  page size, 1 to 100 (validated by the controller as well)
+     * @throws InvalidCursorException  if the cursor is not one issued by this API (checked first)
+     * @throws WalletNotFoundException if the user has no wallet (a data error, {@code 500})
+     */
+    @Transactional(readOnly = true)
+    public WalletTransactionPage listTransactions(UUID userId, String cursor, int limit) {
+        if (limit < 1 || limit > MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException("The page size must be between 1 and " + MAX_PAGE_SIZE);
+        }
+        Long before = cursor == null ? null : TransactionCursor.decode(cursor);
+        UUID walletId = find(userId).getId();
+
+        // One more than the page: it tells whether an older page exists.
+        Limit fetch = Limit.of(limit + 1);
+        List<WalletTransaction> found = before == null
+                ? entries.findByWalletIdOrderByIdDesc(walletId, fetch)
+                : entries.findByWalletIdAndIdLessThanOrderByIdDesc(walletId, before, fetch);
+        List<WalletTransaction> page = found.subList(0, Math.min(limit, found.size()));
+        String nextCursor = found.size() > limit ? TransactionCursor.after(page.getLast().getId()) : null;
+        return new WalletTransactionPage(page.stream().map(WalletService::toResponse).toList(), nextCursor);
+    }
+
+    private static WalletTransactionResponse toResponse(WalletTransaction entry) {
+        return new WalletTransactionResponse(entry.getId(), publicType(entry), entry.getAmount(), entry.getBalanceAfter(),
+                entry.getCreatedAt());
+    }
+
+    /** Fails closed: a stored type without a public value is never shown under another name or skipped. */
+    private static WalletEntryType publicType(WalletTransaction entry) {
+        try {
+            return WalletEntryType.valueOf(entry.getType().name());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Ledger entry " + entry.getId() + " has a type that the API does not publish", ex);
+        }
+    }
+
+    private Wallet find(UUID userId) {
+        Objects.requireNonNull(userId, "userId");
+        return wallets.findByUserId(userId).orElseThrow(() -> new WalletNotFoundException(userId));
     }
 
     /**
@@ -200,13 +275,17 @@ public class WalletService {
         return new WalletOperationResult(earlier.getId(), earlier.getBalanceAfter(), true);
     }
 
-    /** Integer arithmetic only; overflow and the limit are the same outcome for a credit. */
+    /**
+     * Integer arithmetic only. Only a credit can overflow: the balance is at least 0 and a debit at most
+     * {@code Long.MAX_VALUE}, so a debit's result is at least {@code Long.MIN_VALUE + 1} and a too large
+     * debit is caught by {@code result < 0}. Overflow and the limit are the same outcome for a credit.
+     */
     private static long newBalance(long balance, long signedAmount) {
         long result;
         try {
             result = Math.addExact(balance, signedAmount);
         } catch (ArithmeticException ex) {
-            throw signedAmount > 0 ? new BalanceLimitExceededException() : new InsufficientFundsException();
+            throw new BalanceLimitExceededException();
         }
         if (result < 0) {
             throw new InsufficientFundsException();

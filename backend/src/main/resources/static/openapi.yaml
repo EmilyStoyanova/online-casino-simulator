@@ -471,8 +471,7 @@ paths:
     get:
       tags: [Wallet]
       operationId: getWallet
-      summary: Get the signed-in player's wallet (planned)
-      x-implementation-status: planned
+      summary: Get the signed-in player's wallet
       description: |
         Returns the current virtual-coin balance of the wallet that belongs to the session's user.
         The wallet is identified only by the session, never by a request value. Read-only: it never
@@ -503,8 +502,7 @@ paths:
     get:
       tags: [Wallet]
       operationId: listWalletTransactions
-      summary: List the signed-in player's wallet transactions (planned)
-      x-implementation-status: planned
+      summary: List the signed-in player's wallet transactions
       description: |
         Ledger entries of the session user's wallet, newest first, in pages (keyset pagination).
         The first request has no `cursor`; each further page is requested with the `nextCursor` of

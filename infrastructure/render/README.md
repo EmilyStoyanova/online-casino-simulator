@@ -1,8 +1,12 @@
 # Render: backend staging deployment
 
 The Spring Boot backend runs as a Docker web service on Render. It uses the Neon `staging` branch
-(see [docs/database.md → Neon](../../docs/database.md#neon)). The frontend is prepared for Vercel
-([vercel/README.md](../vercel/README.md)); it reaches this service through a same-origin rewrite.
+(see [docs/database.md → Neon](../../docs/database.md#neon)). The frontend runs on Vercel
+([vercel/README.md](../vercel/README.md)) and reaches this service through a same-origin rewrite.
+
+**Current state:** deployed and verified at `https://online-casino-simulator.onrender.com` from `main`
+(Weeks 1–2), registration closed, Neon `staging` at schema V5. The Week 3 wallet (V6/V7) is not
+deployed; its rollout has its own runbook: [wallet-rollout.md](../wallet-rollout.md).
 
 This page is the runbook: what is configured where, the browser steps, and how to verify the
 result. Nothing here deploys automatically.
@@ -77,8 +81,10 @@ openssl rand -base64 32 | tr -d '\n' | clip
 
 **Use the staging branch only.** Copy the four `NEON_DB_*` values from Neon Console → branch
 `staging` → **Connect** (Connection pooling **off**). After the first start, check in the log that
-Flyway reports the schema as up to date: staging is already at v5. If it reports migrations being
-applied, stop the service: it is pointing at a different database.
+Flyway reports the schema as up to date: staging is at v5. If it reports migrations being applied,
+stop the service: it is pointing at a different database. **Exception:** the first deploy that
+contains Week 3 applies exactly V6 and V7 on purpose; follow [wallet-rollout.md](../wallet-rollout.md)
+for that deploy.
 
 ## Deploy in the browser
 
@@ -113,7 +119,7 @@ Replace `<service>` with the service name. These commands print no secrets.
 ```bash
 B=https://<service>.onrender.com
 curl -s --max-time 300 $B/actuator/health/readiness   # {"status":"UP"}; up to ~2 min after a spin-down
-curl -s $B/api/v1/system/status                       # "database":{"status":"UP","schemaVersion":"5"}
+curl -s $B/api/v1/system/status                       # "database":{"status":"UP","schemaVersion":"5"} ("7" after the Week 3 rollout)
 ```
 
 **HTTPS: HSTS and cookie flags.** This is the check that matters most. Cookie values are masked:
@@ -307,8 +313,8 @@ Until registration is opened on purpose, do not share the URL or invite real use
 
 ## Frontend on Vercel (same-origin `/api` rewrite)
 
-The frontend is prepared for Vercel. A rewrite forwards `/api/*` to this service, so the browser
-sees a single origin and the cookies stay first-party. The runbook is
+The frontend runs on Vercel. A rewrite forwards `/api/*` to this service, so the browser sees a
+single origin and the cookies stay first-party. The runbook is
 [vercel/README.md](../vercel/README.md). The final hosting decision remains ADR-0007 (Week 12).
 
 For this service, it means:

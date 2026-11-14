@@ -169,15 +169,14 @@ class OpenApiContractTest {
     // ------------------------------------------------------------------ planned elements
 
     @Test
-    void everyWeek2OperationIsImplementedAndTheWeek3WalletOperationsArePlanned() {
+    void everyOperationIsImplementedAndNoneIsPlanned() {
         assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.4.0");
         // GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08),
         // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10).
         assertThat(contract.implementedOperations()).contains("GET " + STATUS_PATH, "GET /api/v1/users/me",
-                "PATCH /api/v1/users/me");
-        // Designed in W3-02; implemented in W3-07 and W3-08, which remove the marker.
-        assertThat(contract.plannedOperations()).containsExactlyInAnyOrder(
-                "GET " + WALLET_PATH, "GET " + WALLET_TRANSACTIONS_PATH);
+                "PATCH /api/v1/users/me", "GET " + WALLET_PATH, "GET " + WALLET_TRANSACTIONS_PATH);
+        // The wallet operations designed in W3-02 are implemented (W3-07, W3-08): no planned operation is left (AC-0.7).
+        assertThat(contract.plannedOperations()).isEmpty();
     }
 
     // ------------------------------------------------------------------ wallet (Week 3)

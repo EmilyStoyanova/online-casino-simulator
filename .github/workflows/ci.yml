@@ -46,6 +46,18 @@ jobs:
             backend/target/failsafe-reports/
           retention-days: 7
 
+      # JaCoCo (P-W3-14): `verify` fails below 80 % lines / 70 % branches for com.casino.wallet.service.
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: |
+            backend/target/site/jacoco/
+            backend/target/site/jacoco-unit/
+          if-no-files-found: ignore
+          retention-days: 7
+
   frontend:
     name: Frontend (Node · Vite)
     runs-on: ubuntu-latest

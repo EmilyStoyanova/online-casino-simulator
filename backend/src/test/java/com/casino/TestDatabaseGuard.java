@@ -12,8 +12,9 @@ import java.util.Set;
  * database:
  * <ul>
  *   <li>G1 — test sources only: this class and {@link TestDatabase} live in {@code src/test}, so they
- *       are never part of the application jar or image ({@code NoTruncateInMainSourcesTest} checks
- *       that production sources contain no {@code TRUNCATE});</li>
+ *       are never part of the application jar or image
+ *       ({@code TestDatabaseGuardTest.g1ProductionSourcesNeverTruncate} checks that production sources
+ *       contain no {@code TRUNCATE});</li>
  *   <li>G2 — the database is {@code test}, the Testcontainers default (Docker Compose uses
  *       {@code casino}, Neon {@code neondb});</li>
  *   <li>G3 — the JDBC URL points to the local machine, and the server address is loopback or private

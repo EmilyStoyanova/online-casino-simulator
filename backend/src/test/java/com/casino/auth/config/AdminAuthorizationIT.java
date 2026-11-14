@@ -116,6 +116,8 @@ class AdminAuthorizationIT {
         MockHttpServletResponse profile = perform(get("/api/v1/users/me").cookie(admin));
         assertThat(json(profile).path("role").asText()).isEqualTo("ADMIN");
         assertThat(json(profile).path("displayName").asText()).isEqualTo("Administrator");
+        // ... but not the player-only wallet (W3-07, P-W3-3).
+        expectProblem(perform(get("/api/v1/wallet").cookie(admin)), ProblemCode.ACCESS_DENIED);
     }
 
     @Test

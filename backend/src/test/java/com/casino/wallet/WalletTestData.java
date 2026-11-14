@@ -1,5 +1,7 @@
 package com.casino.wallet;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import com.casino.wallet.dto.WalletOperation;
@@ -37,6 +39,13 @@ public final class WalletTestData {
                 VALUES (?, '{noop}not-used', 'Player', now()) RETURNING id""", UUID.class, email);
     }
 
+    /** A player whose wallet was opened as at registration: the starting balance and its single entry. */
+    public UUID openedPlayer(String email) {
+        UUID user = player(email);
+        walletService.openWallet(user);
+        return user;
+    }
+
     /** A player with a wallet holding {@code balance} coins (one {@code TEST_CREDIT} entry, none for 0). */
     public UUID playerWithBalance(String email, long balance) {
         UUID user = player(email);
@@ -57,6 +66,54 @@ public final class WalletTestData {
         return jdbcTemplate.queryForObject("""
                 SELECT count(*) FROM wallet_transactions t JOIN wallets w ON w.id = t.wallet_id WHERE w.user_id = ?""",
                 Long.class, user);
+    }
+
+    /**
+     * Violations of the ledger invariants, by name; every count must be 0 (W3-09):
+     * <ul>
+     *   <li>{@code balance <> Σ amount} or {@code balance <> newest balance_after};</li>
+     *   <li>an entry whose {@code balance_after} is not the running sum of its wallet's amounts up to it
+     *       (in id order): every entry was appended to the balance it saw, none was lost or reordered;</li>
+     *   <li>a balance or {@code balance_after} outside 0 … 2^53 - 1, a zero amount;</li>
+     *   <li>more than one wallet per user, a wallet of a non-player, a key used twice in a wallet.</li>
+     * </ul>
+     * Independent of how the balances were funded (unlike {@link #walletsNotOpenedByTheStartingEntry}).
+     */
+    public Map<String, Long> ledgerViolations() {
+        Map<String, Long> violations = new LinkedHashMap<>();
+        violations.put("balance differs from the ledger", inconsistentWallets());
+        violations.put("balance_after is not the running sum", count("""
+                SELECT count(*) FROM (SELECT balance_after, sum(amount) OVER (PARTITION BY wallet_id ORDER BY id) AS running
+                                      FROM wallet_transactions) e WHERE e.balance_after <> e.running"""));
+        violations.put("value out of range", count("""
+                SELECT (SELECT count(*) FROM wallets WHERE balance NOT BETWEEN 0 AND 9007199254740991)
+                     + (SELECT count(*) FROM wallet_transactions
+                        WHERE balance_after NOT BETWEEN 0 AND 9007199254740991 OR amount = 0)"""));
+        violations.put("several wallets per user", count(
+                "SELECT count(*) FROM (SELECT user_id FROM wallets GROUP BY user_id HAVING count(*) > 1) d"));
+        violations.put("wallet of a non-player", count(
+                "SELECT count(*) FROM wallets w JOIN users u ON u.id = w.user_id WHERE u.role <> 'PLAYER'"));
+        violations.put("key used twice in a wallet", count("""
+                SELECT count(*) FROM (SELECT wallet_id, idempotency_key FROM wallet_transactions
+                                      GROUP BY wallet_id, idempotency_key HAVING count(*) > 1) d"""));
+        return violations;
+    }
+
+    /**
+     * Wallets whose first entry is not the one {@code openWallet} writes ({@code STARTING_BALANCE}, key
+     * {@code starting-balance}) or that have another {@code STARTING_BALANCE} entry; 0 when every wallet was
+     * opened by registration or V7.
+     */
+    public long walletsNotOpenedByTheStartingEntry() {
+        return count("""
+                SELECT count(*) FROM wallets w
+                WHERE (SELECT t.type || '/' || t.idempotency_key FROM wallet_transactions t WHERE t.wallet_id = w.id
+                       ORDER BY t.id LIMIT 1) IS DISTINCT FROM 'STARTING_BALANCE/starting-balance'
+                   OR (SELECT count(*) FROM wallet_transactions t WHERE t.wallet_id = w.id AND t.type = 'STARTING_BALANCE') <> 1""");
+    }
+
+    private long count(String sql) {
+        return jdbcTemplate.queryForObject(sql, Long.class);
     }
 
     /**

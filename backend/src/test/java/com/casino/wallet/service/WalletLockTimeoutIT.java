@@ -100,6 +100,42 @@ class WalletLockTimeoutIT {
     }
 
     @Test
+    void aLockTimeoutRollsBackTheWholeCallerTransaction() throws Exception {
+        // W3-09: the caller (as a registration or a Week 4 round would) has already written in its
+        // transaction when the wallet it needs stays locked. The timeout aborts the transaction, and
+        // every earlier write of it disappears too.
+        UUID busy = data.playerWithBalance("busy@example.com", 1000);
+        UUID newcomer = data.player("newcomer@example.com");
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            Future<?> holder = executor.submit(() -> transactions.executeWithoutResult(status -> {
+                jdbcTemplate.queryForObject("SELECT balance FROM wallets WHERE user_id = ? FOR UPDATE", Long.class, busy);
+                locked.countDown();
+                await(release);
+            }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+            assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+                walletService.openWallet(newcomer);
+                walletService.debit(busy, debit(100, "after-opening"));
+            })).isInstanceOf(WalletBusyException.class);
+
+            release.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+        }
+
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM wallets WHERE user_id = ?", Integer.class, newcomer)).isZero();
+        assertThat(data.balance(busy)).isEqualTo(1000);
+        assertThat(data.entries(busy)).isOne();
+        // Recovery: both operations succeed once the lock is free.
+        assertThat(walletService.openWallet(newcomer).replayed()).isFalse();
+        assertThat(walletService.debit(busy, debit(100, "after-opening")).balanceAfter()).isEqualTo(900);
+        assertThat(data.ledgerViolations()).allSatisfy((name, count) -> assertThat(count).as(name).isZero());
+    }
+
+    @Test
     void theLockTimeoutAppliesOnlyToTheLockingStatement() {
         UUID player = data.playerWithBalance("bob@example.com", 1000);
 

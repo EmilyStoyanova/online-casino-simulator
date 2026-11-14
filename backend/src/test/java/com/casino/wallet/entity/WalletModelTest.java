@@ -6,10 +6,11 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import java.util.Arrays;
 import java.util.UUID;
 
+import com.casino.wallet.dto.WalletEntryType;
 import com.casino.wallet.dto.WalletTransactionType;
 import org.junit.jupiter.api.Test;
 
-/** {@link Wallet} bounds and the alignment of the stored and the public transaction types. */
+/** {@link Wallet} bounds and the alignment of the stored, the command and the published transaction types. */
 class WalletModelTest {
 
     @Test
@@ -38,5 +39,15 @@ class WalletModelTest {
         assertThat(WalletTransactionType.STARTING_BALANCE.isCredit()).isTrue();
         assertThat(WalletTransactionType.TEST_CREDIT.isCredit()).isTrue();
         assertThat(WalletTransactionType.TEST_DEBIT.isCredit()).isFalse();
+    }
+
+    @Test
+    void theApiPublishesEveryStoredTypeExceptTheTestOnlyOnes() {
+        // W3-08: responses show WalletEntryType only. A new stored type (Week 4) must get its public
+        // value with its contract change; the test-only types never get one.
+        assertThat(Arrays.stream(WalletEntryType.values()).map(Enum::name))
+                .containsExactlyElementsOf(Arrays.stream(TransactionType.values())
+                        .filter(type -> type != TransactionType.TEST_CREDIT && type != TransactionType.TEST_DEBIT)
+                        .map(Enum::name).toList());
     }
 }

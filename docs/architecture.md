@@ -32,28 +32,31 @@ version ([ADR-0001](decisions/0001-modular-monolith.md)).
 
 Root package `com.casino`. Each direct sub-package is a module:
 
-| Module | Responsibility | Week |
-|---|---|---|
-| `common` | Shared kernel: web/OpenAPI config, clock, platform status, API error format | 1 |
-| `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 |
-| `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 |
-| `wallet` | Balances, immutable transaction ledger, idempotency | 3 |
-| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 |
-| `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 |
-| `responsibleplay` | Session limits, breaks, self-exclusion, play-time tracking | 9 |
-| `admin` | Administrative use cases under `/api/v1/admin/**` | 10 |
+| Module | Responsibility | Week | Status |
+|---|---|---|---|
+| `common` | Shared kernel: web/OpenAPI config, clock, platform status, API error format | 1 | implemented |
+| `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 | implemented |
+| `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 | implemented |
+| `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented on `feature/week-03-wallet`, in review, not deployed |
+| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 | planned |
+| `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 | planned |
+| `responsibleplay` | Session limits, breaks, self-exclusion, play-time tracking | 9 | planned |
+| `admin` | Administrative use cases under `/api/v1/admin/**` | 10 | planned |
 
 ### Dependency rules
 
 - `common` depends on no business module; every module may depend on `common`.
 - Modules talk to each other only through their **public API**: the module's `service`, `dto` and
   `exception` packages. They never use another module's repositories, entities or controllers.
-- Expected direction: `auth → user`, `game → wallet`, `game → responsibleplay`, `learning → wallet`,
-  `admin → (learning, responsibleplay, wallet, user)`. Cycles are not allowed; in particular `user`
-  never depends on `auth`.
-- Enforcement: ArchUnit rules R1–R12 in `ModuleArchitectureTest`, run with every build
-  (`./mvnw test`, [ADR-0005](decisions/0005-architecture-rules-archunit.md),
-  [`docs/plans/week-02.md`](plans/week-02.md) §9). `ArchitectureRulesTest` proves that each rule
+- Expected direction: `auth → user`, **`wallet → user`** (only `user.dto.UserRegistered`), `game → wallet`,
+  `game → responsibleplay`, `learning → wallet`, `admin → (learning, responsibleplay, wallet, user)`.
+  Cycles are not allowed; in particular `user` never depends on `auth` or `wallet`.
+- Enforcement: ArchUnit rules R1–R15 in `ModuleArchitectureTest`, run with every build
+  (`./mvnw test`, [ADR-0005](decisions/0005-architecture-rules-archunit.md); R1–R12:
+  [`docs/plans/week-02.md`](plans/week-02.md) §9, R13–R15: [`docs/plans/week-03.md`](plans/week-03.md) §9):
+  - R13: `wallet.service.WalletService` is used only by `wallet`, `game`, `learning` and `admin`;
+  - R14: `wallet` uses `user` only through `user.dto`;
+  - R15: production code never uses the test-only ledger types `TEST_CREDIT`/`TEST_DEBIT`. `ArchitectureRulesTest` proves that each rule
   detects its violation. A new module must be added to `ArchitectureRules.BUSINESS_MODULES`.
 
 ### Layers inside a module
@@ -89,6 +92,101 @@ The `common.system` package (platform status) is the reference implementation:
 | `service` | `SystemStatusService` | Builds the status from the database check, version and clock |
 | `repository` | `DatabaseProbe`, `FlywayDatabaseProbe`, `DatabaseHealth` | Reads Flyway's schema history to check the database |
 | `dto` | `SystemStatusResponse`, `ComponentStatus` | API representation (`SystemStatus` schema) |
+
+### Wallet module (Week 3)
+
+Virtual coins only: no deposits, withdrawals or purchases exist. Design and decisions:
+[`docs/plans/week-03.md`](plans/week-03.md); schema: [database.md](database.md#wallets-and-ledger-v6-v7);
+API: [api.md](api.md#wallet-get-apiv1wallet).
+
+| Package | Classes | Responsibility |
+|---|---|---|
+| `controller` | `WalletController` | `GET /api/v1/wallet`, `GET /api/v1/wallet/transactions`; the user is the session principal, never a request value |
+| `service` | `WalletService` | Public API of the module: `getWallet`, `listTransactions`, `credit`, `debit`, `openWallet`, `getBalance` |
+| | `WalletOpener` | `@EventListener` for `user.dto.UserRegistered` |
+| | `TransactionCursor` | Opaque cursor of the history pages |
+| `repository` | `WalletRepository` (+ `WalletLocking`), `WalletTransactionRepository` | Spring Data JPA; no delete methods |
+| `entity` | `Wallet`, `WalletTransaction` (`@Immutable`), `TransactionType` | JPA mapping of V6 |
+| `dto` | `WalletResponse`, `WalletTransactionPage`, `WalletTransactionResponse`, `WalletEntryType`; `WalletOperation`, `WalletOperationResult`, `WalletTransactionType` | Responses (contract schemas) and the internal command API for other modules |
+| `config` | `WalletProperties`, `WalletConfig` | `app.wallet.starting-balance`, `app.wallet.lock-timeout` |
+| `exception` | `InsufficientFundsException`, `IdempotencyKeyReusedException`, `BalanceLimitExceededException` (`409`), `WalletBusyException` (`503`), `InvalidCursorException` (`400`), `WalletNotFoundException` (`500`) | Stable `ProblemCode`s |
+
+**Users, wallets and ledger.** One wallet per `PLAYER` (`uq_wallets_user_id`), none for `ADMIN`.
+A wallet holds the current balance; every change appends exactly one row to the append-only ledger
+`wallet_transactions` (signed `amount`, `balance_after`, idempotency key). The balance always equals
+the sum of the wallet's entries.
+
+**Opening a wallet at registration (atomic).** `UserAccountService.createAccount` (`@Transactional`)
+saves the account and publishes `UserRegistered`. `WalletOpener` is a plain synchronous
+`@EventListener` with `@Transactional(propagation = MANDATORY)`: it runs in the registration
+transaction and calls `WalletService.openWallet`, which inserts the wallet (`ON CONFLICT DO NOTHING`)
+and credits the starting balance as its first entry (`STARTING_BALANCE`, key `starting-balance`).
+Account, wallet and entry commit together; any failure rolls the whole registration back
+(`500 INTERNAL_ERROR`, no session). Not `@TransactionalEventListener` (after commit an account could
+stay without a wallet) and not `@Async`. A repeated event changes nothing. The administrator
+bootstrap publishes no event, so administrators get no wallet. Accounts that existed before V6 got
+their wallet from Flyway V7, once.
+
+**Starting balance.** `APP_WALLET_STARTING_BALANCE` (default `1000`, validated 1 … 2⁵³ − 1 at
+start-up; an invalid value stops the application). It is copied into the starting entry, so a later
+change affects only wallets opened afterwards. V7 uses the literal 1,000.
+
+**Credit and debit rules** (`WalletService.credit`/`debit`; internal only, no HTTP operation):
+- `amount` > 0 (the direction comes from the method and the type); the type must match the
+  direction; `STARTING_BALANCE` is credited only by `openWallet`;
+- key `^[a-z0-9][a-z0-9:._-]{0,99}$`, unique per wallet; `reference` optional, 1–100 characters;
+- the balance stays within 0 … 2⁵³ − 1: a too large debit is `INSUFFICIENT_FUNDS`, a credit beyond
+  the limit (or a `long` overflow) `BALANCE_LIMIT_EXCEEDED`;
+- a failed operation writes nothing; exceptions carry no amounts, balances or keys.
+
+**One transaction per operation, in this order:** validate the operation → lock the wallet row →
+look up the idempotency key → check the rules → append one entry and set the balance. `credit` and
+`debit` join the caller's transaction (`REQUIRED`), so a Week 4 round can debit, credit and store
+its round atomically; if the caller's transaction rolls back, the entry and the balance change do
+too, and the key is free again.
+
+**Pessimistic locking and timeout.** Hibernate `PESSIMISTIC_WRITE` (`SELECT … FOR NO KEY UPDATE` on
+PostgreSQL) on the wallet row, with the hint `jakarta.persistence.lock.timeout` from
+`APP_WALLET_LOCK_TIMEOUT` (default `5s`, 100 ms … 1 min). Verified against PostgreSQL: Hibernate
+issues `SET LOCAL lock_timeout` for the locking statement only and restores it afterwards; a longer
+wait fails with SQLSTATE `55P03`, answered as `WalletBusyException` (`503 SERVICE_UNAVAILABLE`) with
+the whole caller transaction rolled back. Readers (`getWallet`, `listTransactions`) take no lock.
+One operation locks at most one wallet; a future feature that locks several must lock them in
+ascending wallet id order (deadlock rule).
+
+**Idempotency.** The key lookup happens after the lock, so concurrent duplicates are serialized:
+the same key with the same type, amount and reference returns the original result
+(`replayed = true`) and changes nothing, also after the balance has moved on; the same key with
+other values is `IDEMPOTENCY_KEY_REUSED`. The unique constraint stays the last line of defence.
+
+**Immutable ledger.** `WalletTransaction` is `@Immutable` with no setters; the trigger
+`trg_wallet_transactions_append_only` rejects `UPDATE` and `DELETE`; foreign keys are
+`ON DELETE RESTRICT`. Corrections are new entries.
+
+**Authorization (PLAYER only).** `SecurityConfig`: `/api/v1/wallet` and `/api/v1/wallet/**` require
+`ROLE_PLAYER` (before the generic `/api/**` rule): anonymous `401`, administrators `403
+ACCESS_DENIED`, also for unknown wallet paths. Both operations are `GET`; `POST`/`PUT`/`DELETE`
+answer `405` after the CSRF check. Responses carry `Cache-Control: no-store`.
+
+**History pages (keyset).** `listTransactions` reads `limit + 1` entries of the session's wallet
+ordered by id descending (`WHERE wallet_id = ? [AND id < cursor] ORDER BY id DESC`); the extra entry
+decides `nextCursor`. Ids increase in commit order per wallet, so following the cursor never repeats
+or skips entries while new ones are added. The cursor is URL-safe Base64 of `v1:<id>`, accepted
+only in the exact issued form. It is a position, **not a credential and not cryptographically
+bound to a user**: the query is always bound to the session's wallet, so a foreign cursor pages only
+through the caller's own entries. Responses show only the published types (`WalletEntryType`); a
+stored entry of any other type fails the request closed (`500`). `limit` accepts decimal digits only
+(`common.exception.DecimalIntegerParameters`).
+
+**Test-only ledger types.** `TEST_CREDIT`/`TEST_DEBIT` exist so that the integration tests can debit
+and credit before Week 4 brings real types. A test-only Flyway callback allows them in test
+databases; the production schema rejects them, ArchUnit R15 forbids their use in production code,
+and no response type can carry them. They are still compiled into the two enums; their removal is a
+Week 4 task (`docs/plans/week-03.md` §7.8, §7.13).
+
+**Coverage.** JaCoCo checks `com.casino.wallet.service` in every `./mvnw verify` (CI included):
+at least 80 % lines and 70 % branches. Measured in W3-09: 100 % lines (111/111) and 100 % branches
+(62/62).
 
 ### API design (design-first)
 
@@ -164,12 +262,13 @@ frontend/src
 | API documentation | Swagger UI at `/swagger-ui.html`, showing the contract and the generated implementation view (to be disabled in production, Week 12) |
 | Time | Injected `java.time.Clock` (UTC) for deterministic tests |
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
-| Security | Spring Security and Spring Session JDBC, see [§5.1](#51-security-week-2) and [ADR-0006](decisions/0006-session-authentication-security.md) |
+| Security | Spring Security and Spring Session JDBC, see [§5.1](#51-security-week-2-extended-in-week-3) and [ADR-0006](decisions/0006-session-authentication-security.md) |
 | Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
-| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. Browser acceptance: Playwright against an isolated real stack (`frontend/e2e`, run locally); full E2E coverage and CI in Week 11 |
-| CI | GitHub Actions: backend `mvnw verify`, frontend lint → typecheck → test → build |
+| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Migrations also on PostgreSQL 18.6 (`MigrationCompatibilityIT`). Coverage: JaCoCo, enforced for `com.casino.wallet.service` (≥ 80 % lines, ≥ 70 % branches). Test contexts are cached at most 6 at a time (`src/test/resources/spring.properties`), because each holds its own PostgreSQL container. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. Browser acceptance: Playwright against an isolated real stack (`frontend/e2e`, run locally); full E2E coverage and CI in Week 11 |
+| CI | GitHub Actions: backend `mvnw verify` (including the JaCoCo check; coverage report uploaded as `backend-coverage`), frontend lint → typecheck → test → build |
+| Request parameters | Integer query parameters accept decimal digits only (`common.exception.DecimalIntegerParameters`); anything else is `400 MALFORMED_REQUEST`, range violations `400 VALIDATION_FAILED` |
 
-### 5.1 Security (Week 2)
+### 5.1 Security (Week 2, extended in Week 3)
 
 Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.md) and
 [`docs/plans/week-02.md`](plans/week-02.md) §7. Implemented in `auth.config.SecurityConfig` and the
@@ -178,7 +277,8 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
 - **Authorization:** deny by default.
   - Public: system status, CSRF token, registration, login, logout, interests, health and info,
     Swagger UI and both API descriptions.
-  - `/api/v1/admin/**` needs the role `ADMIN` (no endpoints yet). Every other `/api/**` path needs a
+  - `/api/v1/admin/**` needs the role `ADMIN` (no endpoints yet). `/api/v1/wallet` and
+    `/api/v1/wallet/**` need the role `PLAYER` (Week 3). Every other `/api/**` path needs a
     session. Everything else is denied.
   - `401` and `403` are Problem Details from `ProblemDetailFactory`.
 - **Authentication:** JSON login and registration endpoints; `DaoAuthenticationProvider` with
@@ -211,13 +311,17 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
   - CSRF tokens are not revoked on the server.
   - Method security comes with the admin services (Week 10).
 
-## 6. Deployment view (target, Week 12)
+## 6. Deployment view (staging today, final decision Week 12)
 
-| Component | Host |
-|---|---|
-| Frontend (static build) | Vercel with a same-origin `/api` rewrite, prepared for staging ([infrastructure/vercel](../infrastructure/vercel/README.md)); Cloudflare Pages was the original plan; the final choice is ADR-0007 |
-| Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render, Frankfurt; staging prepared ([infrastructure/render](../infrastructure/render/README.md)) |
-| Database | Neon (managed PostgreSQL 18; local development and tests use 17) |
+| Component | Staging today | Code deployed |
+|---|---|---|
+| Frontend (static build) | Vercel, `https://online-casino-simulator.vercel.app`, same-origin `/api` rewrite to Render; deploys `main` automatically ([infrastructure/vercel](../infrastructure/vercel/README.md)). Cloudflare Pages was the original plan; the final choice is ADR-0007 | `main` (Weeks 1–2 and the deployment foundation) |
+| Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render Free, Frankfurt, `https://online-casino-simulator.onrender.com`, profiles `neon,render`, registration closed, Auto-Deploy Off, manual deploys ([infrastructure/render](../infrastructure/render/README.md)) | `main` |
+| Database | Neon (managed PostgreSQL 18), branch `staging`; `production` untouched until Week 12. Local development and tests use 17 | schema **V5** |
+
+Week 3 (wallet, V6/V7) is **not deployed**: it is on `feature/week-03-wallet`, locally at V7. Its
+rollout is a separately approved step with its own runbook:
+[infrastructure/wallet-rollout.md](../infrastructure/wallet-rollout.md).
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a
 fast feedback loop. The Spring profile `neon` points a local backend at a Neon branch instead

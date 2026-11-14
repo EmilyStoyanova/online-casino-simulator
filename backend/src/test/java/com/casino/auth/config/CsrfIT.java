@@ -93,7 +93,7 @@ class CsrfIT {
         // Nothing happened: no account, no throttling attempt, the session is still signed in.
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM users", Integer.class)).isOne();
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM auth_throttle", Integer.class)).isZero();
-        assertThat(perform(get("/api/v1/wallet").cookie(session)).getStatus()).isEqualTo(404);
+        assertThat(perform(get("/api/v1/unknown").cookie(session)).getStatus()).isEqualTo(404);
     }
 
     @Test

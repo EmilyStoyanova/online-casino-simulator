@@ -135,6 +135,38 @@ class WalletConcurrencyIT {
     }
 
     @Test
+    void rolledBackCallerTransactionsUnderContentionLeaveNoTrace() throws InterruptedException {
+        // 40 debits of 10 on one wallet, each in its own caller transaction; every second caller fails
+        // after its debit (W3-09). Only the committed half remains, and the failed keys are free again.
+        UUID player = data.playerWithBalance("erin@example.com", 1000);
+        TransactionTemplate transactions = new TransactionTemplate(transactionManager);
+        AtomicInteger counter = new AtomicInteger();
+
+        List<Concurrency.Outcome<Integer>> outcomes = Concurrency.outcomes(40, () -> {
+            int n = counter.incrementAndGet();
+            transactions.executeWithoutResult(status -> {
+                walletService.debit(player, debit(10, "debit-" + n));
+                if (n % 2 == 0) {
+                    throw new IllegalStateException("caller failed after the debit");
+                }
+            });
+            return n;
+        });
+
+        assertThat(outcomes).filteredOn(outcome -> outcome.failure() != null).hasSize(20)
+                .allSatisfy(outcome -> assertThat(outcome.failure()).hasMessage("caller failed after the debit"));
+        assertThat(data.balance(player)).isEqualTo(1000 - 20 * 10);
+        assertThat(data.entries(player)).isEqualTo(1 + 20);
+        assertThat(data.ledgerViolations()).allSatisfy((name, count) -> assertThat(count).as(name).isZero());
+        // The rolled-back operations never happened: their keys apply now.
+        for (int n = 2; n <= 40; n += 2) {
+            assertThat(walletService.debit(player, debit(10, "debit-" + n)).replayed()).isFalse();
+        }
+        assertThat(data.balance(player)).isEqualTo(600);
+        assertThat(data.ledgerViolations()).allSatisfy((name, count) -> assertThat(count).as(name).isZero());
+    }
+
+    @Test
     void operationsOnDifferentWalletsDoNotWaitForEachOther() throws InterruptedException {
         // One debit per wallet in parallel: no shared lock, so all succeed.
         List<UUID> players = new ArrayList<>();

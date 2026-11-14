@@ -73,6 +73,9 @@ public class SecurityConfig {
                         // comes from users.role at sign-in, never from the request. Anonymous → 401,
                         // signed in without the role → 403 ACCESS_DENIED, also for unknown admin paths.
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                        // The virtual wallet is a player feature (P-W3-3): an administrator gets 403 ACCESS_DENIED,
+                        // also for unknown wallet paths. The wallet is chosen by the session, never by the request.
+                        .requestMatchers("/api/v1/wallet", "/api/v1/wallet/**").hasRole("PLAYER")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 // XSRF-TOKEN cookie (readable by JavaScript) + X-XSRF-TOKEN header on every unsafe method.

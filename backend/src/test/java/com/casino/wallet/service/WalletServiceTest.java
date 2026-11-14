@@ -16,6 +16,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
@@ -23,8 +25,12 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.casino.common.exception.ApiException;
 import com.casino.common.exception.ProblemCode;
 import com.casino.wallet.config.WalletProperties;
+import com.casino.wallet.dto.WalletEntryType;
 import com.casino.wallet.dto.WalletOperation;
 import com.casino.wallet.dto.WalletOperationResult;
+import com.casino.wallet.dto.WalletResponse;
+import com.casino.wallet.dto.WalletTransactionPage;
+import com.casino.wallet.dto.WalletTransactionResponse;
 import com.casino.wallet.dto.WalletTransactionType;
 import com.casino.wallet.entity.TransactionType;
 import com.casino.wallet.entity.Wallet;
@@ -32,6 +38,7 @@ import com.casino.wallet.entity.WalletTransaction;
 import com.casino.wallet.exception.BalanceLimitExceededException;
 import com.casino.wallet.exception.IdempotencyKeyReusedException;
 import com.casino.wallet.exception.InsufficientFundsException;
+import com.casino.wallet.exception.InvalidCursorException;
 import com.casino.wallet.exception.WalletBusyException;
 import com.casino.wallet.exception.WalletNotFoundException;
 import com.casino.wallet.repository.WalletRepository;
@@ -41,6 +48,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.data.domain.Limit;
 import org.springframework.test.util.ReflectionTestUtils;
 
 /** Business rules and the order of steps of {@link WalletService}, with the repositories mocked. */
@@ -245,6 +253,105 @@ class WalletServiceTest {
     void theBalanceIsReadWithoutALock() {
         assertThat(service.getBalance(USER)).isEqualTo(1000);
         verify(wallets, never()).findByUserIdForUpdate(any(), any());
+    }
+
+    @Test
+    void theWalletReadReturnsBalanceAndChangeTimeWithoutLockOrWrite() {
+        Instant updatedAt = Instant.parse("2026-11-12T09:15:00.123456Z");
+        ReflectionTestUtils.setField(wallet, "updatedAt", updatedAt);
+
+        assertThat(service.getWallet(USER)).isEqualTo(new WalletResponse(1000, updatedAt));
+        verify(wallets, never()).findByUserIdForUpdate(any(), any());
+        verify(wallets, never()).insertIfAbsent(any());
+        verify(wallets, never()).save(any());
+        verifyNoInteractions(entries);
+    }
+
+    // ------------------------------------------------------------------ history (W3-08)
+
+    @Test
+    void theFirstPageAsksForOneEntryMoreThanTheLimitAndTheLastPageHasNoCursor() {
+        when(entries.findByWalletIdOrderByIdDesc(WALLET, Limit.of(21)))
+                .thenReturn(List.of(entry(1, TransactionType.STARTING_BALANCE, 1000, 1000, "starting-balance", "x")));
+
+        WalletTransactionPage page = service.listTransactions(USER, null, 20);
+
+        assertThat(page.items()).containsExactly(new WalletTransactionResponse(1, WalletEntryType.STARTING_BALANCE, 1000, 1000, null));
+        assertThat(page.nextCursor()).isNull();
+        // Read-only and without a lock.
+        verify(wallets, never()).findByUserIdForUpdate(any(), any());
+        verify(wallets, never()).insertIfAbsent(any());
+        verify(entries, never()).save(any());
+    }
+
+    @Test
+    void aFullPageEndsWithTheCursorOfItsOldestEntry() {
+        when(entries.findByWalletIdOrderByIdDesc(WALLET, Limit.of(3))).thenReturn(List.of(starting(9), starting(7), starting(4)));
+
+        WalletTransactionPage page = service.listTransactions(USER, null, 2);
+
+        assertThat(page.items()).extracting(WalletTransactionResponse::id).containsExactly(9L, 7L);
+        assertThat(page.nextCursor()).isEqualTo(TransactionCursor.after(7));
+    }
+
+    @Test
+    void aCursorContinuesBelowItsEntryInTheSessionsWallet() {
+        when(entries.findByWalletIdAndIdLessThanOrderByIdDesc(WALLET, 7, Limit.of(3))).thenReturn(List.of(starting(4), starting(2)));
+
+        WalletTransactionPage page = service.listTransactions(USER, TransactionCursor.after(7), 2);
+
+        assertThat(page.items()).extracting(WalletTransactionResponse::id).containsExactly(4L, 2L);
+        assertThat(page.nextCursor()).isNull();
+        verify(entries, never()).findByWalletIdOrderByIdDesc(any(), any());
+    }
+
+    @Test
+    void anEmptyHistoryIsAnEmptyLastPage() {
+        when(entries.findByWalletIdOrderByIdDesc(WALLET, Limit.of(2))).thenReturn(List.of());
+
+        assertThat(service.listTransactions(USER, null, 1)).isEqualTo(new WalletTransactionPage(List.of(), null));
+    }
+
+    @Test
+    void invalidPageRequestsAreRejectedBeforeAnythingIsRead() {
+        assertThatThrownBy(() -> service.listTransactions(USER, "not-a-cursor", 20)).isInstanceOf(InvalidCursorException.class);
+        assertThatIllegalArgumentException().isThrownBy(() -> service.listTransactions(USER, null, 0));
+        assertThatIllegalArgumentException().isThrownBy(() -> service.listTransactions(USER, null, 101));
+        verifyNoInteractions(wallets, entries);
+    }
+
+    @Test
+    void anEntryWithATypeOutsideThePublicContractIsNeverShown() {
+        // Only test databases can hold one (the production schema rejects the test-only types).
+        when(entries.findByWalletIdOrderByIdDesc(WALLET, Limit.of(21)))
+                .thenReturn(List.of(entry(5, TransactionType.TEST_CREDIT, 10, 1010, "gift", null), starting(1)));
+
+        assertThatThrownBy(() -> service.listTransactions(USER, null, 20))
+                .isExactlyInstanceOf(IllegalStateException.class)
+                .hasMessage("Ledger entry 5 has a type that the API does not publish");
+    }
+
+    @Test
+    void theHistoryOfAPlayerWithoutAWalletIsADataError() {
+        UUID stranger = UUID.randomUUID();
+        when(wallets.findByUserId(stranger)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.listTransactions(stranger, null, 20)).isInstanceOf(WalletNotFoundException.class);
+        verifyNoInteractions(entries);
+    }
+
+    private static WalletTransaction starting(long id) {
+        return entry(id, TransactionType.STARTING_BALANCE, 1000, 1000, "key-" + id, null);
+    }
+
+    @Test
+    void theWalletReadOfAPlayerWithoutAWalletCreatesNone() {
+        UUID stranger = UUID.randomUUID();
+        when(wallets.findByUserId(stranger)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getWallet(stranger)).isInstanceOf(WalletNotFoundException.class);
+        verify(wallets, never()).insertIfAbsent(any());
+        verify(wallets, never()).save(any());
     }
 
     // ------------------------------------------------------------------ opening a wallet (W3-05)

@@ -228,7 +228,7 @@ class MigrationsIT {
             assertThat(latest.info().applied()).filteredOn(info -> info.getVersion() != null)
                     .allMatch(info -> info.getState().isApplied() && !info.getState().isFailed())
                     .extracting(info -> info.getVersion().getVersion())
-                    .containsExactly("1", "2", "3", "4", "5", "6");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7");
             // Existing data is untouched, and the new tables are there.
             assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM " + COMPAT_SCHEMA + ".spring_session", Integer.class))
                     .isOne();
@@ -268,6 +268,9 @@ class MigrationsIT {
                     .isEqualTo(alice.toString());
             assertThat(jdbcTemplate.queryForObject("SELECT attempt_count FROM " + COMPAT_SCHEMA + ".auth_throttle", Integer.class))
                     .isEqualTo(3);
+            // ... and the existing player got a wallet with the starting balance (V7).
+            assertThat(jdbcTemplate.queryForObject("SELECT balance FROM " + COMPAT_SCHEMA + ".wallets WHERE user_id = ?", Long.class, alice))
+                    .isEqualTo(1000);
             // The existing account starts without interests and can be given some (W2-10).
             assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM " + COMPAT_SCHEMA + ".user_interests", Integer.class))
                     .isZero();

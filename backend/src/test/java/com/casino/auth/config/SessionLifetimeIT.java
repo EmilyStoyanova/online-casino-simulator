@@ -46,7 +46,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 class SessionLifetimeIT {
 
     private static final String PASSWORD = "correct-horse-battery-3e8f";
-    private static final String PROTECTED = "/api/v1/wallet";
+    private static final String PROTECTED = "/api/v1/unknown";
 
     @Autowired
     private MockMvc mockMvc;

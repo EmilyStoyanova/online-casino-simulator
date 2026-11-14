@@ -1,8 +1,14 @@
 # Week 3 Plan — Virtual Wallet
 
-- **Status:** Revision 5. Decisions reviewed 2026-11-09 (§2.2, §5.6). W3-02 contract approved (§5.5).
-  W3-03 persistence approved (§6.2, §6.5). W3-04 wallet service reviewed (§7.8).
-  **W3-05 wallet opening at registration implemented, pending review** (§7.9). Nothing else is implemented.
+- **Status:** Revision 10. Decisions reviewed 2026-11-09 (§2.2, §5.6). W3-02 contract approved (§5.5).
+  W3-03 persistence approved (§6.2, §6.5). W3-04 wallet service reviewed (§7.8). W3-05 wallet opening
+  at registration reviewed (§7.9). W3-06 V7 backfill reviewed (§6.6.1); tested on Testcontainers only,
+  **not applied to any Neon branch**. W3-07 `GET /api/v1/wallet` approved (§7.10).
+  W3-08 `GET /api/v1/wallet/transactions` reviewed (§7.11); no `planned` operation is left.
+  W3-09 integrity, concurrency and coverage verification reviewed (§7.12).
+  W3-10 documentation and rollout preparation approved 2026-11-13 (§7.13; P-W3-16 option D).
+  **W3-11 final verification done, pending review** (§7.14); next: the pull request.
+  The wallet stays local until the milestone is approved; staging is at V5.
   Decisions still marked *Proposed* need approval before the task that depends on them starts.
 - **Stage:** 2 — Virtual currency and game logic (Weeks 3–4)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`), §4 (Week 3),
@@ -134,13 +140,13 @@ task. **Proposed** = still pending; the task that depends on it does not start b
 | P-W3-8 | Server-side idempotency keys per wallet; same key + same parameters → original result; different parameters → `IDEMPOTENCY_KEY_REUSED` | Approved | §7.6 |
 | P-W3-9 | No public credit/debit endpoint; credit/debit only through `wallet.service.WalletService` | Approved | §4 |
 | P-W3-10 | `GET /api/v1/wallet` and `GET /api/v1/wallet/transactions` | Endpoints required; contract details **Proposed** (§5.6) | §5 |
-| P-W3-11 | Existing players: Flyway **V7** data migration, no duplicate credits | **Conditionally approved** as the approach; **no execution against any shared database** (Neon staging/production) is authorized | §6.6 |
+| P-W3-11 | Existing players: Flyway **V7** data migration, no duplicate credits | **Conditionally approved** as the approach; **no execution against any shared database** (Neon staging/production) is authorized; implemented in W3-06, tested on Testcontainers only (pending review) | §6.6, §6.6.1 |
 | P-W3-12 | Test cleanup through one guarded `TestDatabase` helper using `TRUNCATE` (explicit table list, no `CASCADE`); no `TRUNCATE` trigger | Guards G1–G5 approved; implemented in W3-03, pending review (§6.5) | §6.5 |
 | P-W3-13 | Dependency direction `wallet → user` (event only); ArchUnit R13–R14 | **Proposed**; R13 in W3-04, R14 in W3-05 (pending review) | §9 |
 | P-W3-14 | JaCoCo: **80 % line, 70 % branch** for the wallet business logic (`com.casino.wallet.service`) | Approved | §10.6 |
 | P-W3-15 | Automated migration test on PostgreSQL 17 **and** 18 | Required | §10.5 |
 | — | Initial transaction type `STARTING_BALANCE` only (Q6) | Approved | §6.2 |
-| P-W3-16 | Test-only types `TEST_CREDIT`/`TEST_DEBIT`, allowed only in test databases (test Flyway callback), forbidden in production code (ArchUnit R15) | **Proposed** (W3-04) | §7.8 |
+| P-W3-16 | Test-only types `TEST_CREDIT`/`TEST_DEBIT`, allowed only in test databases (test Flyway callback), forbidden in production code (ArchUnit R15) | **Approved 2026-11-13** (W3-10 review, option D): kept until Week 4; their removal is a Week 4 acceptance criterion and release gate (§7.13, Q15) | §7.8, §7.13 |
 | — | Error codes `INSUFFICIENT_FUNDS`, `IDEMPOTENCY_KEY_REUSED`, `BALANCE_LIMIT_EXCEEDED` in Week 3 (Q7) | Approved (status `409` **Proposed**, §5.6) | §5.4 |
 | — | Account-deletion policy (Q4) | Deferred to Week 11 | §6.5 |
 | — | Existing PLAYER accounts never receive a duplicate credit | Required | §6.6, AC-9.2, AC-9.3 |
@@ -191,7 +197,7 @@ task. **Proposed** = still pending; the task that depends on it does not start b
 | AC-3.1 | `GET /api/v1/wallet/transactions` returns only the session user's entries, newest first (descending ledger id). |
 | AC-3.2 | `limit` 1–100, default 20; outside the range → `400 VALIDATION_FAILED` with a field error `limit`; not an integer → `400 MALFORMED_REQUEST` (the existing convention for unconvertible parameters, `docs/api.md`; revised in W3-02). |
 | AC-3.3 | `nextCursor` is present only when more entries exist; following it returns the next page with no duplicates and no gaps, also when new entries are added between page requests (new entries appear on the first page only). |
-| AC-3.4 | A malformed or foreign cursor → `400 VALIDATION_FAILED` (`cursor`); a cursor never reveals another wallet's entries. |
+| AC-3.4 | A malformed or foreign cursor → `400 VALIDATION_FAILED` (`cursor`); a cursor never reveals another wallet's entries. *As implemented in W3-08: "foreign" = not issued by this API; a cursor from another account only pages the caller's own entries (§7.11).* |
 | AC-3.5 | Entries expose `id`, `type`, `amount` (signed), `balanceAfter`, `createdAt`; never the idempotency key, the wallet id or the user id. |
 | AC-3.6 | Same authentication, authorization and `no-store` rules as AC-2.2–AC-2.4. |
 
@@ -800,6 +806,63 @@ A player registered by the **old** code after V7 commits would have no wallet. M
 3. if it reports players without wallets, the fix is option B's `openWallet` (one-off, approved
    separately), not a manual insert.
 
+#### 6.6.1 Implemented in W3-06 (pending review)
+
+`V7__backfill_existing_player_wallets.sql`, **one deviation from the sketch**: a single statement
+with a data-modifying CTE instead of two statements.
+
+```sql
+WITH new_wallets AS (
+    INSERT INTO wallets (user_id, balance)
+    SELECT u.id, 1000 FROM users u
+    WHERE u.role = 'PLAYER' AND NOT EXISTS (SELECT 1 FROM wallets w WHERE w.user_id = u.id)
+    ON CONFLICT (user_id) DO NOTHING
+    RETURNING id
+)
+INSERT INTO wallet_transactions (wallet_id, type, amount, balance_after, idempotency_key)
+SELECT id, 'STARTING_BALANCE', 1000, 1000, 'starting-balance' FROM new_wallets;
+```
+
+- **Why:** the sketch's second statement found "its" wallets by a heuristic (`balance = 1000` and
+  no entries). The CTE inserts entries for exactly the wallets this statement created (`RETURNING`),
+  so an existing wallet is never touched, whatever its state. For example, a developer database with a
+  wallet that has no entries yet keeps it as it is; the verification query reports it.
+- **Eligible accounts:** `role = 'PLAYER'`, any `status` (disabled players included, P-W3-3),
+  without a row in `wallets`. Admins are excluded by the role condition.
+- **Duplicates:** `NOT EXISTS` skips players who already have a wallet (registered after V6 through
+  `WalletOpener`), `ON CONFLICT (user_id) DO NOTHING` covers a concurrent insert, and
+  `uq_wallet_transactions_idempotency` with the same key `starting-balance` as `openWallet` stays the
+  last line of defence. A later `openWallet` for a backfilled player finds the entry and changes
+  nothing (W3-05).
+- **Integrity:** no constraint or trigger is changed; the rows meet every V6 rule. Flyway's
+  transaction makes V7 all-or-nothing.
+- **Verification:** the queries of §6.7 are in `infrastructure/neon/verify-wallets.sql`, extended by
+  "wallets without exactly one `STARTING_BALANCE` entry" and a counts line.
+  `MigrationCompatibilityIT` runs that file, so the runbook queries are tested too.
+
+**Tests (W3-06), PostgreSQL 17.11 and 18.6 (`MigrationCompatibilityIT`):**
+- *V5 → V6 → V7* with an active player, a disabled player and an admin (the current staging path):
+  V6 adds empty tables, then V7 opens the players' wallets; `users` rows unchanged.
+- *V6 → V7* with 27 players without a wallet, an admin, and a player whose wallet (250 coins, from the
+  application) already exists. Results:
+  - 27 wallets of 1,000 with one starting entry each;
+  - the existing wallet and its entries unchanged, byte for byte, including ids and times;
+  - `users`, `spring_session`, `spring_session_attributes`, `auth_throttle`, `user_interests` and
+    `interests` unchanged;
+  - verification all `0`.
+- *Re-run (AC-9.2):*
+  - the V7 statement executed by hand twice more changes nothing;
+  - Flyway executes no migration: V7 is a versioned migration and runs **once per database**;
+  - an account created after V7 gets **no** wallet from a later migrate. New players get their wallet
+    from `WalletOpener` at registration (W3-05), never from V7;
+  - executed by hand once more (nothing in the application does this), the statement serves only that
+    account and leaves the existing wallets and entries unchanged.
+- *Rollback:* a failure injected into the ledger insert (a trigger in the throw-away schema, i.e.
+  after the wallets were inserted) → `FlywayException`, no wallet, V7 not recorded, version 6. After
+  the injected trigger is dropped, the next migrate applies V7.
+- `MigrationsIT` (versions 1–7; an account from V4 gets its wallet) and `CasinoSimulatorApplicationIT`
+  (`schemaVersion` 7).
+
 ### 6.7 Verification queries (read-only, for tests and the rollout runbook)
 
 ```sql
@@ -812,8 +875,8 @@ WHERE w.balance <> (SELECT coalesce(sum(t.amount), 0) FROM wallet_transactions t
    OR w.balance <> (SELECT t.balance_after FROM wallet_transactions t WHERE t.wallet_id = w.id ORDER BY t.id DESC LIMIT 1);
 ```
 
-All three must return `0`. They become `infrastructure/neon/verify-wallets.sql` for
-`readonly-query.sh` (W3-10), used only in the approved rollout.
+All three must return `0`. They are in `infrastructure/neon/verify-wallets.sql` (W3-06, §6.6.1) for
+`readonly-query.sh`, used only in the approved rollout.
 
 ---
 
@@ -1054,6 +1117,302 @@ integration `RegistrationIT` (+3, existing tests extended), `WalletOpeningIT` (8
 
 **Note for W3-07:** `RegistrationIT` and `SessionRestartIT` use `GET /api/v1/wallet` as an *unknown*
 protected path (expecting `404`); they must switch to another path when the endpoint exists.
+*Done in W3-07 (§7.10).*
+
+### 7.10 Implemented in W3-07 (pending review)
+
+`GET /api/v1/wallet` along ①–⑥:
+1. **Contract:** the `planned` marker and the "(planned)" suffix of `getWallet` are removed. Nothing
+   else changed: version stays 0.4.0, and `listWalletTransactions` stays planned for W3-08.
+2. **DTO:** `wallet.dto.WalletResponse(long balance, Instant updatedAt)`, `@Schema(name = "Wallet")`,
+   both required. No ids and no owner.
+3. **Controller:** `wallet.controller.WalletController.getWallet(Principal)`, package-private like
+   `UserProfileController`. The user id is the session principal's name; there is no parameter, path
+   variable or body. It is a single delegation to the service.
+4. **Service:** `WalletService.getWallet(UUID)`, `@Transactional(readOnly = true)`. It uses
+   `findByUserId` (no lock, no insert); a missing wallet → `WalletNotFoundException` → generic
+   `500 INTERNAL_ERROR`, logged with the user id only (AC-2.6).
+5. **Security:** `SecurityConfig` rule `.requestMatchers("/api/v1/wallet", "/api/v1/wallet/**").hasRole("PLAYER")`,
+   before `/api/**` `authenticated()`. Anonymous → `401` (entry point: `AUTHENTICATION_REQUIRED` or
+   `SESSION_EXPIRED`); an administrator → `403 ACCESS_DENIED`, also for unknown wallet paths.
+   `Cache-Control: no-store` comes from Spring Security's default headers (and the error handler for
+   problems). CSRF, sessions and throttling are unchanged. `POST`/`PUT`/`DELETE` → `405` after the
+   CSRF check (no public balance change, P-W3-9).
+6. **Tests:**
+   - `WalletIT` (8): the stored balance and `updatedAt` with exactly two fields; two players with
+     interleaved changes; `userId`/`walletId` parameters ignored and ids in the path `404`; anonymous
+     and ended sessions `401`; admin `403`; three reads change no row; a player without a wallet
+     `500` with no wallet created; reloads keep the session; no changing method.
+   - `OpenApiContractIT`: the generated specification matches the contract, plus a runtime check of
+     `200`/`401`/`403`/`500`.
+   - `AccessRulesContractIT`: its player now has a wallet (`TestAccounts.activePlayerWithWallet`).
+   - `AdminAuthorizationIT`: the bootstrap administrator gets `403`.
+   - `RegistrationIT`: the registration session reads `1000`.
+   - `SessionRestartIT`: after an application restart the restored session reads the player's wallet.
+   - `WalletServiceTest` (+2).
+   - Tests that used `/api/v1/wallet` as an unknown protected path now use `/api/v1/unknown`, which
+     `RenderProxyIT` already used, with unchanged assertions: `CsrfIT`, `SessionLifetimeIT`,
+     `WebSecurityIT`, `LoginLogoutIT`, `RegistrationIT`, `SessionRestartIT`,
+     `AbsoluteSessionTimeoutFilterTest`.
+   - New test helpers: `TestAccounts.activePlayerWithWallet` and `activeAdministrator`.
+
+### 7.11 Implemented in W3-08 (pending review)
+
+`GET /api/v1/wallet/transactions` along ①–⑥:
+1. **Contract:** the last `planned` marker is removed (`listWalletTransactions`). Version stays 0.4.0;
+   no `planned` operation is left (AC-0.7).
+2. **DTOs:**
+   - `WalletTransactionPage(items, nextCursor)`, with `nextCursor` required and nullable (always in
+     the JSON, `null` on the last page);
+   - `WalletTransactionResponse(id, type, amount, balanceAfter, createdAt)`: no key, reference,
+     wallet id or user id;
+   - `WalletEntryType`, published as `WalletTransactionType`, with **exactly the contract values**
+     (`STARTING_BALANCE`).
+3. **Controller:** `listWalletTransactions(limit, cursor, Principal)`. The parameters are
+   `@RequestParam(defaultValue = "20") @Min(1) @Max(100) int limit` and an optional `String cursor`;
+   built-in method validation answers out-of-range values with `400 VALIDATION_FAILED` (field
+   `limit`), and a failed conversion with `400 MALFORMED_REQUEST`. Nothing else is read from the
+   request.
+4. **Service:** `listTransactions(userId, cursor, limit)`, `@Transactional(readOnly = true)`. It works
+   in this order:
+   - the cursor is decoded first (`InvalidCursorException` → `400 VALIDATION_FAILED` with field
+     `cursor` and the message "is not a valid cursor"; the value is never echoed);
+   - then the session's wallet is looked up (`findByUserId`, no lock; missing → `500`);
+   - then `limit + 1` entries are read by keyset (`findByWalletIdOrderByIdDesc` /
+     `findByWalletIdAndIdLessThanOrderByIdDesc`, index `ix_wallet_transactions_wallet_id_id`);
+   - the extra entry decides `nextCursor` (the cursor of the page's oldest entry).
+5. **Cursor** (`TransactionCursor`): URL-safe Base64 without padding of `v1:<id>`, at most 30
+   characters (contract: 64). Only the exact issued form is accepted. Invalid: wrong alphabet,
+   padding, undecodable, wrong version, zero or negative, leading zeros, above `Long.MAX_VALUE`,
+   trailing data, any non-canonical spelling.
+6. **Security:** unchanged from W3-07. `/api/v1/wallet/**` requires `PLAYER` (anonymous `401`,
+   administrator `403`), and `no-store` applies.
+
+**AC-3.4 "foreign cursor", as implemented (pending review).** The cursor is a position, not a
+credential: the query is always bound to the session's wallet (`wallet_id = ?`, §6.3). A cursor
+taken from another account is a well-formed position, so it is accepted and pages through the
+**caller's own** entries below that id. It never returns another wallet's entries; this is tested
+with interleaved ids. "Foreign" in AC-3.4 is read as "not issued by this API", matching the
+contract's 400 text, and that case is `400`. Detecting cursors issued to someone else would need a
+signed or per-session cursor; it is not needed for confidentiality, because the cursor grants nothing.
+
+**Test-only types (P-W3-16) — fail closed (pending review).**
+- The response type is `WalletEntryType`, so the generated documentation and every possible JSON
+  value contain only contract values. `OpenApiContractIT` asserts that neither `/v3/api-docs` nor
+  `/openapi.yaml` contains `TEST_CREDIT`/`TEST_DEBIT`.
+- A stored entry whose type has no public value fails the request as a generic `500` (logged with
+  the entry id). It is never renamed, skipped or shown. The production schema cannot hold such an
+  entry (`ck_wallet_transactions_type`, `MigrationCompatibilityIT`), so in production this path is
+  unreachable; in a test database it is tested (`WalletTransactionsIT`).
+- Skipping the entry instead would break the pagination semantics and hide data. Publishing it would
+  silently widen the approved contract.
+- `WalletModelTest` requires a public value for every stored type except the test-only ones, so
+  Week 4 cannot add a stored type without its contract value.
+- Consequence for tests: histories with several entries are built in SQL from `STARTING_BALANCE`
+  rows (balance = Σ entries kept), until Week 4 brings real stake and payout types. This deliberately
+  departs from "one starting entry per wallet" inside those test fixtures only.
+
+**Tests (W3-08):**
+- Unit:
+  - `TransactionCursorTest` (round trip, alphabet and length, 17 invalid forms);
+  - `WalletServiceTest` (+7: limit + 1, cursor of the oldest entry, keyset continuation, empty page,
+    validation before any read, fail-closed type, missing wallet);
+  - `WalletControllerTest` (9, `@WebMvcTest` with the real security chain: default and bound limits,
+    out-of-range → `VALIDATION_FAILED`/`limit` with the contract message, non-integers →
+    `MALFORMED_REQUEST`, cursor errors without echo, parameters never select a user, `401`/`403`,
+    generic `500`, exact JSON with `"nextCursor":null`);
+  - `WalletModelTest` (+1).
+- Integration `WalletTransactionsIT` (10):
+  - the starting entry with exactly the documented fields;
+  - an empty history;
+  - 25 entries paged with the default limit, 7, 1, 100, 25 and 24;
+  - entries appended between pages (no repeat, no skip; new entries on a new first page);
+  - two players with interleaved ids, a cursor from the other player, id parameters and id paths;
+  - invalid `limit`/`cursor`;
+  - `401`/`SESSION_EXPIRED`/`403`;
+  - read-only (every wallet and ledger column unchanged);
+  - test-only type → `500` without leaking it;
+  - missing wallet.
+- Also: `OpenApiContractIT` (runtime `200`/`400`×3/`401`/`403`/`500`, no `TEST_*` in the
+  documentation), `SessionRestartIT` (the history after an application restart) and
+  `AccessRulesContractIT` (its player now reaches both operations with `200`).
+
+### 7.12 Implemented in W3-09 (pending review)
+
+Decisions of the W3-08 review applied: fail closed for unpublished types (kept as built); the cursor
+is position-based and wallet-scoped and is documented as **not cryptographically bound** to a user
+(`docs/api.md`); `TEST_*` stay test infrastructure; `limit=0x10` no longer accepted (below).
+
+**Decimal integer parameters.** Spring's number conversion reads `0x10`/`#10` as hexadecimal, and a
+failed conversion falls back to its `CustomNumberEditor`, which does the same; a `Converter` alone
+therefore cannot fix it (verified). `common.exception.DecimalIntegerParameters` (`@ControllerAdvice`
+with `@InitBinder`, R5 requires the `exception` package) registers a property editor for
+`int`/`Integer`/`long`/`Long`: `^-?[0-9]+$` only, range by `valueOf`. Not decimal → type mismatch →
+`400 MALFORMED_REQUEST` (RFC 9457 Problem Details, existing convention); `0`/`101` stay
+`400 VALIDATION_FAILED`. `0x10`, `#10`, `+5`, `" 5"`, `"5 "`, `1e2`, `٥` (non-ASCII digit) are
+rejected; `007` is decimal (7). The contract is unchanged (`limit` is an `integer`).
+
+**Dead branch removed.** JaCoCo showed one uncovered branch in `WalletService.newBalance`: an
+overflow on a debit, which cannot happen (balance ≥ 0, amount ≤ `Long.MAX_VALUE`, so the result is
+≥ `Long.MIN_VALUE + 1` and a too large debit is caught by `result < 0`). Overflow is now always
+`BALANCE_LIMIT_EXCEEDED`; behaviour is unchanged.
+
+**JaCoCo (P-W3-14)** — `jacoco-maven-plugin` 0.8.13 (not managed by the Spring Boot parent):
+- agent via `@{argLine}` for Surefire (`jacoco.exec`) and Failsafe (`jacoco-it.exec`), merged after
+  the integration tests (`jacoco-merged.exec`);
+- `verify`: reports `target/site/jacoco` (merged, the checked data) and `target/site/jacoco-unit`;
+  `check` on `PACKAGE com.casino.wallet.service`: line ≥ 0.80, branch ≥ 0.70; placed after Failsafe;
+- **not misleading:** the rule was proven to evaluate this package with real data (a temporary
+  `MISSEDCOUNT ≤ -1` limit failed with "lines missed count is 0" for `com.casino.wallet.service`), and
+  the merge was proven to include the integration data (`WalletLockingImpl` 0/9 lines in the unit
+  report, 9/9 merged);
+- CI uploads both reports (`backend-coverage`, also on success).
+
+**Measured coverage, `com.casino.wallet.service`** (`WalletService`, `WalletOpener`,
+`TransactionCursor`): **100 % lines (111/111), 100 % branches (62/62)**, identical for unit tests
+alone and merged, so the threshold is met by unit tests without integration help. Whole `wallet`
+module (reported, not enforced): 100 % lines, 98.5 % branches merged.
+
+**Integrity and concurrency tests added:**
+- `WalletTestData.ledgerViolations()`: named invariant counts (balance = Σ = newest `balance_after`;
+  every `balance_after` is the running sum in id order; values within 0 … 2⁵³ − 1 and no zero
+  amount; ≤ 1 wallet per user; wallets for players only; no key twice per wallet) and
+  `walletsNotOpenedByTheStartingEntry()` (first entry `STARTING_BALANCE`/`starting-balance`, exactly
+  one per wallet).
+- `LedgerIntegrityIT` (new):
+  - 600 seeded sequential operations on 5 opened wallets (credits, debits incl. insufficient,
+    replays, key reuse, rolled-back caller transactions, limit overflow) compared with an in-memory
+    model after every operation;
+  - 16 threads × 60 seeded operations (more threads than pooled connections) with shared duplicate
+    keys and caller rollbacks: entries = starting entries + applied changes, each shared key once,
+    no rolled-back key, every invariant 0.
+- `WalletConcurrencyIT`: 40 concurrent caller transactions on one wallet, every second rolled back
+  after its debit → exactly the committed half remains, the failed keys apply afterwards.
+- `WalletLockTimeoutIT`: a lock timeout aborts the whole caller transaction, including a wallet the
+  caller had opened before; both operations succeed after the lock is released.
+- All assertions are on final states or counts; the only timing assertion is the existing bounded
+  lock wait (450 ms – 4 s for a 500 ms timeout).
+
+**Security and artifact checks added:**
+- `WalletIT`: the running application's handler mappings contain exactly `GET /api/v1/wallet` and
+  `GET /api/v1/wallet/transactions` for the wallet module and path (no public credit/debit).
+- `ProductionArtifactIT` (new): the executable jar holds migrations V1–V7, no test classes, no
+  `db/test-callbacks`, no test-scoped libraries, no packaged SQL/YAML/properties naming
+  `TEST_CREDIT`/`TEST_DEBIT` or the callback, and `spring.flyway.locations: classpath:db/migration`.
+- Note: the constants `TEST_CREDIT`/`TEST_DEBIT` are still compiled into the production enums
+  `wallet.dto.WalletTransactionType` and `wallet.entity.TransactionType` (P-W3-16). They are inert:
+  the production schema rejects them, R15 forbids production use, no response type can carry them.
+  They leave with the callback when Week 4 adds real stake/payout types (§7.8).
+
+**Test environment (Testcontainers).** Every cached Spring test context owns a PostgreSQL container
+(`TestcontainersConfiguration`). With Spring's default cache of 32 contexts, all ~16 configurations
+stay cached: measured during a full `verify`, running test containers grew to **17 at once**. With
+another local Docker stack using the 8 GB Docker VM, a later container missed the 60 s start-up
+wait (the W3-08 incident). `src/test/resources/spring.properties` now sets
+`spring.test.context.cache.maxSize=6`: evicted contexts close and stop their containers. Measured:
+**peak 7** (was 17), same 20 containers started, same duration (356 s vs 360 s), all tests green.
+No retries, timeouts or disabled tests were added. Manual mitigation if Docker is still contended:
+stop *other* local stacks yourself before `./mvnw verify`, or give Docker Desktop more memory; this
+project never touches unrelated containers.
+
+### 7.13 W3-10: documentation, deployment preparation, findings (approved 2026-11-13)
+
+**Documentation aligned with the code.** Updated:
+- `README.md`: status (Week 2 and deployment foundation done, Week 3 in review and not deployed),
+  wallet features, configuration, coverage, Docker note, milestones;
+- `docs/architecture.md`: the wallet module section; R13–R15 and `wallet → user`; PLAYER rule;
+  decimal integer parameters; coverage; deployment view with the real staging state;
+- `docs/database.md`: V6/V7 status per database; the full wallet schema with constraints,
+  triggers, invariants and V7; Neon state; the PostgreSQL 18 note;
+- `docs/api.md`: the wallet operations moved out of "Planned"; contract history; `limit` behaviour;
+  schema version;
+- infrastructure READMEs (overview, Render, Vercel), and §13 of this plan.
+
+**Read-only scripts.**
+- `infrastructure/neon/verify-migrations.sql` (rewritten) recognises both legitimate staging states,
+  V5 (`V5: before the Week 3 rollout`) and V7 (`V7: Week 3 wallet schema`). It reports:
+  - the Neon branch id (`current_setting('neon.branch_id', true)`);
+  - the history and failed migrations;
+  - the expected tables per version and any unexpected table;
+  - counts: interests, players, disabled players, admins, sessions, throttle rows, and wallets and
+    ledger entries once the tables exist.
+- The script is pure SQL apart from `\conninfo`. Missing tables are counted through
+  `query_to_xml`, so no psql conditionals are needed.
+- `MigrationCompatibilityIT` runs it, and `verify-wallets.sql`, on PostgreSQL 17 and 18 with
+  `default_transaction_read_only = on`, so a write in either script would fail the build.
+- Neither script was run against Neon.
+
+**Rollout runbook:** [`infrastructure/wallet-rollout.md`](../../infrastructure/wallet-rollout.md). It
+covers:
+- preconditions (registration closed, Auto-Deploy Off, default wallet settings) and the read-only
+  preflight with recorded player and admin counts;
+- a Neon restore point (`staging-before-week-03` branch) and how Flyway applies V6/V7 at Render
+  start-up (separate transactions, advisory lock, old instance keeps serving);
+- the manual deploy, read-only post-checks and authenticated checks (each with its approval);
+- success and failure criteria and the rollback options. Application rollback keeps V7;
+  restoring the data needs the Neon restore point.
+
+Every step that changes a shared system is marked **APPROVAL**.
+
+**`limit` validation (confirmed by tests):**
+- `5`, `20` and `007` are accepted;
+- `+5`, `0x10`, `#10`, `1e2`, `ten` and padded values are `400 MALFORMED_REQUEST`;
+- `0` and `101` are `400 VALIDATION_FAILED` with field `limit`.
+
+`WalletControllerTest` covers these through the web slice, and `WalletTransactionsIT` through the
+whole stack (`5` accepted; `0x10` and `+5` rejected). Where the W3-09 report seemed to say that `5`
+answers `400`, it meant `+5`.
+
+**Test-only ledger types in production classes — findings (decided 2026-11-13: option D, nothing changed in Week 3).**
+`TEST_CREDIT`/`TEST_DEBIT` are constants of the production enums `wallet.dto.WalletTransactionType`
+and `wallet.entity.TransactionType`.
+
+Current safeguards: the production schema rejects them (`ck_wallet_transactions_type`, tested on
+PostgreSQL 17/18); ArchUnit R15 forbids their use in production code; no response type can carry them
+(`WalletEntryType`, fail closed); and no packaged resource names them (`ProductionArtifactIT`).
+
+Residual risk: they are visible in the compiled classes, and a future change could start using them
+in production code if R15 were removed or bypassed. The tests need *some* debit type before
+Week 4. Options:
+
+| Option | Change | Impact | Verdict |
+|---|---|---|---|
+| A. Keep until Week 4 | none | Constants stay inert (guards above) | Acceptable for staging |
+| B. Open command type | `WalletOperation.type` becomes an interface (e.g. `WalletCommandType`: `name()`, `isCredit()`); production enum `WalletTransactionType` keeps `STARTING_BALANCE` only; tests define their own enum `TestLedgerType`; entity `type` becomes a `String` (or a converter) | Touches `WalletService` validation and replay, the DTO, the entity, R15 (replaced by "only `wallet.dto` implements the interface in production") and about 8 test classes. Loosens the closed set of types in Java (the database check stays) | Possible, medium churn right before review |
+| C. Bring Week 4 types forward | V8 + contract change with stake/payout types, tests use them | Contradicts the approved Q6 (each week adds its own types) | Rejected |
+| D. Remove in Week 4 (recommended) | Week 4 adds `ROULETTE_STAKE`/`ROULETTE_PAYOUT` (migration, contract). The same change moves every test to them, deletes the two constants, the Flyway callback, R15 and its fixtures, and extends `ProductionArtifactIT` to fail if any packaged class contains `TEST_CREDIT`/`TEST_DEBIT` | No Week 3 change; a hard gate from Week 4 on | **Approved 2026-11-13** (W3-10 review), as a Week 4 acceptance criterion and a release gate |
+
+**Week 4 tracking (approved option D).** The Week 4 plan must carry these as acceptance criteria, and
+no Week 4 build is deployed before they hold:
+1. `TEST_CREDIT` and `TEST_DEBIT` are removed from `wallet.dto.WalletTransactionType` and
+   `wallet.entity.TransactionType`; every test uses the real Week 4 types.
+2. `src/test/resources/db/test-callbacks/afterMigrate.sql` and the `db/test-callbacks` Flyway location
+   in `src/test/resources/config/application.yml` are removed.
+3. ArchUnit R15, its fixtures (`archfixture.wallet…`) and `TestLedgerTypesStayInTestsTest` are removed or
+   replaced.
+4. `ProductionArtifactIT` fails if any packaged class or resource contains `TEST_CREDIT` or `TEST_DEBIT`.
+5. V6 and V7 stay unchanged; the new types arrive in a new migration (V8 or later) with the contract change.
+
+If the constants must be gone before the Week 3 merge, option B is the minimal refactor. It needs
+approval first. It would then be verified by the full `./mvnw verify` (`WalletServiceTest`,
+`WalletServiceIT`, `WalletConcurrencyIT`, `LedgerIntegrityIT`, `WalletLockTimeoutIT`,
+`WalletTransactionsIT`, the ArchUnit tests) and a class-file scan in `ProductionArtifactIT`.
+
+### 7.14 W3-11: final verification (pending review)
+
+Run locally on 2026-11-13 (Windows 11, JDK 21.0.12, Node 24.15, Docker Desktop):
+
+| Check | Result |
+|---|---|
+| `./mvnw -B -ntp verify` | **BUILD SUCCESS** (8 min): Surefire 280 tests, 0 failures, 1 skipped (`NeonProfileTest`: a local `.env.neon` exists; runs in CI); Failsafe 233 tests, 0 failures |
+| PostgreSQL 17.11 / 18.6 (`MigrationCompatibilityIT`) | 10 tests on each version, all green: V1–V7, backfill, re-run, failed backfill, ledger rules, read-only scripts at V5 and V7 |
+| JaCoCo check (`com.casino.wallet.service`, ≥ 80 % lines, ≥ 70 % branches) | Met: **100 %** lines (111/111), **100 %** branches (62/62), merged and unit-only. Other wallet packages 100 % lines; whole backend 98.2 % lines, 91.6 % branches |
+| Frontend `lint`, `typecheck`, `test`, `build` | All pass: 15 files / 132 tests; bundle unchanged by Week 3 |
+| `git diff --check` | Clean (committed and uncommitted changes) |
+| Real HTTP, throwaway local stack (packaged jar, new PostgreSQL 17.11 container, no `.env`) | Flyway V1–V7 applied; register → `201`; `GET /wallet` → `{"balance":1000,…}`; history → one `STARTING_BALANCE` entry, `nextCursor: null`; anonymous `401`; `POST` without CSRF `403`, with CSRF `405`; bootstrap admin `403 ACCESS_DENIED`; `limit=0`, `limit=0x10`, bad cursor `400`; admin has no wallet; `UPDATE`/`DELETE` of the ledger rejected by the trigger, `TEST_CREDIT` rejected by the production schema; no `ERROR` in the log |
+
+No Neon branch, Render service, Vercel project or environment variable was touched; no
+pre-existing Docker container was stopped or changed.
 
 ---
 
@@ -1141,8 +1500,9 @@ start-up, so a migration that only works on 17 would break the next staging depl
 
 ### 10.6 Coverage (P-W3-14)
 
-Plan §7 asks for at least 80 % unit-test coverage of the wallet and game engine. There is no coverage
-tool today. Proposal:
+Plan §7 asks for at least 80 % unit-test coverage of the wallet and game engine. **Implemented in
+W3-09 (§7.12):** JaCoCo 0.8.13, measured 100 % lines / 100 % branches for `com.casino.wallet.service`.
+Original proposal:
 - add `jacoco-maven-plugin` using the prepared `@{argLine}` (version from the Spring Boot parent's
   plugin management if it provides one, otherwise pinned to a current release; checked in W3-09);
 - merge unit and integration coverage; report in `target/site/jacoco`, uploaded with the CI test
@@ -1226,6 +1586,9 @@ Docker image, Render and Vercel configuration are unchanged.
   `main`, but the frontend is unchanged.
 
 **Rollout to Neon staging (separate task after Week 3, each step needs explicit approval):**
+*Detailed in W3-10 as the runbook [`infrastructure/wallet-rollout.md`](../../infrastructure/wallet-rollout.md)
+(preflight with `verify-migrations.sql`, restore point, Flyway behaviour, read-only checks, success
+and failure criteria, rollback options). The summary below is kept.*
 1. Read-only preflight with `infrastructure/neon/readonly-query.sh`: Flyway version is 5; counts of
    players and admins (expected wallets after V7).
 2. Restore point: a Neon branch/snapshot of `staging` before the deploy (creating it is a Neon
@@ -1262,13 +1625,14 @@ Neon production is not touched by any of this.
 | R12 | Lock waits pile up (slow Free instance) | Short transactions, lock timeout, reads without locks | AC-7.4, AC-7.5 |
 | R13 | Account deletion blocked by the ledger | Decision in Week 11 (§6.5, Q4); `RESTRICT` prevents accidental loss meanwhile | documented |
 | R14 | Weakening existing security | No change to CSRF, sessions, throttling; one added authorization rule | existing suites, `AccessRulesContractIT` |
+| R15 | Test-only ledger types used in production | Production schema rejects them; ArchUnit R15; `WalletEntryType` fails closed; no packaged resource names them; removal is a Week 4 gate (option D, §7.13) | `MigrationCompatibilityIT`, `ArchitectureRulesTest`, `ProductionArtifactIT`, `TestLedgerTypesStayInTestsTest` |
 
 ---
 
 ## 15. Definition of Done
 
 - All Must acceptance criteria (§3) are covered by passing automated tests, locally and in CI.
-- `openapi.yaml` 0.4.0 has no `planned` Week 3 operation; contract tests and ArchUnit R1–R14 green.
+- `openapi.yaml` 0.4.0 has no `planned` Week 3 operation; contract tests and ArchUnit R1–R15 green.
 - `./mvnw verify` (including PostgreSQL 18 compatibility) and the unchanged frontend checks pass
   without new warnings.
 - Coverage target met for `com.casino.wallet.service` (or the documented alternative, P-W3-14).
@@ -1296,3 +1660,4 @@ Neon production is not touched by any of this.
 | Q12 | Frontend wallet types/client in Week 3 | No; Week 5 with the first caller |
 | Q13 | Update stale Week 2 status lines (README, `week-02.md`) in W3-10 | Yes, status lines only; implementation plan v1.1 unchanged |
 | Q14 | Staging rollout of V6/V7 | After Week 3, separately approved, following §13 |
+| Q15 | Test-only ledger types `TEST_CREDIT`/`TEST_DEBIT` in production enums | **Resolved 2026-11-13:** option D (§7.13): kept until Week 4, removed together with the first real game types; Week 4 acceptance criterion and release gate |

@@ -153,7 +153,7 @@ class RegistrationIT {
             assertThat(new String(attribute, StandardCharsets.ISO_8859_1)).doesNotContain(PASSWORD, "{bcrypt}", hash);
         }
         // The session authenticates: an unknown protected path is 404 instead of 401.
-        assertThat(perform(get("/api/v1/wallet").cookie(new Cookie("SESSION", cookieValue(setCookie)))).getStatus())
+        assertThat(perform(get("/api/v1/unknown").cookie(new Cookie("SESSION", cookieValue(setCookie)))).getStatus())
                 .isEqualTo(404);
     }
 
@@ -182,6 +182,10 @@ class RegistrationIT {
         // AC-1.6: the response is the unchanged profile, without wallet data.
         assertThat(json(response).has("balance")).isFalse();
         assertThat(json(response).has("wallet")).isFalse();
+        // W3-07: the session created by the registration reads exactly this wallet.
+        MockHttpServletResponse read = perform(get("/api/v1/wallet").cookie(new Cookie("SESSION", cookieValue(sessionCookie(response)))));
+        assertThat(read.getStatus()).as(content(read)).isEqualTo(200);
+        assertThat(json(read).path("balance").asLong()).isEqualTo(1000);
     }
 
     @Test
@@ -417,7 +421,7 @@ class RegistrationIT {
             assertThat(cookie(browser, "XSRF-TOKEN")).isNull();
 
             // 3. Without a token the next unsafe request is rejected, also when signed in.
-            HttpResponse<String> withoutToken = send(client, "POST", "/api/v1/wallet", null, "{}");
+            HttpResponse<String> withoutToken = send(client, "POST", "/api/v1/unknown", null, "{}");
             assertThat(withoutToken.statusCode()).isEqualTo(403);
             assertThat(Json31.mapper().readTree(withoutToken.body()).path("code").asText()).isEqualTo("CSRF_TOKEN_INVALID");
 
@@ -428,7 +432,7 @@ class RegistrationIT {
 
             // 5. The new token and the persisted session work together: CSRF passes and the user is
             // authenticated, so an unknown protected path is 404 (not 403 or 401).
-            HttpResponse<String> signedIn = send(client, "POST", "/api/v1/wallet", signedInToken, "{}");
+            HttpResponse<String> signedIn = send(client, "POST", "/api/v1/unknown", signedInToken, "{}");
             assertThat(signedIn.statusCode()).as(signedIn.body()).isEqualTo(404);
         }
     }
@@ -441,7 +445,7 @@ class RegistrationIT {
         String session = cookieValue(sessionCookie(perform(register(body("alice@example.com", PASSWORD, "Alice", true),
                 "192.0.2.15"))));
 
-        MockHttpServletResponse withOldToken = perform(post("/api/v1/wallet").contentType(MediaType.APPLICATION_JSON).content("{}")
+        MockHttpServletResponse withOldToken = perform(post("/api/v1/unknown").contentType(MediaType.APPLICATION_JSON).content("{}")
                 .cookie(new Cookie("SESSION", session)).with(csrf));
 
         assertThat(withOldToken.getStatus()).isEqualTo(404);

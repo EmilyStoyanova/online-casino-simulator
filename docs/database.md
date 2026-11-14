@@ -18,7 +18,7 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
   - Business invariants as database constraints where possible (`CHECK (balance >= 0)`, unique
     idempotency keys) in addition to application checks
 
-## Applied migrations
+## Migrations
 
 | Version | Description |
 |---|---|
@@ -27,11 +27,22 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 | V3 | `users`: accounts (UUID id, normalised unique email, encoded password hash, `role`, `status`, 18+ confirmation, timestamps, `version`) with `set_updated_at()` trigger |
 | V4 | `auth_throttle`: fixed-window counters for login/registration throttling; keys are `<scope>:<HMAC-SHA-256 hex>` with the secret `APP_SECURITY_THROTTLE_SECRET` (no raw email or IP, enforced by a `CHECK`); rows are deleted hourly a day after their window ended |
 | V5 | `interests`: catalogue of educational interests (stable upper-case `code` as key, `sort_order`, `active`), seeded with 8 fixed entries; `user_interests`: each user's selection, replacing the plan's use of `user_preferences` for interests (primary key `(user_id, interest_code)`, cascade on user deletion, interests referenced by users cannot be deleted, only deactivated) |
+| V6 | `wallets` (one per player, balance `bigint` 0 … 2⁵³ − 1, owner fixed by trigger) and `wallet_transactions` (append-only ledger: `UPDATE`/`DELETE` rejected by trigger, `ON DELETE RESTRICT`, idempotency key unique per wallet, type list `STARTING_BALANCE`). Details: [Wallets and ledger](#wallets-and-ledger-v6-v7) |
+| V7 | Data only: every `PLAYER` (active or disabled) that has no wallet gets one with **1,000** coins and one `STARTING_BALANCE` entry (key `starting-balance`). Admins get none; existing wallets and entries are untouched. Details: [V7](#v7-wallets-for-existing-players) |
 
 Flyway records every applied migration in `flyway_schema_history`. `GET /api/v1/system/status`
-reports the latest version as `schemaVersion` (`5`).
+reports the latest version as `schemaVersion`.
 
-## Current schema (after V5)
+**Where each version is applied:**
+
+| Database | Schema version |
+|---|---|
+| Local Docker database and Testcontainers, branch `feature/week-03-wallet` | **V7** (Flyway applies V6 and V7 at the first start of this branch) |
+| `main` | V5 (V6 and V7 arrive with the Week 3 merge) |
+| Neon `staging` (used by Render staging) | **V5**: V6 and V7 have **not** been applied. They run automatically at the first Render start of a build that contains them, so that deploy is a separately approved step: [Week 3 rollout runbook](../infrastructure/wallet-rollout.md) |
+| Neon `production` | Empty and untouched until the Week 12 release |
+
+## Current schema (after V7)
 
 ```mermaid
 erDiagram
@@ -39,9 +50,95 @@ erDiagram
     interests ||--o{ user_interests : "is selected (delete rejected)"
     spring_session ||--o{ spring_session_attributes : "has (ON DELETE CASCADE)"
     users ||..o{ spring_session : "principal_name = users.id (no foreign key)"
+    users ||--o| wallets : "owns, PLAYER only (ON DELETE RESTRICT)"
+    wallets ||--o{ wallet_transactions : "ledger (ON DELETE RESTRICT, append-only)"
 ```
 
 `auth_throttle` stands alone: its keys are HMACs, so it does not reference `users`.
+
+### Wallets and ledger (V6, V7)
+
+**`wallets`** — one per player; the current balance.
+
+| Column | Notes |
+|---|---|
+| `id` | `UUID`, `gen_random_uuid()` |
+| `user_id` | `UUID`, unique (`uq_wallets_user_id`), `fk_wallets_user` → `users(id)` **`ON DELETE RESTRICT`**: an account with a wallet cannot be deleted (account deletion: Week 11, `docs/plans/week-03.md` §6.5). Cannot change (`trg_wallets_owner_fixed`) |
+| `balance` | `BIGINT`, `ck_wallets_balance`: 0 … 9007199254740991 (2⁵³ − 1, exact in JavaScript) |
+| `created_at`, `updated_at` | `updated_at` by `trg_wallets_updated_at` (`set_updated_at()`) |
+
+**`wallet_transactions`** — the append-only ledger; one row per balance change.
+
+| Column | Notes |
+|---|---|
+| `id` | `BIGINT GENERATED ALWAYS AS IDENTITY`. Entries of one wallet are inserted only while its row is locked, so their ids increase in commit order per wallet: history order and keyset pagination. Rolled-back inserts leave gaps |
+| `wallet_id` | `fk_wallet_transactions_wallet` → `wallets(id)` `ON DELETE RESTRICT` |
+| `type` | `VARCHAR(30)`, `ck_wallet_transactions_type`: `STARTING_BALANCE` only (each week adds its types in its own migration) |
+| `amount` | `BIGINT`, signed (credit > 0, debit < 0), never 0, within ± (2⁵³ − 1) (`ck_wallet_transactions_amount`); `STARTING_BALANCE` must be positive (`ck_wallet_transactions_direction`) |
+| `balance_after` | `BIGINT`, 0 … 2⁵³ − 1 (`ck_wallet_transactions_balance`): the balance right after this entry |
+| `idempotency_key` | `VARCHAR(100)`, `^[a-z0-9][a-z0-9:._-]{0,99}$` (`ck_wallet_transactions_key`), unique per wallet (`uq_wallet_transactions_idempotency`). The starting entry always uses `starting-balance` |
+| `reference` | optional `VARCHAR(100)` (e.g. a game round, Week 4); never returned by the API |
+| `created_at` | insert time |
+
+Index `ix_wallet_transactions_wallet_id_id (wallet_id, id DESC)` serves the history pages.
+
+**Triggers (immutability):**
+- `trg_wallet_transactions_append_only` (`reject_ledger_change()`): `BEFORE UPDATE OR DELETE` on
+  the ledger raises SQLSTATE `23000` "wallet_transactions is append-only: … rejected". Corrections
+  are new entries, never edits. `TRUNCATE` is not blocked; only the guarded test cleanup uses it
+  (G1–G5, `docs/plans/week-03.md` §6.5).
+- `trg_wallets_owner_fixed` (`reject_wallet_owner_change()`): a wallet never changes owner.
+
+**Invariants** (enforced by `WalletService` under the row lock and by the constraints above; tested
+by `LedgerIntegrityIT`; checked read-only by
+[`verify-wallets.sql`](../infrastructure/neon/verify-wallets.sql)):
+- balance = Σ `amount` of the wallet's entries = `balance_after` of its newest entry;
+- every `balance_after` is the running sum of the wallet's amounts in id order;
+- a wallet's first entry is its only `STARTING_BALANCE` entry (key `starting-balance`);
+- at most one wallet per user, and only `PLAYER` accounts have one (the application ensures the
+  role; a `CHECK` cannot read `users.role`).
+
+**How rows are written:** only `WalletService` writes, one transaction per operation:
+lock the wallet row (`SELECT … FOR NO KEY UPDATE`, at most `APP_WALLET_LOCK_TIMEOUT`, default 5 s),
+look up the idempotency key, check the rules, append one entry and set the balance
+([architecture.md](architecture.md#wallet-module-week-3)). Registration opens the wallet in the
+registration transaction (`WalletOpener`).
+
+### V7: wallets for existing players
+
+`V7__backfill_existing_player_wallets.sql` gives every player who existed before wallets did what
+registration gives since W3-05:
+
+```sql
+WITH new_wallets AS (
+    INSERT INTO wallets (user_id, balance)
+    SELECT u.id, 1000 FROM users u
+    WHERE u.role = 'PLAYER' AND NOT EXISTS (SELECT 1 FROM wallets w WHERE w.user_id = u.id)
+    ON CONFLICT (user_id) DO NOTHING
+    RETURNING id
+)
+INSERT INTO wallet_transactions (wallet_id, type, amount, balance_after, idempotency_key)
+SELECT id, 'STARTING_BALANCE', 1000, 1000, 'starting-balance' FROM new_wallets;
+```
+
+- **Who:** `role = 'PLAYER'`, active or disabled, without a wallet. Admins never get one.
+- **One statement:** the entries are inserted for exactly the wallets this statement creates, so a
+  wallet is never left without its entry and an existing wallet is **never credited again**.
+- **Amount:** the literal `1000`, independent of `APP_WALLET_STARTING_BALANCE`, so the result is
+  the same in every database.
+- **Runs once per database.** V7 is a versioned migration: Flyway applies it once, at the first
+  start that contains it, for the accounts that exist at that moment. Players registered later get
+  their wallet from the registration listener (`WalletOpener`), never from V7.
+- **Idempotent in itself** (`NOT EXISTS` plus `ON CONFLICT (user_id) DO NOTHING`): executed again by
+  hand, it never touches an existing wallet or adds a second starting entry.
+- **No constraint or trigger is disabled or changed.** Flyway runs each migration in its own
+  transaction. If V7 fails, no row of it remains and it is not recorded, so the next start runs it
+  again (for the first time). V6 and V7 are separate transactions: a failure in V7 leaves V6
+  applied.
+- `created_at` of the backfilled rows is the migration time, not the registration time.
+- Tested on PostgreSQL 17.11 and 18.6 (`MigrationCompatibilityIT`): from a V5 schema with accounts
+  (the current staging state), from V6 with an existing wallet, a re-run, and a fault injected into
+  the ledger insert.
 
 ### Users and roles (`users`, V3)
 
@@ -97,6 +194,10 @@ Registration always creates a `PLAYER`. An `ADMIN` is created only by the start-
 
 ## Planned tables (from the implementation plan)
 
+`wallets` and `wallet_transactions` (Week 3) are implemented: [Wallets and ledger](#wallets-and-ledger-v6-v7).
+The plan's "row version (optimistic locking)" for `wallets` was replaced by a pessimistic row lock
+(`docs/plans/week-03.md` §7.4).
+
 The Week 2 design is in [`docs/plans/week-02.md`](plans/week-02.md) §6. Deviations from the
 original plan are listed in
 [`docs/proposals/0001-implementation-plan-alignment.md`](proposals/0001-implementation-plan-alignment.md).
@@ -104,8 +205,6 @@ original plan are listed in
 | Table | Purpose | Week |
 |---|---|---|
 | `user_preferences` | UI preferences (sound, reduced motion, …) | 6 |
-| `wallets` | Current virtual balance and row version (optimistic locking) | 3 |
-| `wallet_transactions` | Immutable ledger of balance changes, unique idempotency key | 3 |
 | `roulette_rounds` | Rounds, winning number, timestamps | 4 |
 | `roulette_bets` | Bet type, amount, payout | 4 |
 | `learning_modules` | Educational materials and categories | 7 |
@@ -118,10 +217,12 @@ original plan are listed in
 
 ## Integrity requirements
 
-1. A user cannot spend more virtual coins than they own.
+1. A user cannot spend more virtual coins than they own. *Week 3:* `ck_wallets_balance` and
+   `ck_wallet_transactions_balance` (never below 0) plus `INSUFFICIENT_FUNDS` under the row lock.
 2. A game round cannot be processed or paid out twice.
 3. An educational reward cannot be granted twice for the same eligible completion.
-4. Completed transactions are durable and traceable.
+4. Completed transactions are durable and traceable. *Week 3:* one append-only ledger entry per
+   balance change, with a unique idempotency key per wallet.
 5. Only personal data that is strictly necessary is stored.
 
 ## Throttling secret
@@ -223,19 +324,21 @@ accounts, passwords or sessions go there.
 | Connection pool | 10 connections, 5 s timeout | 5 connections, 15 s timeout (compute wake-up) |
 | Configuration | `application.yml` | `application-neon.yml` (overrides only the data source) |
 
-**Current state (2026-11-07):**
+**Current state:**
 
 | Branch | State |
 |---|---|
-| `staging` | V1–V5 applied with the procedure below: 7 tables, 8 seeded interests, no accounts or sessions |
-| `production` | Empty and unused until the deployment (Week 12) |
+| `staging` | **V5.** V1–V5 were applied on 2026-11-07 with the procedure below (7 tables, 8 seeded interests, then no accounts or sessions). Since then the Render staging backend uses it with registration closed. V6/V7 are **not** applied: they need the separately approved [Week 3 rollout](../infrastructure/wallet-rollout.md), which starts with a read-only count of the accounts that exist now |
+| `production` | Empty, unused and untouched until the release (Week 12) |
 
 **Version difference:** Neon runs PostgreSQL 18.6, while the local database and the Testcontainers
 integration tests use 17.11.
 - Flyway 12.4.0 supports major versions up to 18, and the migrations use only features available
   in both versions.
-- Integration tests still do not prove behaviour on 18. Aligning both on one major version is open
-  for the deployment review (Week 12).
+- Since Week 3 `MigrationCompatibilityIT` applies every migration on **both** 17.11 and 18.6 and
+  checks the wallet constraints, triggers, V7 and the read-only scripts there. The application
+  integration tests still run on 17.11 only. Aligning both on one major version is open for the
+  deployment review (Week 12).
 
 To check which branch `.env.neon` points to, compare `neon.branch_id` with the branch ID on the
 branch's page in the Console:
@@ -295,7 +398,12 @@ jdbc:postgresql://${NEON_DB_HOST}/${NEON_DB_NAME}?sslmode=verify-full&sslfactory
    grep -c '^NEON_DB_[A-Z]*=.' .env.neon   # 4 = all four values set (prints only the count)
    ```
 
-### Migration procedure
+### Migration procedure (first migration, V1–V5, done on staging 2026-11-07)
+
+This is the procedure for an **empty** database, kept for a new branch. Later versions on a branch
+that already has a schema (staging: V6 and V7) follow the
+[Week 3 rollout runbook](../infrastructure/wallet-rollout.md) instead; there Render applies them
+at start-up.
 
 Flyway applies migrations automatically when the backend starts with the profile, so the backend is
 started against Neon only after the checks below.
@@ -317,7 +425,7 @@ started against Neon only after the checks below.
    - `flyway_history_exists = f` and `can_create_in_public = t`.
 
    **Stop if anything else appears**: it is the wrong branch or database.
-2. **What will run:** V1–V5 from [Applied migrations](#applied-migrations), in this order:
+2. **What will run:** V1–V5 from [Migrations](#migrations), in this order:
    - V1: `set_updated_at()`;
    - V2: `spring_session` and `spring_session_attributes`;
    - V3: `users`;
@@ -349,11 +457,16 @@ started against Neon only after the checks below.
    bash infrastructure/neon/readonly-query.sh < infrastructure/neon/verify-migrations.sql
    ```
 
-   Expected:
-   - versions 1–5, each with `success = t`;
-   - the tables `auth_throttle`, `flyway_schema_history`, `interests`, `spring_session`,
-     `spring_session_attributes`, `user_interests` and `users`;
-   - 8 interests and no users, sessions or throttle rows.
+   Expected right after this first migration:
+   - `neon_branch_id` = the staging branch ID from Neon Console;
+   - versions 1–5, each with `success = t`; `schema_state` = `V5: before the Week 3 rollout`;
+   - every expected table `present = t` (`auth_throttle`, `flyway_schema_history`, `interests`,
+     `spring_session`, `spring_session_attributes`, `user_interests`, `users`), `unexpected_tables` 0;
+   - 8 interests, no players, admins, sessions or throttle rows; `wallets`/`ledger_entries` empty.
+
+   The same script recognises V7 after the [Week 3 rollout](../infrastructure/wallet-rollout.md)
+   (`schema_state` = `V7: Week 3 wallet schema`). It is tested on PostgreSQL 17 and 18 at both states
+   (`MigrationCompatibilityIT`).
 5. **Later starts** validate the checksums of the applied migrations and apply only new ones.
 
 ### Browsing the tables in Neon Console

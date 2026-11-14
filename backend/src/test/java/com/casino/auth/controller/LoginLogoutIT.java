@@ -53,7 +53,7 @@ class LoginLogoutIT {
 
     private static final String LOGIN = "/api/v1/auth/login";
     private static final String LOGOUT = "/api/v1/auth/logout";
-    private static final String PROTECTED = "/api/v1/wallet";
+    private static final String PROTECTED = "/api/v1/unknown";
     private static final String PASSWORD = "correct-horse-battery-9c1e";
     private static final OpenApiContract CONTRACT = OpenApiContract.load();
 
