@@ -38,7 +38,7 @@ Root package `com.casino`. Each direct sub-package is a module:
 | `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 | implemented |
 | `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 | implemented |
 | `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented, on `main`, deployed to staging |
-| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 | in progress: rules and secure wheel (W4-04); rounds and endpoint follow ([`docs/plans/week-04.md`](plans/week-04.md)) |
+| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 | in progress: rules, secure wheel, round persistence, atomic spin service (W4-04 to W4-06); endpoint follows (W4-07) ([`docs/plans/week-04.md`](plans/week-04.md)) |
 | `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 | planned |
 | `responsibleplay` | Session limits, breaks, self-exclusion, play-time tracking | 9 | planned |
 | `admin` | Administrative use cases under `/api/v1/admin/**` | 10 | planned |
@@ -109,7 +109,7 @@ API: [api.md](api.md#wallet-get-apiv1wallet).
 | Package | Classes | Responsibility |
 |---|---|---|
 | `controller` | `WalletController` | `GET /api/v1/wallet`, `GET /api/v1/wallet/transactions`; the user is the session principal, never a request value |
-| `service` | `WalletService` | Public API of the module: `getWallet`, `listTransactions`, `credit`, `debit`, `openWallet`, `getBalance` |
+| `service` | `WalletService` | Public API of the module: `getWallet`, `listTransactions`, `credit`, `debit`, `openWallet`, `getBalance`, `lockWallet` (W4-06: the row lock for the rest of the caller's transaction, `MANDATORY`) |
 | | `WalletOpener` | `@EventListener` for `user.dto.UserRegistered` |
 | | `TransactionCursor` | Opaque cursor of the history pages |
 | `repository` | `WalletRepository` (+ `WalletLocking`), `WalletTransactionRepository` | Spring Data JPA; no delete methods |
@@ -201,16 +201,21 @@ at least 80 % lines and 70 % branches. Measured in W3-09: 100 % lines (111/111) 
 
 ### Game module (Week 4, in progress)
 
-Design: [`docs/plans/week-04.md`](plans/week-04.md). Implemented so far (W4-04):
+Design: [`docs/plans/week-04.md`](plans/week-04.md). Implemented so far (W4-04 to W4-06):
 
 | Package | Classes | Responsibility |
 |---|---|---|
-| `model` | `RouletteBetCategory`, `RouletteBetColor`, `RouletteParity`, `RouletteRange`, `RouletteDozen`, `RouletteNumberColor`; `RouletteSelection` (sealed: one record per category), `RouletteWager`, `RouletteSettlement`; `RouletteRules` | European roulette rules as pure functions: colors, which selection wins, payouts (stake × 36/2/3 on a win, 0 on a loss), settlement of a spin; integer arithmetic with overflow checks |
+| `model` | `RouletteBetCategory`, `RouletteBetColor`, `RouletteParity`, `RouletteRange`, `RouletteDozen`, `RouletteNumberColor`; `RouletteSelection` (sealed: one record per category), `RouletteWager`, `RouletteSettlement`; `RouletteRules`; `PlayedRound`, `SettledWager` (the result of a spin) | European roulette rules as pure functions: colors, which selection wins, payouts (stake × 36/2/3 on a win, 0 on a loss), settlement of a spin; integer arithmetic with overflow checks |
 | `service` | `RouletteWheel`, `SecureRandomRouletteWheel` | The winning number: `SecureRandom.nextInt(37)`; the only wheel bean |
+| | `RouletteService` (W4-06) | `spin`: one transaction — validate, `lockWallet`, idempotency lookup (Q17), debit the stake, draw, settle, credit the payout, store the round; the only writer of rounds |
+| `entity` | `RouletteRound` (`Persistable`), `RouletteBet` (W4-05) | `@Immutable` mapping of V9; the player and the ledger entries by id only, no relationship into `user` or `wallet`; bets owned by the round, in request order |
+| `repository` | `RouletteRoundRepository` (W4-05) | `save`, `findByUserIdAndRequestId`; no update or delete |
 
 Every bet has the expected net result −1/37 of its amount (house edge 1/37 ≈ 2.7027 %, return to
-player 36/37 ≈ 97.2973 %), proven exactly by `RouletteRulesTest`. Rounds, their persistence, the
-wallet settlement and `POST /api/v1/games/roulette/spins` follow in W4-05 to W4-07.
+player 36/37 ≈ 97.2973 %), proven exactly by `RouletteRulesTest`. A round is atomic: the stake, the
+payout, the round and its bets commit in one transaction or not at all, and a repeated request with the
+same key and content returns the stored round without touching the wallet. `POST
+/api/v1/games/roulette/spins` follows in W4-07.
 
 ### API design (design-first)
 
