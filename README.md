@@ -25,9 +25,9 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 |---|---|---|---|
 | 1 — Foundation | 1 | Repository, tooling, database, CI, documentation | ✅ Done |
 | | 2 | Authentication, users, roles, profile & interests | ✅ Done |
-| Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | ✅ Done: Neon `staging` at V5; Render backend and Vercel frontend deployed and verified (registration closed) |
-| 2 — Virtual currency & game logic | 3 | Virtual wallet and immutable ledger | 🚧 Implemented and verified on `feature/week-03-wallet` (W3-01 … W3-11), in review; **not deployed** (schema V7 locally, V5 on staging) |
-| | 4 | Roulette engine | Planned |
+| Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | ✅ Done: Render backend and Vercel frontend deployed and verified (registration closed); Neon `staging` now at V7 |
+| 2 — Virtual currency & game logic | 3 | Virtual wallet and immutable ledger | ✅ Done: merged into `main` (PR #9) and deployed to staging; Neon `staging` migrated V5 → V7 and verified ([rollout record](infrastructure/wallet-rollout.md#rollout-record-2026-11-15)) |
+| | 4 | Roulette engine | 🚧 In progress on `feature/week-04-roulette`, local only ([Week 4 plan](docs/plans/week-04.md)): plan, contract 0.5.0, Flyway V8 ledger types, roulette rules and secure wheel |
 | 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | Planned |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
 | 5 — Statistics & responsible play | 9–10 | Dashboard, limits, admin panel | Planned |
@@ -50,7 +50,7 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
   educational interests.
 - **Platform status:** a page and an endpoint showing backend, database and schema version.
 
-On the branch `feature/week-03-wallet` (Week 3, in review, not deployed yet):
+Week 3 (on `main`, deployed to staging):
 
 - **Virtual wallet:** every player gets a wallet with 1,000 virtual coins at registration, in the
   same transaction as the account; players who existed before receive theirs from a one-time
@@ -64,10 +64,10 @@ On the branch `feature/week-03-wallet` (Week 3, in review, not deployed yet):
 ### Not implemented yet
 
 Roulette and every other game, the wallet UI, learning modules, quizzes, rewards, statistics, play
-limits and the admin panel are **planned** (see the table above). Staging runs `main` (Weeks 1–2):
-the backend on Render with the Neon `staging` branch and closed registration, the frontend on Vercel
-([runbook](infrastructure/vercel/README.md)). The wallet reaches staging only through the separately
-approved [Week 3 rollout](infrastructure/wallet-rollout.md). Nothing handles game rounds yet.
+limits and the admin panel are **planned** (see the table above). Staging runs `main` (Weeks 1–3):
+the backend on Render with the Neon `staging` branch (schema V7) and closed registration, the
+frontend on Vercel ([runbook](infrastructure/vercel/README.md)). The wallet reached staging through
+the approved [Week 3 rollout](infrastructure/wallet-rollout.md). Nothing handles game rounds yet.
 
 ## Architecture at a glance
 
@@ -450,10 +450,11 @@ Limitations:
 Next milestones:
 
 - **Week 3:** virtual wallet with an immutable ledger and a starting balance on registration —
-  implemented and verified on `feature/week-03-wallet` (W3-01 … W3-11). Remaining: the pull request
-  and, separately approved, the [staging rollout](infrastructure/wallet-rollout.md).
+  done: merged (PR #9), deployed to staging and verified
+  ([rollout record](infrastructure/wallet-rollout.md#rollout-record-2026-11-15)).
 - **Week 4:** server-side European roulette engine (stakes and payouts through the wallet); it also
   removes the test-only ledger types `TEST_CREDIT`/`TEST_DEBIT` (release gate, Week 3 plan §7.13).
+  Plan: [`docs/plans/week-04.md`](docs/plans/week-04.md).
 - **Week 5:** the balance in the user interface.
 
 ## Documentation
@@ -463,7 +464,8 @@ Next milestones:
 - [Database](docs/database.md) — migrations (V1–V7), tables incl. wallets and ledger, Neon, session revocation runbook
 - [User scenarios](docs/user-scenarios.md)
 - [Architecture decision records](docs/decisions/)
-- [Week 2 implementation plan](docs/plans/week-02.md), [Week 3 implementation plan](docs/plans/week-03.md)
+- [Week 2 implementation plan](docs/plans/week-02.md), [Week 3 implementation plan](docs/plans/week-03.md),
+  [Week 4 implementation plan](docs/plans/week-04.md)
 - Deployment: [Render](infrastructure/render/README.md), [Vercel](infrastructure/vercel/README.md),
   [Week 3 wallet rollout](infrastructure/wallet-rollout.md)
 

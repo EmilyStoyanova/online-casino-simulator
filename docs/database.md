@@ -29,6 +29,7 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 | V5 | `interests`: catalogue of educational interests (stable upper-case `code` as key, `sort_order`, `active`), seeded with 8 fixed entries; `user_interests`: each user's selection, replacing the plan's use of `user_preferences` for interests (primary key `(user_id, interest_code)`, cascade on user deletion, interests referenced by users cannot be deleted, only deactivated) |
 | V6 | `wallets` (one per player, balance `bigint` 0 … 2⁵³ − 1, owner fixed by trigger) and `wallet_transactions` (append-only ledger: `UPDATE`/`DELETE` rejected by trigger, `ON DELETE RESTRICT`, idempotency key unique per wallet, type list `STARTING_BALANCE`). Details: [Wallets and ledger](#wallets-and-ledger-v6-v7) |
 | V7 | Data only: every `PLAYER` (active or disabled) that has no wallet gets one with **1,000** coins and one `STARTING_BALANCE` entry (key `starting-balance`). Admins get none; existing wallets and entries are untouched. Details: [V7](#v7-wallets-for-existing-players) |
+| V8 | Week 4 ledger types: replaces `ck_wallet_transactions_type` (now `STARTING_BALANCE`, `ROULETTE_STAKE`, `ROULETTE_PAYOUT`) and `ck_wallet_transactions_direction` (stake < 0, payout and starting balance > 0). No row, table, key or trigger changes. Details: [V8](#v8-roulette-ledger-types) |
 
 Flyway records every applied migration in `flyway_schema_history`. `GET /api/v1/system/status`
 reports the latest version as `schemaVersion`.
@@ -37,12 +38,12 @@ reports the latest version as `schemaVersion`.
 
 | Database | Schema version |
 |---|---|
-| Local Docker database and Testcontainers, branch `feature/week-03-wallet` | **V7** (Flyway applies V6 and V7 at the first start of this branch) |
-| `main` | V5 (V6 and V7 arrive with the Week 3 merge) |
-| Neon `staging` (used by Render staging) | **V5**: V6 and V7 have **not** been applied. They run automatically at the first Render start of a build that contains them, so that deploy is a separately approved step: [Week 3 rollout runbook](../infrastructure/wallet-rollout.md) |
+| Testcontainers, and a local Docker database started from `feature/week-04-roulette` | **V8** (Flyway applies V8 at the first start of a build that contains it) |
+| `main` | V7 (since the Week 3 merge, PR #9) |
+| Neon `staging` (used by Render staging) | **V7** since 2026-11-15: Render applied V6 and V7 at the start of the first Week 3 deploy, following the approved [Week 3 rollout runbook](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15). The V5 state is preserved in the Neon branch `staging-before-week-03`. **V8 is not applied**: the first Render start of a build that contains it would apply it automatically, so that deploy needs its own approval (`docs/plans/week-04.md` §15) |
 | Neon `production` | Empty and untouched until the Week 12 release |
 
-## Current schema (after V7)
+## Current schema (after V8)
 
 ```mermaid
 erDiagram
@@ -73,8 +74,8 @@ erDiagram
 |---|---|
 | `id` | `BIGINT GENERATED ALWAYS AS IDENTITY`. Entries of one wallet are inserted only while its row is locked, so their ids increase in commit order per wallet: history order and keyset pagination. Rolled-back inserts leave gaps |
 | `wallet_id` | `fk_wallet_transactions_wallet` → `wallets(id)` `ON DELETE RESTRICT` |
-| `type` | `VARCHAR(30)`, `ck_wallet_transactions_type`: `STARTING_BALANCE` only (each week adds its types in its own migration) |
-| `amount` | `BIGINT`, signed (credit > 0, debit < 0), never 0, within ± (2⁵³ − 1) (`ck_wallet_transactions_amount`); `STARTING_BALANCE` must be positive (`ck_wallet_transactions_direction`) |
+| `type` | `VARCHAR(30)`, `ck_wallet_transactions_type`: `STARTING_BALANCE`, `ROULETTE_STAKE`, `ROULETTE_PAYOUT` (since V8; V6 allowed `STARTING_BALANCE` only; each week adds its types in its own migration) |
+| `amount` | `BIGINT`, signed (credit > 0, debit < 0), never 0, within ± (2⁵³ − 1) (`ck_wallet_transactions_amount`); `STARTING_BALANCE` and `ROULETTE_PAYOUT` positive, `ROULETTE_STAKE` negative (`ck_wallet_transactions_direction`, V8) |
 | `balance_after` | `BIGINT`, 0 … 2⁵³ − 1 (`ck_wallet_transactions_balance`): the balance right after this entry |
 | `idempotency_key` | `VARCHAR(100)`, `^[a-z0-9][a-z0-9:._-]{0,99}$` (`ck_wallet_transactions_key`), unique per wallet (`uq_wallet_transactions_idempotency`). The starting entry always uses `starting-balance` |
 | `reference` | optional `VARCHAR(100)` (e.g. a game round, Week 4); never returned by the API |
@@ -137,8 +138,45 @@ SELECT id, 'STARTING_BALANCE', 1000, 1000, 'starting-balance' FROM new_wallets;
   applied.
 - `created_at` of the backfilled rows is the migration time, not the registration time.
 - Tested on PostgreSQL 17.11 and 18.6 (`MigrationCompatibilityIT`): from a V5 schema with accounts
-  (the current staging state), from V6 with an existing wallet, a re-run, and a fault injected into
+  (the staging state before the Week 3 rollout), from V6 with an existing wallet, a re-run, and a fault injected into
   the ledger insert.
+
+### V8: roulette ledger types
+
+`V8__add_roulette_wallet_transaction_types.sql` (W4-03) prepares the ledger for roulette rounds
+(`docs/plans/week-04.md` §5.2):
+
+```sql
+ALTER TABLE wallet_transactions
+    DROP CONSTRAINT ck_wallet_transactions_type,
+    DROP CONSTRAINT ck_wallet_transactions_direction,
+    ADD CONSTRAINT ck_wallet_transactions_type
+        CHECK (type IN ('STARTING_BALANCE', 'ROULETTE_STAKE', 'ROULETTE_PAYOUT')),
+    ADD CONSTRAINT ck_wallet_transactions_direction
+        CHECK ((type NOT IN ('STARTING_BALANCE', 'ROULETTE_PAYOUT') OR amount > 0)
+           AND (type <> 'ROULETTE_STAKE' OR amount < 0));
+```
+
+- **Only these two constraints change; their names stay.** Every row, wallet, balance and ledger
+  entry stays as it is, and so do the amount and balance bounds, the key format, the unique key per
+  wallet, the foreign keys and the three triggers (append-only ledger, fixed owner, `updated_at`).
+  Existing rows (`STARTING_BALANCE`, amount > 0) satisfy the new rules.
+- The type list is the only place that names the allowed types; the direction rule constrains the
+  sign of the listed types only, so an unknown type is reported as `ck_wallet_transactions_type`
+  (PostgreSQL checks constraints in name order).
+- One `ALTER TABLE`, one Flyway transaction: if it fails, the V6 rules stay in place and V8 is not
+  recorded. Adding the checks validates the existing rows under a short `ACCESS EXCLUSIVE` lock
+  (milliseconds for the few ledger rows on staging).
+- The Week 3 test-only types (`TEST_CREDIT`/`TEST_DEBIT`) were never allowed by the production schema
+  and still are not; their test-only callback was removed with them, so tests now run on exactly the
+  production schema.
+- Tested on PostgreSQL 17.11 and 18.6 (`MigrationCompatibilityIT`): a clean V1–V8 migration, V7 → V8
+  on a database with players and wallets (rows byte-for-byte unchanged, only the two constraint
+  definitions differ, triggers identical), the sign and zero rules, a failed V8 that leaves V7 intact
+  and applies on the next start, and the read-only scripts at V8.
+- Week 3 code is compatible with a V8 schema (it never writes the new types). Once roulette rounds
+  exist, Week 3 code could not read their ledger entries; see the rollback limits in
+  `docs/plans/week-04.md` §15.3.
 
 ### Users and roles (`users`, V3)
 
@@ -328,7 +366,8 @@ accounts, passwords or sessions go there.
 
 | Branch | State |
 |---|---|
-| `staging` | **V5.** V1–V5 were applied on 2026-11-07 with the procedure below (7 tables, 8 seeded interests, then no accounts or sessions). Since then the Render staging backend uses it with registration closed. V6/V7 are **not** applied: they need the separately approved [Week 3 rollout](../infrastructure/wallet-rollout.md), which starts with a read-only count of the accounts that exist now |
+| `staging` | **V7.** V1–V5 were applied on 2026-11-07 with the procedure below (7 tables, 8 seeded interests, then no accounts or sessions); since then the Render staging backend uses it with registration closed. V6 and V7 were applied on 2026-11-15 by the Render start-up of the first Week 3 deploy ([Week 3 rollout record](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15)): the one existing `PLAYER` received a wallet with 1,000 coins and one `STARTING_BALANCE` entry; the read-only integrity checks reported zero violations |
+| `staging-before-week-03` | Restore point of `staging` at V5, created before the Week 3 deploy. Not used by any application; **kept** (deleting it needs a separate approval) |
 | `production` | Empty, unused and untouched until the release (Week 12) |
 
 **Version difference:** Neon runs PostgreSQL 18.6, while the local database and the Testcontainers
@@ -465,7 +504,8 @@ started against Neon only after the checks below.
    - 8 interests, no players, admins, sessions or throttle rows; `wallets`/`ledger_entries` empty.
 
    The same script recognises V7 after the [Week 3 rollout](../infrastructure/wallet-rollout.md)
-   (`schema_state` = `V7: Week 3 wallet schema`). It is tested on PostgreSQL 17 and 18 at both states
+   (`schema_state` = `V7: Week 3 wallet schema`) and V8 (`V8: Week 4 ledger types`). It is tested on
+   PostgreSQL 17 and 18 at these states
    (`MigrationCompatibilityIT`).
 5. **Later starts** validate the checksums of the applied migrations and apply only new ones.
 

@@ -37,8 +37,8 @@ Root package `com.casino`. Each direct sub-package is a module:
 | `common` | Shared kernel: web/OpenAPI config, clock, platform status, API error format | 1 | implemented |
 | `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 | implemented |
 | `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 | implemented |
-| `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented on `feature/week-03-wallet`, in review, not deployed |
-| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 | planned |
+| `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented, on `main`, deployed to staging |
+| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 | in progress: rules and secure wheel (W4-04); rounds and endpoint follow ([`docs/plans/week-04.md`](plans/week-04.md)) |
 | `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 | planned |
 | `responsibleplay` | Session limits, breaks, self-exclusion, play-time tracking | 9 | planned |
 | `admin` | Administrative use cases under `/api/v1/admin/**` | 10 | planned |
@@ -51,13 +51,18 @@ Root package `com.casino`. Each direct sub-package is a module:
 - Expected direction: `auth → user`, **`wallet → user`** (only `user.dto.UserRegistered`), `game → wallet`,
   `game → responsibleplay`, `learning → wallet`, `admin → (learning, responsibleplay, wallet, user)`.
   Cycles are not allowed; in particular `user` never depends on `auth` or `wallet`.
-- Enforcement: ArchUnit rules R1–R15 in `ModuleArchitectureTest`, run with every build
+- Enforcement: ArchUnit rules R1–R14, R16 and R17 in `ModuleArchitectureTest`, run with every build
   (`./mvnw test`, [ADR-0005](decisions/0005-architecture-rules-archunit.md); R1–R12:
-  [`docs/plans/week-02.md`](plans/week-02.md) §9, R13–R15: [`docs/plans/week-03.md`](plans/week-03.md) §9):
+  [`docs/plans/week-02.md`](plans/week-02.md) §9, R13–R14: [`docs/plans/week-03.md`](plans/week-03.md) §9,
+  R16–R17: [`docs/plans/week-04.md`](plans/week-04.md) §4.6, §4.7):
   - R13: `wallet.service.WalletService` is used only by `wallet`, `game`, `learning` and `admin`;
   - R14: `wallet` uses `user` only through `user.dto`;
-  - R15: production code never uses the test-only ledger types `TEST_CREDIT`/`TEST_DEBIT`. `ArchitectureRulesTest` proves that each rule
-  detects its violation. A new module must be added to `ArchitectureRules.BUSINESS_MODULES`.
+  - R16: randomness comes only from an unseeded `java.security.SecureRandom` (no `new Random()`, no
+    `Math.random()`, `ThreadLocalRandom`, `SplittableRandom` or default `RandomGenerator`, no seeding);
+  - R17: `model` packages depend on no framework (Spring, JPA, Hibernate, servlet) and no other layer;
+  - R15 (production code never used the test-only ledger types) was **retired in W4-03** together with
+    those types; its id is not reused. `ArchitectureRulesTest` proves that each rule detects its
+    violation. A new module must be added to `ArchitectureRules.BUSINESS_MODULES`.
 
 ### Layers inside a module
 
@@ -70,6 +75,8 @@ com.casino.<module>
 ├── repository/   database access (Spring Data JPA repositories, other data-access adapters)
 ├── entity/       JPA entities — never returned by controllers
 ├── dto/          request/response records matching the schemas in openapi.yaml
+├── model/        plain domain types and pure rules shared by the other layers (since W4-04; no
+│                 framework, no other layer: R17; not part of the public API)
 ├── config/       module-specific Spring configuration
 └── exception/    module exceptions and their HTTP mapping
 ```
@@ -178,15 +185,32 @@ through the caller's own entries. Responses show only the published types (`Wall
 stored entry of any other type fails the request closed (`500`). `limit` accepts decimal digits only
 (`common.exception.DecimalIntegerParameters`).
 
-**Test-only ledger types.** `TEST_CREDIT`/`TEST_DEBIT` exist so that the integration tests can debit
-and credit before Week 4 brings real types. A test-only Flyway callback allows them in test
-databases; the production schema rejects them, ArchUnit R15 forbids their use in production code,
-and no response type can carry them. They are still compiled into the two enums; their removal is a
-Week 4 task (`docs/plans/week-03.md` §7.8, §7.13).
+**Ledger types (since W4-03, Flyway V8).** `STARTING_BALANCE` (credit, only through `openWallet`),
+`ROULETTE_STAKE` (debit) and `ROULETTE_PAYOUT` (credit). The command enum
+(`wallet.dto.WalletTransactionType`), the stored enum (`wallet.entity.TransactionType`) and the
+published enum (`wallet.dto.WalletEntryType`) have exactly these values; `WalletService` maps them with
+exhaustive `switch` expressions, so a type added to one enum without the others does not compile. The
+database accepts no other type and enforces each sign. The Week 3 test-only types `TEST_CREDIT`/
+`TEST_DEBIT`, their test Flyway callback and ArchUnit R15 were removed in W4-03 (option D,
+`docs/plans/week-03.md` §7.13): tests run on exactly the production schema, and
+`ProductionArtifactIT` fails if either name appears in any packaged class or resource.
 
 **Coverage.** JaCoCo checks `com.casino.wallet.service` in every `./mvnw verify` (CI included):
 at least 80 % lines and 70 % branches. Measured in W3-09: 100 % lines (111/111) and 100 % branches
 (62/62).
+
+### Game module (Week 4, in progress)
+
+Design: [`docs/plans/week-04.md`](plans/week-04.md). Implemented so far (W4-04):
+
+| Package | Classes | Responsibility |
+|---|---|---|
+| `model` | `RouletteBetCategory`, `RouletteBetColor`, `RouletteParity`, `RouletteRange`, `RouletteDozen`, `RouletteNumberColor`; `RouletteSelection` (sealed: one record per category), `RouletteWager`, `RouletteSettlement`; `RouletteRules` | European roulette rules as pure functions: colors, which selection wins, payouts (stake × 36/2/3 on a win, 0 on a loss), settlement of a spin; integer arithmetic with overflow checks |
+| `service` | `RouletteWheel`, `SecureRandomRouletteWheel` | The winning number: `SecureRandom.nextInt(37)`; the only wheel bean |
+
+Every bet has the expected net result −1/37 of its amount (house edge 1/37 ≈ 2.7027 %, return to
+player 36/37 ≈ 97.2973 %), proven exactly by `RouletteRulesTest`. Rounds, their persistence, the
+wallet settlement and `POST /api/v1/games/roulette/spins` follow in W4-05 to W4-07.
 
 ### API design (design-first)
 
@@ -264,7 +288,7 @@ frontend/src
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
 | Security | Spring Security and Spring Session JDBC, see [§5.1](#51-security-week-2-extended-in-week-3) and [ADR-0006](decisions/0006-session-authentication-security.md) |
 | Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
-| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Migrations also on PostgreSQL 18.6 (`MigrationCompatibilityIT`). Coverage: JaCoCo, enforced for `com.casino.wallet.service` (≥ 80 % lines, ≥ 70 % branches). Test contexts are cached at most 6 at a time (`src/test/resources/spring.properties`), because each holds its own PostgreSQL container. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. Browser acceptance: Playwright against an isolated real stack (`frontend/e2e`, run locally); full E2E coverage and CI in Week 11 |
+| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Migrations also on PostgreSQL 18.6 (`MigrationCompatibilityIT`). Coverage: JaCoCo, enforced for `com.casino.wallet.service`, `com.casino.game.model` and `com.casino.game.service` (≥ 80 % lines, ≥ 70 % branches). Test contexts are cached at most 6 at a time (`src/test/resources/spring.properties`), because each holds its own PostgreSQL container. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. Browser acceptance: Playwright against an isolated real stack (`frontend/e2e`, run locally); full E2E coverage and CI in Week 11 |
 | CI | GitHub Actions: backend `mvnw verify` (including the JaCoCo check; coverage report uploaded as `backend-coverage`), frontend lint → typecheck → test → build |
 | Request parameters | Integer query parameters accept decimal digits only (`common.exception.DecimalIntegerParameters`); anything else is `400 MALFORMED_REQUEST`, range violations `400 VALIDATION_FAILED` |
 
@@ -315,13 +339,15 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
 
 | Component | Staging today | Code deployed |
 |---|---|---|
-| Frontend (static build) | Vercel, `https://online-casino-simulator.vercel.app`, same-origin `/api` rewrite to Render; deploys `main` automatically ([infrastructure/vercel](../infrastructure/vercel/README.md)). Cloudflare Pages was the original plan; the final choice is ADR-0007 | `main` (Weeks 1–2 and the deployment foundation) |
+| Frontend (static build) | Vercel, `https://online-casino-simulator.vercel.app`, same-origin `/api` rewrite to Render; deploys `main` automatically ([infrastructure/vercel](../infrastructure/vercel/README.md)). Cloudflare Pages was the original plan; the final choice is ADR-0007 | `main` (Weeks 1–3 and the deployment foundation) |
 | Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render Free, Frankfurt, `https://online-casino-simulator.onrender.com`, profiles `neon,render`, registration closed, Auto-Deploy Off, manual deploys ([infrastructure/render](../infrastructure/render/README.md)) | `main` |
-| Database | Neon (managed PostgreSQL 18), branch `staging`; `production` untouched until Week 12. Local development and tests use 17 | schema **V5** |
+| Database | Neon (managed PostgreSQL 18), branch `staging`; `production` untouched until Week 12. Local development and tests use 17 | schema **V7** |
 
-Week 3 (wallet, V6/V7) is **not deployed**: it is on `feature/week-03-wallet`, locally at V7. Its
-rollout is a separately approved step with its own runbook:
-[infrastructure/wallet-rollout.md](../infrastructure/wallet-rollout.md).
+Week 3 (wallet, V6/V7) is **deployed to staging** (2026-11-15): merged into `main` (PR #9), deployed
+manually on Render, which applied V6 and V7 to Neon `staging` at start-up. The approved runbook and
+the verification results are in
+[infrastructure/wallet-rollout.md](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15).
+Registration stays closed; Neon `production` is untouched.
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a
 fast feedback loop. The Spring profile `neon` points a local backend at a Neon branch instead

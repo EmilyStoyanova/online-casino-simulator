@@ -37,7 +37,7 @@ The API is **design-first**. The contract
   | `NOT_ACCEPTABLE` | 406 | No representation matches the `Accept` header (the problem itself is still JSON) |
   | `CONFLICT` | 409 | Generic conflict (e.g. a framework `409`) |
   | `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION` | 409 | Registration with an existing email; overlapping profile update |
-  | `INSUFFICIENT_FUNDS`, `IDEMPOTENCY_KEY_REUSED`, `BALANCE_LIMIT_EXCEEDED` | 409 | Wallet rules of balance-changing operations (from Week 4; [wallet](#wallet-rules-both-operations)) |
+  | `INSUFFICIENT_FUNDS`, `IDEMPOTENCY_KEY_REUSED`, `BALANCE_LIMIT_EXCEEDED` | 409 | Wallet rules of balance-changing operations (the roulette spin, planned; [wallet](#wallet-rules-both-operations)) |
   | `CONTENT_TOO_LARGE` | 413 | Request too large |
   | `UNSUPPORTED_MEDIA_TYPE` | 415 | Unsupported request `Content-Type` (`Accept` header lists the supported types) |
   | `TOO_MANY_ATTEMPTS` | 429 | Login and registration throttling; `Retry-After` = whole seconds until the window ends |
@@ -110,9 +110,11 @@ itself (`springdoc.swagger-ui.csrf.enabled`).
 
 1. Change `openapi.yaml` (new path, field, status code, …) and review it. Operations designed ahead
    of their implementation carry `x-implementation-status: planned` and the summary suffix
-   "(planned)"; schema properties designed ahead carry the same marker. The contract tests skip
+   "(planned)"; schema properties designed ahead carry the same marker, and enum values designed
+   ahead are listed in the schema's `x-planned-enum-values` (since 0.5.0). The contract tests skip
    planned elements while they are not implemented, fail as soon as one is implemented with the
-   marker still present, and never validate responses of planned operations.
+   marker still present, never validate responses of planned operations and reject planned enum
+   values in responses.
 2. Implement the controller (`controller` package) and DTO records (`dto` package), and remove the
    `planned` marker in the same change.
 3. Run `./mvnw verify`. `OpenApiContractIT` fails while the implementation and the contract differ,
@@ -154,8 +156,8 @@ Example `GET /api/v1/system/status` → `200`:
 
 - Public. `200` when the backend and the database are up; `503` with the same `SystemStatus` body
   when the database is unreachable (`database.status` = `DOWN`, `schemaVersion` = `null`).
-- `schemaVersion` is the latest applied Flyway migration: `7` with this branch (Week 3), `5` on
-  staging until the approved Week 3 rollout ([runbook](../infrastructure/wallet-rollout.md)).
+- `schemaVersion` is the latest applied Flyway migration: `7` since Week 3, locally and on staging
+  (since the Week 3 rollout of 2026-11-15, [runbook](../infrastructure/wallet-rollout.md)).
 
 ### CSRF token (`GET /api/v1/auth/csrf`)
 
@@ -309,8 +311,10 @@ Example `GET /api/v1/system/status` → `200`:
 - **Coins** are JSON integers (`int64`) from `0` to `9007199254740991` (2^53 − 1), exact in
   JavaScript. A ledger entry has `id`, `type`, `amount` (positive = credit, negative = debit, never
   `0`), `balanceAfter` and `createdAt`; it never contains the idempotency key, the wallet id or the
-  user id. Types: `STARTING_BALANCE` (credit, once per wallet). Later versions add types; clients
-  treat unknown types as generic entries and use the sign of `amount`.
+  user id. Types: `STARTING_BALANCE` (credit, once per wallet), `ROULETTE_STAKE` (debit, the total
+  stake of a roulette round) and `ROULETTE_PAYOUT` (credit, its total payout, only when something was
+  won); the last two are implemented since W4-03 and appear once rounds are played. Clients treat
+  unknown types as generic entries and use the sign of `amount`.
 - **Pagination (keyset):** entries are ordered by `id` descending and new entries always get higher
   ids, so following the cursor never repeats or skips entries, also while new ones are added (they
   appear on a new first page). Ids can have gaps.
@@ -319,8 +323,9 @@ Example `GET /api/v1/system/status` → `200`:
   integer, `500 INTERNAL_ERROR` also for a player account without a wallet (a data error; a read
   never creates a wallet).
 
-**Wallet error codes for balance-changing operations (from Week 4).** No 0.4.0 operation returns them;
-they are defined now so the wallet service uses stable codes from the start:
+**Wallet error codes for balance-changing operations (from Week 4).** No implemented operation of
+0.5.0 returns them yet; the planned roulette spin will. They were defined in 0.4.0 so the wallet
+service uses stable codes from the start:
 
 | `code` | Status | When |
 |---|---|---|
@@ -367,16 +372,52 @@ Example validation error (`400`):
   `WalletTransactionType`, `WalletTransactionPage`) and three wallet error codes. Implemented in
   W3-07 and W3-08; no operation is `planned` any more. Design rationale:
   [`docs/plans/week-03.md`](plans/week-03.md) §5.
+- **0.5.0 (W4-02, pending review):** `POST /api/v1/games/roulette/spins` (`planned`), its schemas
+  (`RouletteSpinRequest`, `RouletteBet`, `RouletteBetCategory` and the option enums,
+  `RouletteSpinResult`, `RouletteSettledBet`, `RouletteNumberColor`), the `Idempotency-Key` header,
+  and the ledger types `ROULETTE_STAKE`/`ROULETTE_PAYOUT` (designed as `x-planned-enum-values`,
+  implemented in W4-03 with Flyway V8, so the listing was removed). No new error code; the existing
+  wallet operations are unchanged. Design rationale: [`docs/plans/week-04.md`](plans/week-04.md) §4,
+  §6, §8.
 
 ## Planned (from the implementation plan)
 
 Each endpoint is added to the contract first, in the week it is implemented.
 
+### Designed in the contract (planned)
+
+**`POST /api/v1/games/roulette/spins`** (Week 4, contract 0.5.0; implemented in W4-07). Players only,
+session and CSRF token, required `Idempotency-Key` (canonical UUID).
+
+```json
+{ "bets": [ { "category": "STRAIGHT", "number": 17, "amount": 10 }, { "category": "RED_BLACK", "color": "RED", "amount": 20 } ] }
+```
+
+| Category | Option property and values | P(win) | Net winnings | Payout on a win (stake included) |
+|---|---|---|---|---|
+| `STRAIGHT` | `number` 0–36 | 1/37 | 35:1 | 36 × amount |
+| `RED_BLACK` | `color` `RED`/`BLACK` | 18/37 | 1:1 | 2 × amount |
+| `EVEN_ODD` | `parity` `EVEN`/`ODD` | 18/37 | 1:1 | 2 × amount |
+| `LOW_HIGH` | `range` `LOW` (1–18)/`HIGH` (19–36) | 18/37 | 1:1 | 2 × amount |
+| `DOZEN` | `dozen` `FIRST`/`SECOND`/`THIRD` | 12/37 | 2:1 | 3 × amount |
+
+- Zero loses every category except a straight bet on `0`. Every bet's expected net result is −1/37
+  of its amount: house edge 1/37 ≈ 2.7027 %, theoretical RTP 36/37 ≈ 97.2973 %.
+- 1–10 bets with different selections, 1–1,000 whole coins each; amounts and numbers must be JSON
+  integers (`10.5`, `10.0`, `"10"` → `400 MALFORMED_REQUEST`).
+- `200` `RouletteSpinResult`: `roundId`, `winningNumber`, `winningColor`, the bets with their
+  `payout`, `totalStake`, `totalPayout`, `balance`, `createdAt`. The request carries bets only:
+  the server draws the number and computes payouts and the balance.
+- The same key with the same content (the same bets as a set) returns the original result without
+  any wallet operation; with different content `409 IDEMPOTENCY_KEY_REUSED`.
+- Errors: `400 VALIDATION_FAILED`/`MALFORMED_REQUEST`, `401`, `403 CSRF_TOKEN_INVALID`/`ACCESS_DENIED`,
+  `409 INSUFFICIENT_FUNDS`/`IDEMPOTENCY_KEY_REUSED`/`BALANCE_LIMIT_EXCEEDED`, `500`,
+  `503 SERVICE_UNAVAILABLE` (wallet lock timeout; retry with the same key).
+
 ### Later weeks
 
 | Method | Endpoint | Purpose | Week |
 |---|---|---|---|
-| POST | `/api/v1/games/roulette/spins` | Place bets and play a round (idempotency key) | 4 |
 | GET | `/api/v1/games/roulette/history` | Roulette history | 6 |
 | GET | `/api/v1/learning/modules` | Educational modules | 7 |
 | POST | `/api/v1/learning/modules/{id}/attempts` | Submit quiz answers | 8 |
