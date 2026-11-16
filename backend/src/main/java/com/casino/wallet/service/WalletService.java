@@ -28,6 +28,7 @@ import com.casino.wallet.repository.WalletTransactionRepository;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -191,6 +192,24 @@ public class WalletService {
             return new WalletOperationResult(earlier.get().getId(), earlier.get().getBalanceAfter(), true);
         }
         return append(wallet, TransactionType.STARTING_BALANCE, properties.startingBalance(), STARTING_BALANCE_KEY, null);
+    }
+
+    /**
+     * Locks the user's wallet row for the rest of the caller's transaction, with the same row lock and
+     * bounded wait as {@link #credit}/{@link #debit} ({@code app.wallet.lock-timeout}). A caller that must
+     * look something up before it changes the balance (W4-06: a roulette round's idempotency lookup) takes
+     * the lock first, so concurrent requests of the same player are serialized before that lookup. Later
+     * credits and debits in the same transaction re-lock the row it already holds without waiting.
+     *
+     * <p>Requires an active transaction ({@code MANDATORY}): outside one the lock would end immediately.
+     *
+     * @throws WalletNotFoundException if the user has no wallet
+     * @throws WalletBusyException     if the wallet stayed locked longer than the lock timeout
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void lockWallet(UUID userId) {
+        Objects.requireNonNull(userId, "userId");
+        lock(userId);
     }
 
     /**

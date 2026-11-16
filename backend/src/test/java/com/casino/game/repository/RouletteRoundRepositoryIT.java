@@ -170,7 +170,7 @@ class RouletteRoundRepositoryIT {
     void roundsCanOnlyBeInsertedAndRead() {
         // The repository offers no update or delete, the entities no setters, the bets list is read-only.
         assertThat(Arrays.stream(RouletteRoundRepository.class.getDeclaredMethods()).map(Method::getName))
-                .containsExactlyInAnyOrder("save", "findByUserIdAndRequestId");
+                .containsExactlyInAnyOrder("saveAndFlush", "findByUserIdAndRequestId");
         for (Class<?> entity : List.of(RouletteRound.class, RouletteBet.class)) {
             assertThat(Arrays.stream(entity.getDeclaredMethods())
                     .filter(method -> Modifier.isPublic(method.getModifiers()) && method.getName().startsWith("set")))
@@ -212,7 +212,7 @@ class RouletteRoundRepositoryIT {
             WalletOperationResult stake = stake(player, id, 10);
             WalletOperationResult payout = walletService.credit(player, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, 20,
                     "roulette-round:" + id + ":payout", id.toString()));
-            rounds.save(new RouletteRound(id, player, UUID.randomUUID(), 4, 10, 0, payout.balanceAfter(), stake.transactionId(),
+            rounds.saveAndFlush(new RouletteRound(id, player, UUID.randomUUID(), 4, 10, 0, payout.balanceAfter(), stake.transactionId(),
                     payout.transactionId(), List.of(RouletteBet.of(new Straight(5), 10, 0)), PLAYED_AT));
             entityManager.flush();
         })).hasStackTraceContaining("ck_roulette_rounds_payout_entry");
@@ -248,7 +248,7 @@ class RouletteRoundRepositoryIT {
             WalletOperationResult payout = totalPayout == 0 ? null : walletService.credit(player, new WalletOperation(
                     WalletTransactionType.ROULETTE_PAYOUT, totalPayout, "roulette-round:" + id + ":payout", id.toString()));
             long balanceAfter = payout == null ? stake.balanceAfter() : payout.balanceAfter();
-            rounds.save(new RouletteRound(id, player, request, winningNumber, totalStake, totalPayout, balanceAfter,
+            rounds.saveAndFlush(new RouletteRound(id, player, request, winningNumber, totalStake, totalPayout, balanceAfter,
                     stake.transactionId(), payout == null ? null : payout.transactionId(),
                     bets.stream().map(bet -> RouletteBet.of(bet.selection(), bet.amount(), bet.payout())).toList(), PLAYED_AT));
             entityManager.flush();
