@@ -242,10 +242,10 @@ class LedgerIntegrityIT {
     }
 
     private static WalletOperation credit(long amount, String key) {
-        return new WalletOperation(WalletTransactionType.TEST_CREDIT, amount, key, null);
+        return new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, amount, key, null);
     }
 
     private static WalletOperation debit(long amount, String key) {
-        return new WalletOperation(WalletTransactionType.TEST_DEBIT, amount, key, null);
+        return new WalletOperation(WalletTransactionType.ROULETTE_STAKE, amount, key, null);
     }
 }

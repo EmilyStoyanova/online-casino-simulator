@@ -89,13 +89,18 @@ class OpenApiContractIT {
     }
 
     @Test
-    void theGeneratedDocumentationNeverShowsTheTestOnlyLedgerTypes() throws Exception {
-        // W3-08: the published type is WalletEntryType (contract values only), never the command type.
+    void theDocumentationShowsExactlyTheProductionLedgerTypes() throws Exception {
+        // W3-08: the published type is WalletEntryType (contract values only). W4-03: the roulette types
+        // are implemented and the retired test-only types appear nowhere.
         String generated = perform(get("/v3/api-docs")).getContentAsString(StandardCharsets.UTF_8);
         String contractFile = perform(get("/openapi.yaml")).getContentAsString(StandardCharsets.UTF_8);
 
-        assertThat(generated).contains("STARTING_BALANCE").doesNotContain("TEST_CREDIT", "TEST_DEBIT");
-        assertThat(contractFile).contains("STARTING_BALANCE").doesNotContain("TEST_CREDIT", "TEST_DEBIT");
+        for (String documentation : new String[] {generated, contractFile}) {
+            assertThat(documentation).contains("STARTING_BALANCE", "ROULETTE_STAKE", "ROULETTE_PAYOUT")
+                    .doesNotContain("TEST_CREDIT", "TEST_DEBIT");
+        }
+        assertThat(OpenApiContract.fromJson(generated).spec().getComponents().getSchemas().get("WalletTransactionType").getEnum())
+                .map(String::valueOf).containsExactly("STARTING_BALANCE", "ROULETTE_STAKE", "ROULETTE_PAYOUT");
     }
 
     @Test

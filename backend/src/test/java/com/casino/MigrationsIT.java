@@ -228,7 +228,7 @@ class MigrationsIT {
             assertThat(latest.info().applied()).filteredOn(info -> info.getVersion() != null)
                     .allMatch(info -> info.getState().isApplied() && !info.getState().isFailed())
                     .extracting(info -> info.getVersion().getVersion())
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
             // Existing data is untouched, and the new tables are there.
             assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM " + COMPAT_SCHEMA + ".spring_session", Integer.class))
                     .isOne();

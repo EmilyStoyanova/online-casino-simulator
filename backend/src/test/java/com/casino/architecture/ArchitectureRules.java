@@ -24,7 +24,8 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 /**
  * Architecture rules of the modular monolith: module boundaries (ADR-0001), layered packages inside
  * each module (ADR-0004) and their enforcement with ArchUnit (ADR-0005). The rule ids R1–R12 match
- * {@code docs/plans/week-02.md} §9; R13–R15 match {@code docs/plans/week-03.md} §9.
+ * {@code docs/plans/week-02.md} §9; R13–R14 match {@code docs/plans/week-03.md} §9 (R15 was retired in
+ * W4-03, {@code docs/plans/week-04.md}).
  *
  * <p>The rules are parameterised by the root package, so {@code ArchitectureRulesTest} can prove
  * against a small fixture that every rule actually detects its violation.
@@ -164,19 +165,8 @@ final class ArchitectureRules {
                 .as("R14 wallet depends on user only through user.dto");
     }
 
-    /**
-     * R15: the test-only ledger types ({@code TEST_CREDIT}, {@code TEST_DEBIT}) are never used by
-     * production code. Test databases allow them (a test-only Flyway callback), the production schema
-     * rejects them, so a production use would pass the tests and fail only in production.
-     */
-    ArchRule testLedgerTypesAreNotUsedByProductionCode() {
-        String dtoType = root + ".wallet.dto.WalletTransactionType";
-        String entityType = root + ".wallet.entity.TransactionType";
-        return noClasses().that().doNotHaveFullyQualifiedName(dtoType).and().doNotHaveFullyQualifiedName(entityType)
-                .should().accessField(dtoType, "TEST_CREDIT").orShould().accessField(dtoType, "TEST_DEBIT")
-                .orShould().accessField(entityType, "TEST_CREDIT").orShould().accessField(entityType, "TEST_DEBIT")
-                .as("R15 the test-only ledger types TEST_CREDIT and TEST_DEBIT are not used by production code");
-    }
+    // R15 (the test-only ledger types were not used by production code) was retired in W4-03 together
+    // with those types (docs/plans/week-04.md, option D). Its id is not reused.
 
     /** R10: dependencies are injected through constructors. */
     ArchRule noFieldInjection() {

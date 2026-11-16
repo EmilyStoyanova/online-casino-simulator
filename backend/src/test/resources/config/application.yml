@@ -1,13 +1,9 @@
 # Test-only overrides (test classpath, never packaged; loaded after the main application.yml).
+# Test databases use exactly the production migrations (spring.flyway.locations of the main
+# application.yml); there is no test-only schema change (docs/plans/week-04.md, W4-03).
 app:
   security:
     throttle:
       # No secret in the repository: without APP_SECURITY_THROTTLE_SECRET, every test application
       # context uses a random throttling secret.
       ephemeral-secret: true
-
-spring:
-  flyway:
-    # db/test-callbacks/afterMigrate.sql allows the test-only wallet transaction types TEST_CREDIT and
-    # TEST_DEBIT in test databases (docs/plans/week-03.md §6.2). Production migrations are unchanged.
-    locations: classpath:db/migration,classpath:db/test-callbacks

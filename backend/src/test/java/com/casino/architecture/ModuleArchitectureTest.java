@@ -55,7 +55,4 @@ class ModuleArchitectureTest {
 
     @ArchTest
     static final ArchRule walletUsesUserOnlyThroughDtos = RULES.walletUsesUserOnlyThroughDtos();
-
-    @ArchTest
-    static final ArchRule testLedgerTypesAreNotUsedByProductionCode = RULES.testLedgerTypesAreNotUsedByProductionCode();
 }

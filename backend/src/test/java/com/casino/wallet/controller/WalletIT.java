@@ -51,8 +51,8 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 
 /**
  * {@code GET /api/v1/wallet} end to end (W3-07, FR-2) with the real filter chain, Spring Session JDBC
- * and PostgreSQL: sessions from real logins, balances changed through {@link WalletService} (test-only
- * types), every response checked against {@code openapi.yaml}.
+ * and PostgreSQL: sessions from real logins, balances changed through {@link WalletService} (roulette
+ * stake and payout types), every response checked against {@code openapi.yaml}.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
@@ -123,10 +123,10 @@ class WalletIT {
         Cookie bobSession = signIn("bob@example.com");
 
         // AC-2.5: interleaved changes; each read returns its own session's balance.
-        walletService.debit(alice, new WalletOperation(WalletTransactionType.TEST_DEBIT, 300, "spend-1", null));
+        walletService.debit(alice, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 300, "spend-1", null));
         assertThat(balance(aliceSession)).isEqualTo(700);
         assertThat(balance(bobSession)).isEqualTo(1000);
-        walletService.credit(bob, new WalletOperation(WalletTransactionType.TEST_CREDIT, 50, "gift-1", null));
+        walletService.credit(bob, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, 50, "gift-1", null));
         assertThat(balance(bobSession)).isEqualTo(1050);
         assertThat(balance(aliceSession)).isEqualTo(700);
 

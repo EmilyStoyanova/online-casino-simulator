@@ -415,13 +415,16 @@ class OpenApiContractTest {
     }
 
     @Test
-    void walletTransactionTypesAddThePlannedRouletteTypesButNoTestTypes() throws Exception {
+    void walletTransactionTypesAreExactlyTheProductionTypesWithoutTestTypes() throws Exception {
         assertThat(enumOf("WalletTransactionType")).containsExactly("STARTING_BALANCE", "ROULETTE_STAKE", "ROULETTE_PAYOUT");
-        // Designed in W4-02, implemented with V8 in W4-03 (the listing is removed then).
-        assertThat(contract.plannedEnumValues("WalletTransactionType")).containsExactly("ROULETTE_PAYOUT", "ROULETTE_STAKE");
+        // Designed in W4-02 as planned values, implemented with V8 in W4-03: no planned value is left.
+        assertThat(contract.plannedEnumValues("WalletTransactionType")).isEmpty();
         assertThat(contract.validateSchema("WalletTransaction", """
-                {"id":2,"type":"ROULETTE_STAKE","amount":-10,"balanceAfter":990,"createdAt":"2026-11-20T10:15:30Z"}"""))
-                .containsExactly("$.type: value 'ROULETTE_STAKE' is listed in x-planned-enum-values; remove it from there when implementing it");
+                {"id":2,"type":"ROULETTE_STAKE","amount":-10,"balanceAfter":990,"createdAt":"2026-11-20T10:15:30Z"}""")).isEmpty();
+        assertThat(contract.validateSchema("WalletTransaction", """
+                {"id":3,"type":"ROULETTE_PAYOUT","amount":360,"balanceAfter":1350,"createdAt":"2026-11-20T10:15:30Z"}""")).isEmpty();
+        assertThat(contract.spec().getComponents().getSchemas().keySet())
+                .allSatisfy(name -> assertThat(contract.plannedEnumValues(name)).as(name).isEmpty());
         // The test-only ledger types never reach the public contract (week-03.md §7.13, option D).
         try (var in = getClass().getClassLoader().getResourceAsStream(OpenApiContract.CONTRACT_RESOURCE)) {
             assertThat(new String(Objects.requireNonNull(in).readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))

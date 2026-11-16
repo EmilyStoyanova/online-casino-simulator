@@ -1464,15 +1464,13 @@ components:
         | Value | Direction | Meaning |
         |---|---|---|
         | `STARTING_BALANCE` | credit | Starting coins, granted exactly once when the wallet is opened |
-        | `ROULETTE_STAKE` | debit | Total stake of one roulette round (planned) |
-        | `ROULETTE_PAYOUT` | credit | Total payout of one roulette round: stakes plus net winnings of its winning bets; only when something was won (planned) |
+        | `ROULETTE_STAKE` | debit | Total stake of one roulette round |
+        | `ROULETTE_PAYOUT` | credit | Total payout of one roulette round: stakes plus net winnings of its winning bets; only when something was won |
 
         A roulette round always has one `ROULETTE_STAKE` entry and, only if at least one bet won,
-        one `ROULETTE_PAYOUT` entry. Values listed in `x-planned-enum-values` are designed but not
-        returned yet. Later versions add values (for example learning rewards). Clients treat an
-        unknown value as a generic entry and use the sign of `amount`.
+        one `ROULETTE_PAYOUT` entry. Later versions add values (for example learning rewards).
+        Clients treat an unknown value as a generic entry and use the sign of `amount`.
       enum: [STARTING_BALANCE, ROULETTE_STAKE, ROULETTE_PAYOUT]
-      x-planned-enum-values: [ROULETTE_STAKE, ROULETTE_PAYOUT]
 
     WalletTransactionPage:
       type: object

@@ -102,10 +102,9 @@ public class WalletService {
      * commit order, so following {@code nextCursor} never repeats or skips an entry, also when entries
      * are added in between. Read-only, without a lock.
      *
-     * <p>Only the session's wallet is ever queried; a cursor is a position within it. An entry whose
-     * stored type is not part of the public contract ({@link WalletEntryType}) is never shown: the
-     * request fails as a server error instead. The production schema cannot hold such an entry
-     * ({@code ck_wallet_transactions_type}); only test databases can.
+     * <p>Only the session's wallet is ever queried; a cursor is a position within it. Every stored type
+     * is shown under its public value ({@link WalletEntryType}, exhaustive mapping); the database
+     * accepts no other type ({@code ck_wallet_transactions_type}).
      *
      * @param cursor {@code nextCursor} of the previous page, or {@code null} for the first page
      * @param limit  page size, 1 to 100 (validated by the controller as well)
@@ -131,17 +130,30 @@ public class WalletService {
     }
 
     private static WalletTransactionResponse toResponse(WalletTransaction entry) {
-        return new WalletTransactionResponse(entry.getId(), publicType(entry), entry.getAmount(), entry.getBalanceAfter(),
+        return new WalletTransactionResponse(entry.getId(), publicType(entry.getType()), entry.getAmount(), entry.getBalanceAfter(),
                 entry.getCreatedAt());
     }
 
-    /** Fails closed: a stored type without a public value is never shown under another name or skipped. */
-    private static WalletEntryType publicType(WalletTransaction entry) {
-        try {
-            return WalletEntryType.valueOf(entry.getType().name());
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalStateException("Ledger entry " + entry.getId() + " has a type that the API does not publish", ex);
-        }
+    /**
+     * The public value of a stored type. Exhaustive without a {@code default}: a stored type added
+     * without its public value (and contract value) does not compile, so nothing is ever shown under
+     * another name or skipped.
+     */
+    static WalletEntryType publicType(TransactionType type) {
+        return switch (type) {
+            case STARTING_BALANCE -> WalletEntryType.STARTING_BALANCE;
+            case ROULETTE_STAKE -> WalletEntryType.ROULETTE_STAKE;
+            case ROULETTE_PAYOUT -> WalletEntryType.ROULETTE_PAYOUT;
+        };
+    }
+
+    /** The stored type of a command type; exhaustive for the same reason as {@link #publicType}. */
+    static TransactionType storedType(WalletTransactionType type) {
+        return switch (type) {
+            case STARTING_BALANCE -> TransactionType.STARTING_BALANCE;
+            case ROULETTE_STAKE -> TransactionType.ROULETTE_STAKE;
+            case ROULETTE_PAYOUT -> TransactionType.ROULETTE_PAYOUT;
+        };
     }
 
     private Wallet find(UUID userId) {
@@ -222,8 +234,7 @@ public class WalletService {
             return replay(earlier.get(), operation, signedAmount);
         }
 
-        return append(wallet, TransactionType.valueOf(operation.type().name()), signedAmount,
-                operation.idempotencyKey(), operation.reference());
+        return append(wallet, storedType(operation.type()), signedAmount, operation.idempotencyKey(), operation.reference());
     }
 
     /** Checks the business rules, then appends one entry and sets the balance (the wallet is locked). */
@@ -266,7 +277,7 @@ public class WalletService {
     }
 
     private static WalletOperationResult replay(WalletTransaction earlier, WalletOperation operation, long signedAmount) {
-        boolean sameOperation = earlier.getType().name().equals(operation.type().name())
+        boolean sameOperation = earlier.getType() == storedType(operation.type())
                 && earlier.getAmount() == signedAmount
                 && Objects.equals(earlier.getReference(), operation.reference());
         if (!sameOperation) {

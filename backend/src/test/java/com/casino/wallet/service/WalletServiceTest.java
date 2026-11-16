@@ -92,7 +92,7 @@ class WalletServiceTest {
         order.verify(entries).save(any(WalletTransaction.class));
         WalletTransaction entry = savedEntry();
         assertThat(entry.getWalletId()).isEqualTo(WALLET);
-        assertThat(entry.getType()).isEqualTo(TransactionType.TEST_CREDIT);
+        assertThat(entry.getType()).isEqualTo(TransactionType.ROULETTE_PAYOUT);
         assertThat(entry.getAmount()).isEqualTo(250);
         assertThat(entry.getBalanceAfter()).isEqualTo(1250);
         assertThat(entry.getIdempotencyKey()).isEqualTo("credit-1");
@@ -101,7 +101,7 @@ class WalletServiceTest {
 
     @Test
     void debitRemovesCoinsAndStoresANegativeAmount() {
-        WalletOperationResult result = service.debit(USER, new WalletOperation(WalletTransactionType.TEST_DEBIT, 300, "debit-1", "round-7"));
+        WalletOperationResult result = service.debit(USER, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 300, "debit-1", "round-7"));
 
         assertThat(result.balanceAfter()).isEqualTo(700);
         assertThat(wallet.getBalance()).isEqualTo(700);
@@ -151,10 +151,10 @@ class WalletServiceTest {
 
     @Test
     void theSameOperationAgainReturnsTheOriginalResultAndChangesNothing() {
-        WalletTransaction earlier = entry(77, TransactionType.TEST_DEBIT, -300, 700, "debit-1", "round-7");
+        WalletTransaction earlier = entry(77, TransactionType.ROULETTE_STAKE, -300, 700, "debit-1", "round-7");
         when(entries.findByWalletIdAndIdempotencyKey(WALLET, "debit-1")).thenReturn(Optional.of(earlier));
 
-        WalletOperationResult replay = service.debit(USER, new WalletOperation(WalletTransactionType.TEST_DEBIT, 300, "debit-1", "round-7"));
+        WalletOperationResult replay = service.debit(USER, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 300, "debit-1", "round-7"));
 
         assertThat(replay).isEqualTo(new WalletOperationResult(77, 700, true));
         assertThat(wallet.getBalance()).isEqualTo(1000);
@@ -165,17 +165,17 @@ class WalletServiceTest {
 
     @Test
     void theSameKeyWithOtherValuesIsRejected() {
-        WalletTransaction earlier = entry(77, TransactionType.TEST_DEBIT, -300, 700, "op-1", "round-7");
+        WalletTransaction earlier = entry(77, TransactionType.ROULETTE_STAKE, -300, 700, "op-1", "round-7");
         when(entries.findByWalletIdAndIdempotencyKey(WALLET, "op-1")).thenReturn(Optional.of(earlier));
 
         // Other amount, other reference, no reference, other type/direction.
-        assertThatThrownBy(() -> service.debit(USER, new WalletOperation(WalletTransactionType.TEST_DEBIT, 301, "op-1", "round-7")))
+        assertThatThrownBy(() -> service.debit(USER, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 301, "op-1", "round-7")))
                 .isInstanceOf(IdempotencyKeyReusedException.class);
-        assertThatThrownBy(() -> service.debit(USER, new WalletOperation(WalletTransactionType.TEST_DEBIT, 300, "op-1", "round-8")))
+        assertThatThrownBy(() -> service.debit(USER, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 300, "op-1", "round-8")))
                 .isInstanceOf(IdempotencyKeyReusedException.class);
-        assertThatThrownBy(() -> service.debit(USER, new WalletOperation(WalletTransactionType.TEST_DEBIT, 300, "op-1", null)))
+        assertThatThrownBy(() -> service.debit(USER, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 300, "op-1", null)))
                 .isInstanceOf(IdempotencyKeyReusedException.class);
-        assertThatThrownBy(() -> service.credit(USER, new WalletOperation(WalletTransactionType.TEST_CREDIT, 300, "op-1", "round-7")))
+        assertThatThrownBy(() -> service.credit(USER, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, 300, "op-1", "round-7")))
                 .isInstanceOf(IdempotencyKeyReusedException.class);
 
         assertThat(wallet.getBalance()).isEqualTo(1000);
@@ -187,7 +187,7 @@ class WalletServiceTest {
         // The original debit already happened; replaying it must not be judged against today's balance.
         wallet.changeBalanceTo(0);
         when(entries.findByWalletIdAndIdempotencyKey(WALLET, "debit-1"))
-                .thenReturn(Optional.of(entry(77, TransactionType.TEST_DEBIT, -1000, 0, "debit-1", null)));
+                .thenReturn(Optional.of(entry(77, TransactionType.ROULETTE_STAKE, -1000, 0, "debit-1", null)));
 
         assertThat(service.debit(USER, debit(1000, "debit-1")).replayed()).isTrue();
     }
@@ -199,16 +199,16 @@ class WalletServiceTest {
         assertThatIllegalArgumentException().isThrownBy(() -> service.credit(USER, credit(0, "zero")));
         assertThatIllegalArgumentException().isThrownBy(() -> service.debit(USER, debit(-5, "negative")));
         assertThatIllegalArgumentException().isThrownBy(() -> service.debit(USER, credit(5, "credit-type-as-debit")))
-                .withMessage("TEST_CREDIT is a credit type");
+                .withMessage("ROULETTE_PAYOUT is a credit type");
         assertThatIllegalArgumentException().isThrownBy(() -> service.credit(USER, debit(5, "debit-type-as-credit")))
-                .withMessage("TEST_DEBIT is a debit type");
+                .withMessage("ROULETTE_STAKE is a debit type");
         for (String key : new String[] {null, "", "Upper", "with space", "-dash-first", "x".repeat(101)}) {
             assertThatIllegalArgumentException().as(String.valueOf(key)).isThrownBy(() -> service.credit(USER, credit(5, key)));
         }
         assertThatIllegalArgumentException().isThrownBy(() ->
-                service.credit(USER, new WalletOperation(WalletTransactionType.TEST_CREDIT, 5, "ok", "")));
+                service.credit(USER, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, 5, "ok", "")));
         assertThatIllegalArgumentException().isThrownBy(() ->
-                service.credit(USER, new WalletOperation(WalletTransactionType.TEST_CREDIT, 5, "ok", "r".repeat(101))));
+                service.credit(USER, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, 5, "ok", "r".repeat(101))));
         assertThatThrownBy(() -> service.credit(USER, new WalletOperation(null, 5, "ok", null))).isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> service.credit(USER, null)).isInstanceOf(NullPointerException.class);
 
@@ -219,7 +219,7 @@ class WalletServiceTest {
     void theLongestKeyAndReferenceAreAccepted() {
         String key = "a" + "b:._-".repeat(19) + "1234";
 
-        service.credit(USER, new WalletOperation(WalletTransactionType.TEST_CREDIT, 5, key, "r".repeat(100)));
+        service.credit(USER, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, 5, key, "r".repeat(100)));
 
         assertThat(savedEntry().getIdempotencyKey()).hasSize(100);
     }
@@ -321,14 +321,22 @@ class WalletServiceTest {
     }
 
     @Test
-    void anEntryWithATypeOutsideThePublicContractIsNeverShown() {
-        // Only test databases can hold one (the production schema rejects the test-only types).
-        when(entries.findByWalletIdOrderByIdDesc(WALLET, Limit.of(21)))
-                .thenReturn(List.of(entry(5, TransactionType.TEST_CREDIT, 10, 1010, "gift", null), starting(1)));
+    void everyStoredTypeIsShownUnderItsOwnPublicValue() {
+        // Replaces the W3-08 fail-closed test: the mapping is an exhaustive switch (a stored type without
+        // a public value does not compile) and the database accepts no other type (MigrationCompatibilityIT).
+        when(entries.findByWalletIdOrderByIdDesc(WALLET, Limit.of(21))).thenReturn(List.of(
+                entry(7, TransactionType.ROULETTE_PAYOUT, 360, 1330, "roulette-round:r:payout", "r"),
+                entry(6, TransactionType.ROULETTE_STAKE, -30, 970, "roulette-round:r:stake", "r"),
+                starting(1)));
 
-        assertThatThrownBy(() -> service.listTransactions(USER, null, 20))
-                .isExactlyInstanceOf(IllegalStateException.class)
-                .hasMessage("Ledger entry 5 has a type that the API does not publish");
+        assertThat(service.listTransactions(USER, null, 20).items()).extracting(item -> item.type().name())
+                .containsExactly("ROULETTE_PAYOUT", "ROULETTE_STAKE", "STARTING_BALANCE");
+        for (TransactionType stored : TransactionType.values()) {
+            assertThat(WalletService.publicType(stored).name()).as(stored.name()).isEqualTo(stored.name());
+        }
+        for (WalletTransactionType command : WalletTransactionType.values()) {
+            assertThat(WalletService.storedType(command).name()).as(command.name()).isEqualTo(command.name());
+        }
     }
 
     @Test
@@ -403,7 +411,7 @@ class WalletServiceTest {
     @Test
     void theStartingKeyHeldByAnotherEntryIsRejected() {
         when(entries.findByWalletIdAndIdempotencyKey(WALLET, "starting-balance"))
-                .thenReturn(Optional.of(entry(5, TransactionType.TEST_CREDIT, 500, 500, "starting-balance", null)));
+                .thenReturn(Optional.of(entry(5, TransactionType.ROULETTE_PAYOUT, 500, 500, "starting-balance", null)));
 
         assertThatThrownBy(() -> service.openWallet(USER)).isInstanceOf(IdempotencyKeyReusedException.class);
         verify(entries, never()).save(any());
@@ -430,11 +438,11 @@ class WalletServiceTest {
     // ------------------------------------------------------------------ helpers
 
     private static WalletOperation credit(long amount, String key) {
-        return new WalletOperation(WalletTransactionType.TEST_CREDIT, amount, key, null);
+        return new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, amount, key, null);
     }
 
     private static WalletOperation debit(long amount, String key) {
-        return new WalletOperation(WalletTransactionType.TEST_DEBIT, amount, key, null);
+        return new WalletOperation(WalletTransactionType.ROULETTE_STAKE, amount, key, null);
     }
 
     private static Wallet walletWithBalance(long balance) {

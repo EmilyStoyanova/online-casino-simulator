@@ -1,11 +1,12 @@
 -- Read-only schema check (docs/database.md, "Neon"; infrastructure/wallet-rollout.md).
--- Recognises the two states the staging branch can legitimately be in:
---   V5 = before the Week 3 rollout (the state since 2026-11-07),
---   V7 = after it (V6 wallet tables, V7 wallets for existing players).
+-- Recognises the states the staging branch can legitimately be in:
+--   V5 = before the Week 3 rollout (until 2026-11-15),
+--   V7 = after it (V6 wallet tables, V7 wallets for existing players; the state since 2026-11-15),
+--   V8 = Week 4 ledger types (roulette stake and payout; no new table).
 -- Run: infrastructure/neon/readonly-query.sh < infrastructure/neon/verify-migrations.sql
 -- readonly-query.sh wraps it in a READ ONLY transaction that is rolled back. Counts only; no row
 -- contents are read. MigrationCompatibilityIT runs these statements (without the psql line below) on
--- PostgreSQL 17 and 18 at V5 and at V7.
+-- PostgreSQL 17 and 18 at V5, V7 and V8.
 
 \conninfo
 
@@ -16,18 +17,20 @@ SELECT current_database() AS database, current_user AS role_name,
        current_setting('neon.branch_id', true) AS neon_branch_id;
 
 -- 2. Every applied migration. Expected: success = t in every row; versions 1-5 before the
---    Week 3 rollout, 1-7 after it.
+--    Week 3 rollout, 1-7 after it, 1-8 with the Week 4 ledger types.
 SELECT installed_rank, version, description, type, success
 FROM flyway_schema_history
 ORDER BY installed_rank;
 
 -- 3. The state in one line. Expected: failed_migrations = 0 and schema_state
---    'V5: before the Week 3 rollout' or 'V7: Week 3 wallet schema'. Anything else: stop.
+--    'V5: before the Week 3 rollout', 'V7: Week 3 wallet schema' or 'V8: Week 4 ledger types'.
+--    Anything else: stop.
 SELECT max(version::int) FILTER (WHERE success) AS schema_version,
        count(*) FILTER (WHERE NOT success) AS failed_migrations,
        CASE max(version::int) FILTER (WHERE success)
            WHEN 5 THEN 'V5: before the Week 3 rollout'
            WHEN 7 THEN 'V7: Week 3 wallet schema'
+           WHEN 8 THEN 'V8: Week 4 ledger types'
            ELSE 'UNEXPECTED: stop and investigate'
        END AS schema_state
 FROM flyway_schema_history

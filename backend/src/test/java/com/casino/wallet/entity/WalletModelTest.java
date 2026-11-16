@@ -36,18 +36,19 @@ class WalletModelTest {
         for (WalletTransactionType type : WalletTransactionType.values()) {
             assertThat(TransactionType.valueOf(type.name()).isCredit()).as(type.name()).isEqualTo(type.isCredit());
         }
+        // Exactly the production types of V8 with their directions (W4-03).
+        assertThat(Arrays.stream(WalletTransactionType.values()).map(Enum::name))
+                .containsExactly("STARTING_BALANCE", "ROULETTE_STAKE", "ROULETTE_PAYOUT");
         assertThat(WalletTransactionType.STARTING_BALANCE.isCredit()).isTrue();
-        assertThat(WalletTransactionType.TEST_CREDIT.isCredit()).isTrue();
-        assertThat(WalletTransactionType.TEST_DEBIT.isCredit()).isFalse();
+        assertThat(WalletTransactionType.ROULETTE_STAKE.isCredit()).isFalse();
+        assertThat(WalletTransactionType.ROULETTE_PAYOUT.isCredit()).isTrue();
     }
 
     @Test
-    void theApiPublishesEveryStoredTypeExceptTheTestOnlyOnes() {
-        // W3-08: responses show WalletEntryType only. A new stored type (Week 4) must get its public
-        // value with its contract change; the test-only types never get one.
+    void theApiPublishesEveryStoredTypeAndNothingElse() {
+        // W3-08: responses show WalletEntryType only; every stored type has a public value of the same
+        // name (and WalletService maps them with an exhaustive switch).
         assertThat(Arrays.stream(WalletEntryType.values()).map(Enum::name))
-                .containsExactlyElementsOf(Arrays.stream(TransactionType.values())
-                        .filter(type -> type != TransactionType.TEST_CREDIT && type != TransactionType.TEST_DEBIT)
-                        .map(Enum::name).toList());
+                .containsExactlyElementsOf(Arrays.stream(TransactionType.values()).map(Enum::name).toList());
     }
 }

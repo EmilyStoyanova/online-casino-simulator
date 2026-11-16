@@ -34,9 +34,9 @@ import org.postgresql.util.PSQLException;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * The Flyway migrations, the wallet schema (V6) and the wallet backfill (V7) on PostgreSQL 17 (Docker Compose, Testcontainers,
- * CI) **and** 18 (Neon runs 18.6; Render applies migrations at start-up, so a migration that only
- * works on 17 would break the next staging start). No Spring context.
+ * The Flyway migrations, the wallet schema (V6), the wallet backfill (V7) and the Week 4 ledger types (V8) on PostgreSQL 17
+ * (Docker Compose, Testcontainers, CI) **and** 18 (Neon runs 18.6; Render applies migrations at
+ * start-up, so a migration that only works on 17 would break the next staging start). No Spring context.
  *
  * <p>Each test migrates its own new schema in a container started by this class, so no test cleans
  * up anything: the containers are discarded at the end. Violations are identified by constraint name
@@ -70,7 +70,7 @@ class MigrationCompatibilityIT {
         try (Connection connection = connect(schema)) {
             assertThat(queryString(connection, "SHOW server_version")).startsWith(image.substring("postgres:".length(), image.indexOf('.')));
             assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success"))
-                    .isEqualTo("7");
+                    .isEqualTo("8");
         }
     }
 
@@ -111,8 +111,8 @@ class MigrationCompatibilityIT {
             assertViolation(connection, entrySql(wallet, "STARTING_BALANCE", 5, 9007199254740992L, "above-cap"),
                     "ck_wallet_transactions_balance");
             assertViolation(connection, entrySql(wallet, "ADMIN_GIFT", 5, 1005, "unknown-type"), "ck_wallet_transactions_type");
-            // The test-only types exist only in test databases (callback db/test-callbacks/afterMigrate.sql,
-            // which this class does not load): the production schema rejects them.
+            // The test-only types of Week 3 were never allowed by the production schema, and still are not
+            // (they were removed in W4-03 together with their test callback).
             assertViolation(connection, entrySql(wallet, "TEST_CREDIT", 5, 1005, "test-credit"), "ck_wallet_transactions_type");
             assertViolation(connection, entrySql(wallet, "TEST_DEBIT", -5, 995, "test-debit"), "ck_wallet_transactions_type");
             assertViolation(connection, entrySql(wallet, "STARTING_BALANCE", -5, 995, "wrong-direction"),
@@ -130,6 +130,116 @@ class MigrationCompatibilityIT {
             insertEntry(connection, other, "STARTING_BALANCE", 1000, 1000, "starting-balance");
             insertEntry(connection, other, "STARTING_BALANCE", 1, 1001, "a" + "b:._-".repeat(19) + "1234");
             assertThat(queryString(connection, "SELECT count(*) FROM wallet_transactions")).isEqualTo("3");
+        }
+    }
+
+    @Test
+    void rouletteStakesAreDebitsAndPayoutsAreCredits() throws SQLException {
+        try (Connection connection = connect(migrated(null))) {
+            UUID wallet = insertWallet(connection, insertUser(connection, "olivia@example.com"), 1330);
+            insertEntry(connection, wallet, "STARTING_BALANCE", 1000, 1000, "starting-balance");
+            insertEntry(connection, wallet, "ROULETTE_STAKE", -30, 970, "roulette-round:r1:stake");
+            insertEntry(connection, wallet, "ROULETTE_PAYOUT", 360, 1330, "roulette-round:r1:payout");
+
+            // V8: a stake is strictly negative, a payout strictly positive (STARTING_BALANCE stays positive).
+            assertViolation(connection, entrySql(wallet, "ROULETTE_STAKE", 30, 1360, "positive-stake"), "ck_wallet_transactions_direction");
+            assertViolation(connection, entrySql(wallet, "ROULETTE_PAYOUT", -30, 1300, "negative-payout"),
+                    "ck_wallet_transactions_direction");
+            // Zero amounts stay forbidden for every type.
+            for (String type : new String[] {"STARTING_BALANCE", "ROULETTE_STAKE", "ROULETTE_PAYOUT"}) {
+                assertViolation(connection, entrySql(wallet, type, 0, 1330, "zero-" + type.toLowerCase(java.util.Locale.ROOT)),
+                        "ck_wallet_transactions_amount");
+            }
+            // Only the exact spellings are types; an unknown type is reported by the type rule.
+            assertViolation(connection, entrySql(wallet, "roulette_stake", -5, 1325, "lower-case"), "ck_wallet_transactions_type");
+            assertViolation(connection, entrySql(wallet, "ROULETTE_REFUND", 5, 1335, "unknown"), "ck_wallet_transactions_type");
+            // The V6 bounds, the key format and the unique key apply to the new types unchanged.
+            assertViolation(connection, entrySql(wallet, "ROULETTE_PAYOUT", 9007199254740992L, 1330, "too-big"),
+                    "ck_wallet_transactions_amount");
+            assertViolation(connection, entrySql(wallet, "ROULETTE_STAKE", -2000, -670, "overdraw"), "ck_wallet_transactions_balance");
+            assertViolation(connection, entrySql(wallet, "ROULETTE_STAKE", -30, 1300, "Roulette-Round"), "ck_wallet_transactions_key");
+            assertViolation(connection, entrySql(wallet, "ROULETTE_STAKE", -30, 1300, "roulette-round:r1:stake"),
+                    "uq_wallet_transactions_idempotency");
+            // And the ledger stays append-only for them.
+            assertTriggerRejects(connection, "UPDATE wallet_transactions SET amount = -31 WHERE type = 'ROULETTE_STAKE'",
+                    "wallet_transactions is append-only: UPDATE rejected");
+            assertTriggerRejects(connection, "DELETE FROM wallet_transactions WHERE type = 'ROULETTE_PAYOUT'",
+                    "wallet_transactions is append-only: DELETE rejected");
+            assertThat(queryString(connection, "SELECT count(*) FROM wallet_transactions")).isEqualTo("3");
+        }
+    }
+
+    @Test
+    void v8ChangesOnlyTheTwoTypeRulesOfADatabaseAtV7() throws SQLException {
+        // The current staging path: a database at V7 with players, their wallets and other data.
+        String schema = migrated("6");
+        try (Connection connection = connect(schema)) {
+            UUID alice = insertUser(connection, "alice@example.com");
+            insertUser(connection, "bob@example.com", "PLAYER", "DISABLED");
+            insertUser(connection, "admin@example.com", "ADMIN", "ACTIVE");
+            UUID carol = insertUser(connection, "carol@example.com");
+            insertEntry(connection, insertWallet(connection, carol, 250), "STARTING_BALANCE", 250, 250, "starting-balance");
+            flyway(schema, "7").migrate();
+            execute(connection, "INSERT INTO user_interests (user_id, interest_code) VALUES ('" + alice + "', 'HISTORY')");
+            Map<String, String> tablesBefore = untouchedTables(connection);
+            String ledgerBefore = rows(connection, "wallets") + rows(connection, "wallet_transactions");
+            Map<String, String> constraintsBefore = walletConstraints(connection);
+            String triggersBefore = walletTriggers(connection);
+
+            flyway(schema, null).migrate();
+
+            assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("8");
+            // Every wallet, balance and ledger entry is unchanged, byte for byte (ids and times included).
+            assertThat(rows(connection, "wallets") + rows(connection, "wallet_transactions")).isEqualTo(ledgerBefore);
+            assertThat(untouchedTables(connection)).isEqualTo(tablesBefore);
+            assertThat(verification(connection)).containsExactly("0,0,0,0", "3,1,3,3");
+            // Only the type list and the direction rule changed; keys, foreign keys, bounds, key format and
+            // the triggers (append-only ledger, fixed owner) are identical.
+            Map<String, String> constraintsAfter = walletConstraints(connection);
+            assertThat(constraintsAfter.keySet()).isEqualTo(constraintsBefore.keySet());
+            List<String> changed = constraintsAfter.keySet().stream()
+                    .filter(name -> !constraintsAfter.get(name).equals(constraintsBefore.get(name))).toList();
+            assertThat(changed).containsExactly("wallet_transactions.ck_wallet_transactions_direction",
+                    "wallet_transactions.ck_wallet_transactions_type");
+            assertThat(constraintsAfter.get("wallet_transactions.ck_wallet_transactions_type"))
+                    .contains("STARTING_BALANCE", "ROULETTE_STAKE", "ROULETTE_PAYOUT").doesNotContain("TEST_");
+            assertThat(walletTriggers(connection)).isEqualTo(triggersBefore).contains("trg_wallet_transactions_append_only",
+                    "trg_wallets_owner_fixed", "trg_wallets_updated_at");
+            // The new types work on the upgraded data.
+            UUID aliceWallet = UUID.fromString(queryString(connection, "SELECT id FROM wallets WHERE user_id = '" + alice + "'"));
+            insertEntry(connection, aliceWallet, "ROULETTE_STAKE", -100, 900, "roulette-round:r1:stake");
+            execute(connection, "UPDATE wallets SET balance = 900 WHERE id = '" + aliceWallet + "'");
+            assertThat(verification(connection)).containsExactly("0,0,0,0", "3,1,3,3");
+        }
+    }
+
+    @Test
+    void aFailedV8KeepsTheV6TypeRulesAndCanBeRepeated() throws SQLException {
+        String schema = migrated("7");
+        try (Connection connection = connect(schema)) {
+            UUID wallet = insertWallet(connection, insertUser(connection, "alice@example.com"), 1000);
+            insertEntry(connection, wallet, "STARTING_BALANCE", 1000, 1000, "starting-balance");
+            String ledger = rows(connection, "wallets") + rows(connection, "wallet_transactions");
+            // Fault injection in this throw-away schema only: V8 drops ck_wallet_transactions_direction by
+            // name, after dropping the type rule in the same statement. Under another name the drop fails.
+            execute(connection, "ALTER TABLE wallet_transactions RENAME CONSTRAINT ck_wallet_transactions_direction TO injected_direction");
+            Map<String, String> injected = walletConstraints(connection);
+
+            assertThatThrownBy(() -> flyway(schema, null).migrate()).isInstanceOf(FlywayException.class)
+                    .hasMessageContaining("ck_wallet_transactions_direction");
+
+            // Rolled back as a whole: the V6 type rule is still in place, V8 not recorded, no row changed.
+            assertThat(walletConstraints(connection)).isEqualTo(injected);
+            assertThat(queryString(connection, "SELECT count(*) FROM flyway_schema_history WHERE version = '8'")).isEqualTo("0");
+            assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("7");
+            assertViolation(connection, entrySql(wallet, "ROULETTE_STAKE", -5, 995, "stake-before-v8"), "ck_wallet_transactions_type");
+            assertThat(rows(connection, "wallets") + rows(connection, "wallet_transactions")).isEqualTo(ledger);
+
+            // Once the cause is gone, the next start applies V8 normally.
+            execute(connection, "ALTER TABLE wallet_transactions RENAME CONSTRAINT injected_direction TO ck_wallet_transactions_direction");
+            flyway(schema, null).migrate();
+            assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("8");
+            insertEntry(connection, wallet, "ROULETTE_STAKE", -5, 995, "stake-after-v8");
         }
     }
 
@@ -174,7 +284,7 @@ class MigrationCompatibilityIT {
             assertThat(queryString(connection, "SELECT count(*) || ':' || (SELECT count(*) FROM wallet_transactions) FROM wallets"))
                     .isEqualTo("0:0");
 
-            flyway(schema, null).migrate();
+            flyway(schema, "7").migrate();
 
             assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("7");
             assertThat(wallet(connection, grace)).isEqualTo(STARTING_WALLET);
@@ -207,7 +317,7 @@ class MigrationCompatibilityIT {
             // 8 interests, 2 players (1 disabled), 1 admin, no sessions or throttle rows, no wallet tables yet.
             assertThat(before.get(5)).isEqualTo("8,2,1,1,0,0,null,null");
 
-            flyway(schema, null).migrate();
+            flyway(schema, "7").migrate();
             List<String> after = readOnlyScript(connection, "verify-migrations.sql");
 
             assertThat(after.get(1).split("\\|")).allSatisfy(row -> assertThat(row).endsWith(",t"))
@@ -216,6 +326,17 @@ class MigrationCompatibilityIT {
             assertThat(after.get(3)).doesNotContain(",f").contains("wallets,6,t", "wallet_transactions,6,t");
             assertThat(after.get(4)).isEqualTo("0");
             assertThat(after.get(5)).isEqualTo("8,2,1,1,0,0,2,2");
+
+            // V8 (W4-03) adds no table; the check recognises it as the Week 4 ledger state.
+            flyway(schema, null).migrate();
+            List<String> v8 = readOnlyScript(connection, "verify-migrations.sql");
+
+            assertThat(v8.get(1).split("\\|")).allSatisfy(row -> assertThat(row).endsWith(",t"))
+                    .filteredOn(row -> row.contains(",SQL,")).hasSize(8);
+            assertThat(v8.get(2)).isEqualTo("8,0,V8: Week 4 ledger types");
+            assertThat(v8.get(3)).isEqualTo(after.get(3));
+            assertThat(v8.get(4)).isEqualTo("0");
+            assertThat(v8.get(5)).isEqualTo("8,2,1,1,0,0,2,2");
         }
     }
 
@@ -412,6 +533,28 @@ class MigrationCompatibilityIT {
         return queryString(connection, """
                 SELECT w::text || ' / ' || (SELECT string_agg(t::text, '|' ORDER BY t.id) FROM wallet_transactions t WHERE t.wallet_id = w.id)
                 FROM wallets w WHERE w.user_id = '%s'""".formatted(user));
+    }
+
+    /** Every constraint of {@code wallets} and {@code wallet_transactions}: {@code table.name} → definition. */
+    private static Map<String, String> walletConstraints(Connection connection) throws SQLException {
+        Map<String, String> constraints = new java.util.TreeMap<>();
+        try (Statement statement = connection.createStatement(); ResultSet row = statement.executeQuery("""
+                SELECT c.conrelid::regclass::text || '.' || c.conname, pg_get_constraintdef(c.oid)
+                FROM pg_constraint c
+                WHERE c.conrelid IN ('wallets'::regclass, 'wallet_transactions'::regclass)""")) {
+            while (row.next()) {
+                constraints.put(row.getString(1), row.getString(2));
+            }
+        }
+        return constraints;
+    }
+
+    /** The user-defined triggers of {@code wallets} and {@code wallet_transactions} with their definitions. */
+    private static String walletTriggers(Connection connection) throws SQLException {
+        return queryString(connection, """
+                SELECT string_agg(pg_get_triggerdef(t.oid), '|' ORDER BY t.tgname)
+                FROM pg_trigger t
+                WHERE NOT t.tgisinternal AND t.tgrelid IN ('wallets'::regclass, 'wallet_transactions'::regclass)""");
     }
 
     /** All rows of a table as text, in a stable order. */

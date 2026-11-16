@@ -103,7 +103,7 @@ class WalletOpeningIT {
     @Test
     void aRepeatedEventDoesNotRestoreSpentCoins() {
         UUID player = register("carol@example.com");
-        walletService.debit(player, new WalletOperation(WalletTransactionType.TEST_DEBIT, 250, "spend-everything", null));
+        walletService.debit(player, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 250, "spend-everything", null));
 
         transactions.executeWithoutResult(status -> events.publishEvent(new UserRegistered(player)));
 

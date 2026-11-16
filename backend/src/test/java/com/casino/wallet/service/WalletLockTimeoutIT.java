@@ -149,7 +149,7 @@ class WalletLockTimeoutIT {
     }
 
     private static WalletOperation debit(long amount, String key) {
-        return new WalletOperation(WalletTransactionType.TEST_DEBIT, amount, key, null);
+        return new WalletOperation(WalletTransactionType.ROULETTE_STAKE, amount, key, null);
     }
 
     private static void await(CountDownLatch latch) {

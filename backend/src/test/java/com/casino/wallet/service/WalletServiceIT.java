@@ -30,8 +30,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * {@link WalletService} against PostgreSQL with the real schema (plus the test-only types
- * {@code TEST_CREDIT}/{@code TEST_DEBIT}): balance and ledger change together, failures change nothing,
+ * {@link WalletService} against PostgreSQL with exactly the production schema (credits and debits use
+ * the real types {@code ROULETTE_PAYOUT}/{@code ROULETTE_STAKE}, W4-03): balance and ledger change together, failures change nothing,
  * idempotency on real rows, rollback of the caller's transaction, and the ledger stays consistent.
  */
 @SpringBootTest
@@ -72,7 +72,7 @@ class WalletServiceIT {
         UUID player = data.playerWithBalance("alice@example.com", 1000);
 
         WalletOperationResult credit = walletService.credit(player, credit(250, "credit-1"));
-        WalletOperationResult debit = walletService.debit(player, new WalletOperation(WalletTransactionType.TEST_DEBIT, 400, "debit-1", "round-1"));
+        WalletOperationResult debit = walletService.debit(player, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 400, "debit-1", "round-1"));
 
         assertThat(credit.balanceAfter()).isEqualTo(1250);
         assertThat(debit.balanceAfter()).isEqualTo(850);
@@ -82,7 +82,7 @@ class WalletServiceIT {
         assertThat(data.balance(player)).isEqualTo(850);
         assertThat(data.entries(player)).isEqualTo(3);
         Map<String, Object> entry = jdbcTemplate.queryForMap("SELECT * FROM wallet_transactions WHERE id = ?", debit.transactionId());
-        assertThat(entry).containsEntry("type", "TEST_DEBIT").containsEntry("amount", -400L).containsEntry("balance_after", 850L)
+        assertThat(entry).containsEntry("type", "ROULETTE_STAKE").containsEntry("amount", -400L).containsEntry("balance_after", 850L)
                 .containsEntry("idempotency_key", "debit-1").containsEntry("reference", "round-1");
         assertThat(data.inconsistentWallets()).isZero();
     }
@@ -201,24 +201,29 @@ class WalletServiceIT {
     }
 
     @Test
-    void theTestOnlyTypesAreTheOnlyAdditionToTheProductionTypeRules() {
+    void theTestDatabaseHasExactlyTheProductionTypeRules() {
         UUID player = data.playerWithBalance("mallory@example.com", 10);
         UUID walletId = wallets.findByUserId(player).orElseThrow().getId();
 
-        // The test callback keeps the direction rules: a TEST_DEBIT must be negative, a TEST_CREDIT positive.
+        // No test-only schema change exists any more (W4-03): the V8 rules apply here as in production.
         assertThatThrownBy(() -> jdbcTemplate.update("""
                 INSERT INTO wallet_transactions (wallet_id, type, amount, balance_after, idempotency_key)
-                VALUES (?, 'TEST_DEBIT', 5, 15, 'positive-debit')""", walletId)).hasMessageContaining("ck_wallet_transactions_test_direction");
+                VALUES (?, 'ROULETTE_STAKE', 5, 15, 'positive-stake')""", walletId)).hasMessageContaining("ck_wallet_transactions_direction");
         assertThatThrownBy(() -> jdbcTemplate.update("""
                 INSERT INTO wallet_transactions (wallet_id, type, amount, balance_after, idempotency_key)
-                VALUES (?, 'ADMIN_GIFT', 5, 15, 'unknown')""", walletId)).hasMessageContaining("ck_wallet_transactions_type");
+                VALUES (?, 'ROULETTE_PAYOUT', -5, 5, 'negative-payout')""", walletId)).hasMessageContaining("ck_wallet_transactions_direction");
+        for (String retired : new String[] {"TEST_CREDIT", "TEST_DEBIT", "ADMIN_GIFT"}) {
+            assertThatThrownBy(() -> jdbcTemplate.update("""
+                    INSERT INTO wallet_transactions (wallet_id, type, amount, balance_after, idempotency_key)
+                    VALUES (?, ?, 5, 15, 'unknown')""", walletId, retired)).as(retired).hasMessageContaining("ck_wallet_transactions_type");
+        }
     }
 
     private static WalletOperation credit(long amount, String key) {
-        return new WalletOperation(WalletTransactionType.TEST_CREDIT, amount, key, null);
+        return new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, amount, key, null);
     }
 
     private static WalletOperation debit(long amount, String key) {
-        return new WalletOperation(WalletTransactionType.TEST_DEBIT, amount, key, null);
+        return new WalletOperation(WalletTransactionType.ROULETTE_STAKE, amount, key, null);
     }
 }

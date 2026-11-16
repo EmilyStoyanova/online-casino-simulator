@@ -44,11 +44,10 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
  * {@code GET /api/v1/wallet/transactions} end to end (W3-08, FR-3) with the real filter chain,
  * Spring Session JDBC and PostgreSQL; every response is checked against {@code openapi.yaml}.
  *
- * <p><b>Histories with several entries.</b> Week 3 publishes one entry type, {@code STARTING_BALANCE},
- * and production code creates exactly one per wallet. Longer histories are therefore built in SQL from
- * that type ({@link #appendEntries}, keeping balance = sum of entries) until Week 4 adds its stake and
- * payout types. The test-only types are not used for that: the API never shows them
- * ({@link #anEntryOfATestOnlyTypeIsNeverShown}).
+ * <p><b>Histories with several entries.</b> The paging tests build long histories in SQL from
+ * {@code STARTING_BALANCE} rows ({@link #appendEntries}, keeping balance = sum of entries), which keeps
+ * them independent of any game rule. The real Week 4 types, written through {@link WalletService}, are
+ * covered by {@link #rouletteStakesAndPayoutsAreShownWithTheirPublicTypes}.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
@@ -248,19 +247,26 @@ class WalletTransactionsIT {
     }
 
     @Test
-    void anEntryOfATestOnlyTypeIsNeverShown() throws Exception {
-        // Only a test database can hold one (test Flyway callback; the production schema rejects it).
-        // The API fails closed: a generic 500 instead of a value outside the contract (WalletEntryType).
+    void rouletteStakesAndPayoutsAreShownWithTheirPublicTypes() throws Exception {
+        // W4-03: the real ledger types of Week 4, written through WalletService as a round will (W4-06).
+        // expectPage validates every response against the contract, whose type enum has exactly the
+        // production values.
         UUID alice = accounts.activePlayerWithWallet("alice@example.com", PASSWORD, walletService);
-        walletService.credit(alice, new WalletOperation(WalletTransactionType.TEST_CREDIT, 5, "test-only", null));
+        walletService.debit(alice, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 30, "roulette-round:r1:stake", "r1"));
+        walletService.credit(alice, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, 360, "roulette-round:r1:payout", "r1"));
+        walletService.debit(alice, new WalletOperation(WalletTransactionType.ROULETTE_STAKE, 50, "roulette-round:r2:stake", "r2"));
         Cookie session = signIn("alice@example.com");
 
-        MockHttpServletResponse response = expectProblem(perform(get(TRANSACTIONS).cookie(session)), ProblemCode.INTERNAL_ERROR);
+        MockHttpServletResponse response = expectPage(get(TRANSACTIONS).cookie(session));
 
-        assertThat(content(response)).doesNotContain("TEST_", "test-only", "Ledger entry");
-        // The balance itself stays readable, and the read changed nothing.
-        assertThat(perform(get("/api/v1/wallet").cookie(session)).getStatus()).isEqualTo(200);
-        assertThat(ids(alice)).hasSize(2);
+        assertThat(json(response).path("items"))
+                .extracting(item -> item.path("type").asText() + " " + item.path("amount").asLong() + " -> "
+                        + item.path("balanceAfter").asLong())
+                .containsExactly("ROULETTE_STAKE -50 -> 1280", "ROULETTE_PAYOUT 360 -> 1330", "ROULETTE_STAKE -30 -> 970",
+                        "STARTING_BALANCE 1000 -> 1000");
+        // Idempotency keys and references (round ids) stay internal.
+        assertThat(content(response)).doesNotContain("roulette-round", "\"r1\"", "\"r2\"");
+        assertThat(json(perform(get("/api/v1/wallet").cookie(session))).path("balance").asLong()).isEqualTo(1280);
     }
 
     @Test

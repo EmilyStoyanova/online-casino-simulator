@@ -93,7 +93,7 @@ class WalletConcurrencyIT {
         UUID player = data.playerWithBalance("bob@example.com", 0);
 
         List<WalletOperationResult> results = Concurrency.runTogether(THREADS,
-                () -> walletService.credit(player, new WalletOperation(WalletTransactionType.TEST_CREDIT, 1000, "starting-coins", null)));
+                () -> walletService.credit(player, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, 1000, "starting-coins", null)));
 
         assertThat(results).extracting(WalletOperationResult::transactionId).containsOnly(results.getFirst().transactionId());
         assertThat(results).extracting(WalletOperationResult::balanceAfter).containsOnly(1000L);
@@ -125,7 +125,7 @@ class WalletConcurrencyIT {
         Concurrency.runTogether(THREADS, () -> {
             int n = counter.incrementAndGet();
             return n % 2 == 0
-                    ? walletService.credit(player, new WalletOperation(WalletTransactionType.TEST_CREDIT, 7, "credit-" + n, null))
+                    ? walletService.credit(player, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, 7, "credit-" + n, null))
                     : walletService.debit(player, debit(5, "debit-" + n));
         });
 
@@ -184,6 +184,6 @@ class WalletConcurrencyIT {
     }
 
     private static WalletOperation debit(long amount, String key) {
-        return new WalletOperation(WalletTransactionType.TEST_DEBIT, amount, key, null);
+        return new WalletOperation(WalletTransactionType.ROULETTE_STAKE, amount, key, null);
     }
 }
