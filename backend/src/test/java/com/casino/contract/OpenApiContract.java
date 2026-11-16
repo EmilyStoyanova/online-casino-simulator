@@ -54,12 +54,19 @@ import io.swagger.v3.oas.models.security.SecurityRequirement;
  * other specification does not have them, and reports them as soon as it does (the marker must be
  * removed together with the implementation). {@link #validateResponse} rejects planned operations and
  * reports planned properties that appear in a response.
+ *
+ * <p><b>Planned enum values.</b> Values of an enum schema that are designed but not implemented yet are
+ * listed in the schema's {@code x-planned-enum-values} (they stay in {@code enum}). {@link #differencesTo}
+ * ignores them while the other specification's enum does not have them, and reports a value that it
+ * does have but that is still listed (the listing must be removed together with the implementation).
+ * Response validation reports a planned value that appears in a response.
  */
 public final class OpenApiContract {
 
     static final String CONTRACT_RESOURCE = "static/openapi.yaml";
     static final String IMPLEMENTATION_STATUS = "x-implementation-status";
     static final String PLANNED = "planned";
+    static final String PLANNED_ENUM_VALUES = "x-planned-enum-values";
     private static final String SCHEMA_REF_PREFIX = "#/components/schemas/";
 
     private final OpenAPI spec;
@@ -101,6 +108,12 @@ public final class OpenApiContract {
     /** Operations marked {@code x-implementation-status: planned}, as {@code "GET /path"}. */
     public Set<String> plannedOperations() {
         return operationNames(true);
+    }
+
+    /** Values of the component schema {@code schemaName} listed in {@code x-planned-enum-values}. */
+    public Set<String> plannedEnumValues(String schemaName) {
+        Schema<?> schema = schemas().get(schemaName);
+        return schema == null ? Set.of() : plannedEnumValues(SCHEMA_REF_PREFIX + schemaName, schema);
     }
 
     // ------------------------------------------------------------------ structural comparison
@@ -189,7 +202,7 @@ public final class OpenApiContract {
         }
         compare(loc + " type", types(mine), types(theirs), diffs);
         compare(loc + " format", mine.getFormat(), theirs.getFormat(), diffs);
-        compare(loc + " enum", enumValues(mine), enumValues(theirs), diffs);
+        compareEnums(loc, mine, theirs, diffs);
         compare(loc + " required", asSet(mine.getRequired()), asSet(theirs.getRequired()), diffs);
         compare(loc + " additionalProperties", allowsAdditionalProperties(mine), allowsAdditionalProperties(theirs), diffs);
 
@@ -207,6 +220,26 @@ public final class OpenApiContract {
         if (mine.getItems() != null || theirs.getItems() != null) {
             compareSchemas(loc + "[]", mine.getItems(), other, theirs.getItems(), diffs, visited);
         }
+    }
+
+    /**
+     * Compares enum values. A planned value of this specification is skipped while the other lacks it;
+     * if the other has it without listing it as planned (it is implemented), the listing must go.
+     */
+    private static void compareEnums(String loc, Schema<?> mine, Schema<?> theirs, List<String> diffs) {
+        Set<String> myValues = new TreeSet<>(enumValues(mine));
+        Set<String> theirValues = enumValues(theirs);
+        Set<String> theirPlanned = plannedEnumValues(loc, theirs);
+        for (String planned : plannedEnumValues(loc, mine)) {
+            if (theirValues.contains(planned)) {
+                if (!theirPlanned.contains(planned)) {
+                    diffs.add(loc + " enum value " + planned + ": implemented, but still listed in " + PLANNED_ENUM_VALUES);
+                }
+            } else {
+                myValues.remove(planned);
+            }
+        }
+        compare(loc + " enum", myValues, theirValues, diffs);
     }
 
     // ------------------------------------------------------------------ response validation
@@ -289,6 +322,9 @@ public final class OpenApiContract {
         Set<String> allowed = enumValues(schema);
         if (!allowed.isEmpty() && !allowed.contains(node.asText())) {
             errors.add(loc + ": value '" + node.asText() + "' is not one of " + allowed);
+        } else if (plannedEnumValues(loc, schema).contains(node.asText())) {
+            errors.add(loc + ": value '" + node.asText() + "' is listed in " + PLANNED_ENUM_VALUES
+                    + "; remove it from there when implementing it");
         }
         validateFormat(loc, node, schema.getFormat(), errors);
         validateConstraints(loc, node, schema, errors);
@@ -431,13 +467,36 @@ public final class OpenApiContract {
     }
 
     /**
-     * Fails fast on misuse of the marker: only the value {@code planned} is allowed (on operations
-     * and on properties of component schemas), and a planned property must not be required.
+     * Values listed in {@code x-planned-enum-values} of {@code schema}; empty without the listing.
+     *
+     * @throws IllegalStateException if the listing is not a non-empty list
+     */
+    private static Set<String> plannedEnumValues(String loc, Schema<?> schema) {
+        Object listed = schema.getExtensions() == null ? null : schema.getExtensions().get(PLANNED_ENUM_VALUES);
+        if (listed == null) {
+            return Set.of();
+        }
+        if (!(listed instanceof Collection<?> values) || values.isEmpty()) {
+            throw new IllegalStateException(loc + ": " + PLANNED_ENUM_VALUES + " must be a non-empty list");
+        }
+        return values.stream().map(String::valueOf).collect(Collectors.toCollection(TreeSet::new));
+    }
+
+    /**
+     * Fails fast on misuse of the markers: only the value {@code planned} is allowed (on operations
+     * and on properties of component schemas), a planned property must not be required, and planned
+     * enum values must be values of the schema's {@code enum}.
      */
     private void requireValidImplementationStatus() {
         orEmpty(spec.getPaths()).forEach((path, item) -> item.readOperationsMap().forEach((method, operation) ->
                 requireValidMarker(method + " " + path, operation.getExtensions())));
         schemas().forEach((name, schema) -> {
+            Set<String> plannedValues = plannedEnumValues(SCHEMA_REF_PREFIX + name, schema);
+            Set<String> unknown = difference(plannedValues, enumValues(schema));
+            if (!unknown.isEmpty()) {
+                throw new IllegalStateException(SCHEMA_REF_PREFIX + name + ": " + PLANNED_ENUM_VALUES + " " + unknown
+                        + " are not values of its enum");
+            }
             Map<String, Schema> properties = orEmpty(schema.getProperties());
             properties.forEach((property, propertySchema) -> {
                 String loc = SCHEMA_REF_PREFIX + name + "." + property;

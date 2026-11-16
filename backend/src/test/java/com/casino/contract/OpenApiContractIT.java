@@ -118,8 +118,8 @@ class OpenApiContractIT {
                 "GET /actuator/info");
         // Planned operations cannot be verified at runtime (validateResponse rejects them). When one is
         // implemented, its marker is removed and it moves to the list above with a runtime check.
-        // The wallet operations designed in W3-02 are implemented (W3-07, W3-08): none is left.
-        assertThat(contract.plannedOperations()).isEmpty();
+        // The spin designed in W4-02 is implemented in W4-07 (week-04.md §11).
+        assertThat(contract.plannedOperations()).containsExactly("POST /api/v1/games/roulette/spins");
     }
 
     @Test

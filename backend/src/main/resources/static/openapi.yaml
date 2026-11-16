@@ -10,6 +10,8 @@ openapi: 3.1.0
 #
 # Designed but not yet implemented operations and schema properties carry
 # `x-implementation-status: planned` (operations also get the summary suffix "(planned)").
+# Enum values designed ahead of their implementation are listed in the schema's
+# `x-planned-enum-values`.
 # The contract tests skip them while they are not implemented and fail as soon as an
 # implementation exists, so the marker is removed in the same change as the implementation.
 #
@@ -18,7 +20,7 @@ openapi: 3.1.0
 
 info:
   title: Online Casino Simulator API
-  version: 0.4.0
+  version: 0.5.0
   summary: Casino rules and probabilities with virtual currency only.
   description: |
     REST API of the Online Casino Simulator.
@@ -47,7 +49,8 @@ info:
     - Virtual coins are JSON integers (`int64`), never fractions. Balances are between `0` and
       `9007199254740991` (2^53 − 1), so every value is exact in JavaScript (`Number.MAX_SAFE_INTEGER`).
     - Operations whose summary ends with "(planned)" (`x-implementation-status: planned`) are
-      designed and reviewed, but not available yet.
+      designed and reviewed, but not available yet. Enum values listed in a schema's
+      `x-planned-enum-values` are designed, but not returned yet.
 
     ## Authentication
     - Server-side sessions: registration and login set an `HttpOnly` session
@@ -64,17 +67,35 @@ info:
       created from server configuration. The role is taken from the account when signing in, never
       from a request. Administrative operations under `/api/v1/admin/**` (from Week 10) require
       `ADMIN`: other signed-in users get `403 ACCESS_DENIED` for every path there, also unknown
-      ones. Player operations under `/api/v1/wallet/**` require `PLAYER`: administrators have no
-      wallet and get `403 ACCESS_DENIED`. A role change applies from the next sign-in.
+      ones. Player operations under `/api/v1/wallet/**` and `/api/v1/games/**` require `PLAYER`:
+      administrators have no wallet and get `403 ACCESS_DENIED`. A role change applies from the
+      next sign-in.
 
     ## Virtual wallet
     - Every player has exactly one wallet, opened with the starting balance when the account is
       registered. The wallet is always the one of the session's user: no operation takes a wallet
       or user id, so no client can read another user's wallet.
-    - The API only **reads** wallets. Balances change on the server alone, as the result of game,
-      learning or reward rules (from Week 4); there is no operation that credits or debits a wallet.
+    - The wallet operations only **read** wallets. Balances change on the server alone, as the
+      result of game, learning or reward rules: a roulette spin (`POST /api/v1/games/roulette/spins`,
+      planned) debits its stake and credits its payout. No operation credits or debits a wallet
+      directly, and no request can set a balance or an amount to credit.
     - Every balance change is an entry in an append-only ledger (`WalletTransaction`). Entries are
       never changed or deleted.
+
+    ## European roulette (planned)
+    - Single-zero wheel with the numbers 0–36; the server draws every result with a
+      cryptographically secure random number generator, each number with probability exactly
+      1/37. No request can choose, preview or influence a result or a payout.
+    - Five bet categories (`RouletteBetCategory`), each with its own option: straight number,
+      red/black, even/odd, low/high and dozens. Zero is green, neither even nor odd, neither low
+      nor high and in no dozen: it loses every category except a straight bet on `0`.
+    - Standard payouts, quoted as **net winnings** (odds) on a winning bet: straight 35:1,
+      red/black, even/odd and low/high 1:1, dozens 2:1. A winning bet returns its stake plus the
+      net winnings (`payout`: 36×, 2× or 3× the amount); a losing bet returns nothing.
+    - Every bet has the same expected net result of −1/37 of its amount: the house edge is
+      1/37 ≈ 2.7027 % and the theoretical return to player (RTP) is 36/37 ≈ 97.2973 %. Single
+      rounds vary widely around these long-run averages.
+    - One request plays exactly one round. There is no autoplay, repeat or bonus mechanic.
   license:
     name: Proprietary — SAP mentorship project
 
@@ -93,6 +114,8 @@ tags:
     description: Catalog of educational interests
   - name: Wallet
     description: Virtual-coin balance and transaction history of the signed-in player (read-only)
+  - name: Roulette
+    description: European roulette rounds of the signed-in player, played with virtual coins
   - name: Operations
     description: Infrastructure health probes provided by Spring Boot Actuator
 
@@ -606,6 +629,335 @@ paths:
         '500':
           $ref: '#/components/responses/WalletInternalError'
 
+  /api/v1/games/roulette/spins:
+    post:
+      tags: [Roulette]
+      operationId: spinRoulette
+      summary: Place bets and spin the European roulette wheel (planned)
+      x-implementation-status: planned
+      description: |
+        Plays one round for the session's player: validates the bets, debits their total stake from
+        the player's wallet, draws the winning number on the server, evaluates every bet and credits
+        the total payout. Stake, result, payout, round and bets are stored in **one** database
+        transaction: either all of it happens or nothing does. The result is sent only after it has
+        been stored.
+
+        **The request contains bets only.** The player comes from the session; the winning number,
+        the payouts and the resulting balance are always computed by the server. Properties that are
+        not in `RouletteSpinRequest` (for example `winningNumber`, `payout`, `balance` or `userId`)
+        are ignored and never influence the round.
+
+        **Bets** (`RouletteBet`): 1–10 per spin, each with a whole-coin `amount` of 1–1,000, so the
+        total stake is 1–10,000 coins. The same selection (category and option) at most once per
+        spin. Amounts and numbers must be JSON integers written without a fraction or exponent:
+        `10.5`, `10.0`, `1e1` or `"10"` are rejected with `400 MALFORMED_REQUEST`, never rounded or
+        converted. The total stake must not exceed the current balance (`409 INSUFFICIENT_FUNDS`);
+        this is checked while the wallet is locked, so parallel spins cannot spend the same coins.
+
+        **Idempotency.** Every spin attempt sends a new UUID in `Idempotency-Key` and reuses it for
+        every retry of that attempt (for example after a timeout). Keys are scoped to the player:
+        - The first request with a key that passes validation plays the round.
+        - A later request with the same key and the **same content** returns the original result
+          (same `roundId`, winning number, payouts and `balance`) with `200`. Nothing is debited,
+          credited, drawn or stored again, even if the balance has changed since. Same content means
+          the same bets as a set: the same category, option and amount for every bet, whatever the
+          bet order, JSON formatting, property order or ignored properties; an option property sent as
+          `null` counts as omitted. The response lists the bets in the order of the original request.
+        - The same key with **different content** → `409 IDEMPOTENCY_KEY_REUSED`; nothing changes.
+          A new spin needs a new key.
+        - Requests with the same key at the same time are processed one after the other: one plays
+          the round, the others return its result.
+        - A request that fails (`400`, `409`, `500`, `503`) stores nothing, so its key is not used up.
+          Validation (`400`) happens before the key is looked up.
+
+        **Responsible play.** One request plays exactly one round; there is no autoplay or repeat.
+        The response shows every stake and payout, and the wallet history shows the stake and the
+        payout as separate entries (`ROULETTE_STAKE`, `ROULETTE_PAYOUT`).
+
+        Players only (an administrator gets `403 ACCESS_DENIED`). Requires a session and a CSRF
+        token.
+      security:
+        - sessionCookie: []
+          csrfHeader: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            UUID chosen by the client for this spin attempt, in the canonical 36-character form
+            (`8-4-4-4-12` hexadecimal digits, case-insensitive). Reused unchanged for retries of the
+            same attempt; a new spin needs a new key. Missing or not a canonical UUID →
+            `400 MALFORMED_REQUEST`.
+          schema:
+            type: string
+            format: uuid
+            minLength: 36
+            maxLength: 36
+            pattern: '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+          example: 3f2b8c4e-9d1a-4e7b-8c2f-5a6d7e8f9a0b
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouletteSpinRequest'
+            examples:
+              straightAndColor:
+                summary: A straight bet on 17 and a bet on red
+                value:
+                  bets:
+                    - category: STRAIGHT
+                      number: 17
+                      amount: 10
+                    - category: RED_BLACK
+                      color: RED
+                      amount: 20
+              everyCategory:
+                summary: One bet of every category
+                value:
+                  bets:
+                    - category: STRAIGHT
+                      number: 0
+                      amount: 5
+                    - category: RED_BLACK
+                      color: BLACK
+                      amount: 10
+                    - category: EVEN_ODD
+                      parity: EVEN
+                      amount: 10
+                    - category: LOW_HIGH
+                      range: HIGH
+                      amount: 10
+                    - category: DOZEN
+                      dozen: SECOND
+                      amount: 15
+      responses:
+        '200':
+          description: |
+            The round was played, or the same request (same key and content) was already played and
+            its original result is returned.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouletteSpinResult'
+              examples:
+                win:
+                  summary: 17 (black) wins the straight bet; red loses
+                  value:
+                    roundId: 6f1c2a0e-8b3d-4c55-9a7e-2f0d5b1e9c41
+                    winningNumber: 17
+                    winningColor: BLACK
+                    bets:
+                      - category: STRAIGHT
+                        number: 17
+                        amount: 10
+                        payout: 360
+                      - category: RED_BLACK
+                        color: RED
+                        amount: 20
+                        payout: 0
+                    totalStake: 30
+                    totalPayout: 360
+                    balance: 1330
+                    createdAt: '2026-11-20T10:15:30.123456Z'
+                zero:
+                  summary: Zero wins the straight bet on 0; even loses
+                  value:
+                    roundId: 0d9e8f7a-6b5c-4d3e-8f1a-2b3c4d5e6f70
+                    winningNumber: 0
+                    winningColor: GREEN
+                    bets:
+                      - category: STRAIGHT
+                        number: 0
+                        amount: 5
+                        payout: 180
+                      - category: EVEN_ODD
+                        parity: EVEN
+                        amount: 10
+                        payout: 0
+                    totalStake: 15
+                    totalPayout: 180
+                    balance: 1165
+                    createdAt: '2026-11-20T10:16:02.654321Z'
+                loss:
+                  summary: Nothing won; only the stake is debited
+                  value:
+                    roundId: 9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d
+                    winningNumber: 8
+                    winningColor: BLACK
+                    bets:
+                      - category: DOZEN
+                        dozen: THIRD
+                        amount: 50
+                        payout: 0
+                    totalStake: 50
+                    totalPayout: 0
+                    balance: 950
+                    createdAt: '2026-11-20T10:17:45.000001Z'
+        '400':
+          description: |
+            Invalid request; nothing was changed and no number was drawn.
+
+            `VALIDATION_FAILED` (the fields are named in `errors`, rejected values are never echoed):
+            no bets or more than 10 (`bets`); the same selection twice (`bets`); an `amount` outside
+            1–1,000 (`bets[i].amount`); a missing option or a `number` outside 0–36 (e.g.
+            `bets[i].number`, `bets[i].color`); an option property that does not belong to the bet's
+            category (e.g. `bets[i].dozen` on a `RED_BLACK` bet).
+
+            `MALFORMED_REQUEST`: missing `Idempotency-Key` or one that is not a canonical UUID;
+            missing, unreadable or non-JSON-object body; an unknown `category` or option value (e.g.
+            `"color": "GREEN"`); a wrong JSON type; an amount or number with a fraction or exponent,
+            or written as a string.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                amountOutOfRange:
+                  value:
+                    title: Bad Request
+                    status: 400
+                    code: VALIDATION_FAILED
+                    detail: The request contains invalid values.
+                    instance: /api/v1/games/roulette/spins
+                    errors:
+                      - field: bets[0].amount
+                        message: must be less than or equal to 1000
+                tooManyBets:
+                  value:
+                    title: Bad Request
+                    status: 400
+                    code: VALIDATION_FAILED
+                    detail: The request contains invalid values.
+                    instance: /api/v1/games/roulette/spins
+                    errors:
+                      - field: bets
+                        message: size must be between 1 and 10
+                missingOption:
+                  value:
+                    title: Bad Request
+                    status: 400
+                    code: VALIDATION_FAILED
+                    detail: The request contains invalid values.
+                    instance: /api/v1/games/roulette/spins
+                    errors:
+                      - field: bets[1].color
+                        message: must not be null
+                malformed:
+                  summary: Missing or invalid Idempotency-Key, unknown category, fractional amount
+                  value:
+                    title: Bad Request
+                    status: 400
+                    code: MALFORMED_REQUEST
+                    detail: The request could not be read.
+                    instance: /api/v1/games/roulette/spins
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: |
+            The `X-XSRF-TOKEN` header is missing or does not match the `XSRF-TOKEN` cookie
+            (`CSRF_TOKEN_INVALID`, checked first), or the signed-in user is not a player
+            (`ACCESS_DENIED`): administrators have no wallet.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                csrfTokenInvalid:
+                  value:
+                    title: Forbidden
+                    status: 403
+                    code: CSRF_TOKEN_INVALID
+                    detail: The CSRF token is missing or invalid.
+                    instance: /api/v1/games/roulette/spins
+                accessDenied:
+                  value:
+                    title: Forbidden
+                    status: 403
+                    code: ACCESS_DENIED
+                    detail: You are not allowed to perform this action.
+                    instance: /api/v1/games/roulette/spins
+        '409':
+          description: |
+            The spin conflicts with the state of the wallet or with an earlier request; nothing was
+            changed and no number was drawn. `INSUFFICIENT_FUNDS`: the total stake is larger than the
+            current balance. `IDEMPOTENCY_KEY_REUSED`: the `Idempotency-Key` was already used for a
+            spin with different content; use a new key. `BALANCE_LIMIT_EXCEEDED`: the payout would
+            take the balance beyond 2^53 − 1 (practically unreachable); the whole round is undone.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              examples:
+                insufficientFunds:
+                  value:
+                    title: Conflict
+                    status: 409
+                    code: INSUFFICIENT_FUNDS
+                    detail: The virtual balance is too low for this action.
+                    instance: /api/v1/games/roulette/spins
+                idempotencyKeyReused:
+                  value:
+                    title: Conflict
+                    status: 409
+                    code: IDEMPOTENCY_KEY_REUSED
+                    detail: This request was already processed with different values.
+                    instance: /api/v1/games/roulette/spins
+                balanceLimitExceeded:
+                  value:
+                    title: Conflict
+                    status: 409
+                    code: BALANCE_LIMIT_EXCEEDED
+                    detail: The virtual balance would exceed its maximum.
+                    instance: /api/v1/games/roulette/spins
+        '500':
+          description: |
+            Unexpected error; the details are only logged on the server. This includes a player
+            account without a wallet (a data error). Nothing was changed: the whole round was undone,
+            so a retry with the same `Idempotency-Key` plays it.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                title: Internal Server Error
+                status: 500
+                code: INTERNAL_ERROR
+                detail: An unexpected error occurred. Please try again later.
+                instance: /api/v1/games/roulette/spins
+        '503':
+          description: |
+            The wallet stayed locked by another operation for longer than the server's lock timeout
+            (`SERVICE_UNAVAILABLE`). Nothing was changed; retry with the **same** `Idempotency-Key`.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                title: Service Unavailable
+                status: 503
+                code: SERVICE_UNAVAILABLE
+                detail: The service is temporarily unavailable. Please try again later.
+                instance: /api/v1/games/roulette/spins
+
   /actuator/health:
     get:
       tags: [Operations]
@@ -1112,10 +1464,15 @@ components:
         | Value | Direction | Meaning |
         |---|---|---|
         | `STARTING_BALANCE` | credit | Starting coins, granted exactly once when the wallet is opened |
+        | `ROULETTE_STAKE` | debit | Total stake of one roulette round (planned) |
+        | `ROULETTE_PAYOUT` | credit | Total payout of one roulette round: stakes plus net winnings of its winning bets; only when something was won (planned) |
 
-        Later versions add values for game stakes and payouts and for learning rewards. Clients
-        treat an unknown value as a generic entry and use the sign of `amount`.
-      enum: [STARTING_BALANCE]
+        A roulette round always has one `ROULETTE_STAKE` entry and, only if at least one bet won,
+        one `ROULETTE_PAYOUT` entry. Values listed in `x-planned-enum-values` are designed but not
+        returned yet. Later versions add values (for example learning rewards). Clients treat an
+        unknown value as a generic entry and use the sign of `amount`.
+      enum: [STARTING_BALANCE, ROULETTE_STAKE, ROULETTE_PAYOUT]
+      x-planned-enum-values: [ROULETTE_STAKE, ROULETTE_PAYOUT]
 
     WalletTransactionPage:
       type: object
@@ -1135,6 +1492,209 @@ components:
           description: |
             Opaque cursor for the next (older) page, passed back unchanged as `cursor`; `null` when
             this is the last page.
+
+    RouletteSpinRequest:
+      type: object
+      description: |
+        The bets of one roulette spin. Nothing else: the player comes from the session, and the
+        result, the payouts and the balance are computed by the server. Properties not listed here
+        are ignored.
+      required: [bets]
+      properties:
+        bets:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: |
+            1–10 bets with different selections (no category and option twice). Total stake:
+            1–10,000 coins, at most the current balance.
+          items:
+            $ref: '#/components/schemas/RouletteBet'
+
+    RouletteBet:
+      type: object
+      description: |
+        One bet: a category, the one option property of that category, and the amount.
+
+        | `category` | Option property | Allowed option values |
+        |---|---|---|
+        | `STRAIGHT` | `number` | an integer 0–36 |
+        | `RED_BLACK` | `color` | `RED`, `BLACK` |
+        | `EVEN_ODD` | `parity` | `EVEN`, `ODD` |
+        | `LOW_HIGH` | `range` | `LOW` (1–18), `HIGH` (19–36) |
+        | `DOZEN` | `dozen` | `FIRST` (1–12), `SECOND` (13–24), `THIRD` (25–36) |
+
+        The option property of the bet's category is required; the other four option properties
+        must be omitted (`null` counts as omitted). Otherwise `400 VALIDATION_FAILED` names the
+        property, e.g. `bets[0].color`.
+      required: [category, amount]
+      properties:
+        category:
+          $ref: '#/components/schemas/RouletteBetCategory'
+        number:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 36
+          description: The number of a `STRAIGHT` bet; only for `STRAIGHT`.
+          examples: [17]
+        color:
+          $ref: '#/components/schemas/RouletteBetColor'
+        parity:
+          $ref: '#/components/schemas/RouletteParity'
+        range:
+          $ref: '#/components/schemas/RouletteRange'
+        dozen:
+          $ref: '#/components/schemas/RouletteDozen'
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000
+          description: Stake of this bet in whole virtual coins, 1–1,000; a JSON integer without fraction or exponent.
+          examples: [10]
+
+    RouletteBetCategory:
+      type: string
+      description: |
+        The five bet categories of European roulette. Zero wins only a `STRAIGHT` bet on `0`; it loses
+        every other category.
+
+        | Category | Covers | Probability of a win | Net winnings (odds) | Payout on a win (stake included) |
+        |---|---|---|---|---|
+        | `STRAIGHT` | the chosen number | 1/37 ≈ 2.7027 % | 35:1 | 36 × amount |
+        | `RED_BLACK` | the 18 red or the 18 black numbers | 18/37 ≈ 48.6486 % | 1:1 | 2 × amount |
+        | `EVEN_ODD` | 2, 4, …, 36 or 1, 3, …, 35 | 18/37 ≈ 48.6486 % | 1:1 | 2 × amount |
+        | `LOW_HIGH` | 1–18 or 19–36 | 18/37 ≈ 48.6486 % | 1:1 | 2 × amount |
+        | `DOZEN` | 1–12, 13–24 or 25–36 | 12/37 ≈ 32.4324 % | 2:1 | 3 × amount |
+
+        A losing bet returns nothing. For every category the expected net result is −1/37 of the
+        amount (house edge 1/37 ≈ 2.7027 %, return to player 36/37 ≈ 97.2973 %). Example, straight:
+        35 × 1/37 − 1 × 36/37 = −1/37.
+      enum: [STRAIGHT, RED_BLACK, EVEN_ODD, LOW_HIGH, DOZEN]
+
+    RouletteBetColor:
+      type: string
+      description: |
+        Option of a `RED_BLACK` bet. Red: 1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32,
+        34, 36. Black: 2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35. Zero (green)
+        cannot be chosen.
+      enum: [RED, BLACK]
+
+    RouletteParity:
+      type: string
+      description: Option of an `EVEN_ODD` bet. Zero is neither even nor odd.
+      enum: [EVEN, ODD]
+
+    RouletteRange:
+      type: string
+      description: 'Option of a `LOW_HIGH` bet: `LOW` = 1–18, `HIGH` = 19–36. Zero is in neither.'
+      enum: [LOW, HIGH]
+
+    RouletteDozen:
+      type: string
+      description: 'Option of a `DOZEN` bet: `FIRST` = 1–12, `SECOND` = 13–24, `THIRD` = 25–36. Zero is in none.'
+      enum: [FIRST, SECOND, THIRD]
+
+    RouletteNumberColor:
+      type: string
+      description: Color of a winning number. `GREEN` only for 0.
+      enum: [RED, BLACK, GREEN]
+
+    RouletteSpinResult:
+      type: object
+      description: |
+        Result of one roulette round, as stored by the server. The net change of the balance is
+        `totalPayout − totalStake`.
+      required: [roundId, winningNumber, winningColor, bets, totalStake, totalPayout, balance, createdAt]
+      properties:
+        roundId:
+          type: string
+          format: uuid
+          description: Id of the round, generated by the server; the same for a replayed request.
+        winningNumber:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 36
+          description: The number drawn by the server.
+          examples: [17]
+        winningColor:
+          $ref: '#/components/schemas/RouletteNumberColor'
+        bets:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: Every bet of the round with its payout, in the order of the original request.
+          items:
+            $ref: '#/components/schemas/RouletteSettledBet'
+        totalStake:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 10000
+          description: Sum of the bets' amounts, debited as one `ROULETTE_STAKE` ledger entry.
+          examples: [30]
+        totalPayout:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 360000
+          description: |
+            Sum of the bets' payouts, credited as one `ROULETTE_PAYOUT` ledger entry; `0` when nothing
+            was won (then there is no payout entry).
+          examples: [360]
+        balance:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+          description: Balance of the wallet right after this round (after the payout, if any).
+          examples: [1330]
+        createdAt:
+          type: string
+          format: date-time
+          description: When the round was played (UTC).
+
+    RouletteSettledBet:
+      type: object
+      description: |
+        A bet of a played round: the selection as requested (the category and its one option
+        property; the other option properties are omitted), the amount and the payout.
+      required: [category, amount, payout]
+      properties:
+        category:
+          $ref: '#/components/schemas/RouletteBetCategory'
+        number:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 36
+          description: Only for `STRAIGHT`.
+        color:
+          $ref: '#/components/schemas/RouletteBetColor'
+        parity:
+          $ref: '#/components/schemas/RouletteParity'
+        range:
+          $ref: '#/components/schemas/RouletteRange'
+        dozen:
+          $ref: '#/components/schemas/RouletteDozen'
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000
+          description: Stake of this bet in whole virtual coins.
+        payout:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 36000
+          description: |
+            Coins returned for this bet: on a win the stake plus the net winnings (36×, 2× or 3× the
+            amount, see `RouletteBetCategory`), on a loss `0`. Net winnings of a winning bet =
+            `payout − amount`.
+          examples: [360]
 
     ProblemDetail:
       type: object
@@ -1188,7 +1748,8 @@ components:
             The wallet codes `INSUFFICIENT_FUNDS` (debit larger than the balance),
             `IDEMPOTENCY_KEY_REUSED` (an operation key reused with different values) and
             `BALANCE_LIMIT_EXCEEDED` (a credit beyond 2^53 − 1) belong to balance-changing
-            operations, the first of which arrive in Week 4; no operation of this version returns them.
+            operations: they are returned by `POST /api/v1/games/roulette/spins` (planned); no
+            implemented operation of this version returns them.
             New specific codes may be added in later versions, so clients treat an unknown code like
             the generic code of its status class.
           enum:
