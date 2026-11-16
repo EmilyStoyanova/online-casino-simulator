@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The executable jar that Docker and Render run, as built by {@code package} before the integration
- * tests (W3-09): it contains the migrations V1–V8 and no test infrastructure. The retired test-only
+ * tests (W3-09): it contains the migrations V1–V9 and no test infrastructure. The retired test-only
  * ledger types ({@code TEST_CREDIT}, {@code TEST_DEBIT}, P-W3-16, removed in W4-03 by option D) appear in
  * no packaged class or resource, and neither does the former test callback location; test-scoped
  * libraries are absent.
@@ -36,7 +36,7 @@ class ProductionArtifactIT {
             // order (alphabetical on NTFS, hash order on Linux CI), and Flyway sorts by version anyway.
             assertThat(names).filteredOn(name -> name.startsWith(CLASSES + "db/migration/") && name.endsWith(".sql"))
                     .extracting(name -> name.substring((CLASSES + "db/migration/").length(), name.indexOf("__")))
-                    .containsExactlyInAnyOrder("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8");
+                    .containsExactlyInAnyOrder("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9");
             assertThat(names).noneMatch(name -> name.contains("test-callbacks") || name.contains("archfixture")
                     || name.endsWith("IT.class") || name.endsWith("Test.class") || name.contains("TestDatabase")
                     || name.contains("TestAccounts") || name.contains("TestcontainersConfiguration"));

@@ -34,8 +34,8 @@ import org.postgresql.util.PSQLException;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * The Flyway migrations, the wallet schema (V6), the wallet backfill (V7) and the Week 4 ledger types (V8) on PostgreSQL 17
- * (Docker Compose, Testcontainers, CI) **and** 18 (Neon runs 18.6; Render applies migrations at
+ * The Flyway migrations, the wallet schema (V6), the wallet backfill (V7), the Week 4 ledger types (V8) and the roulette
+ * rounds (V9) on PostgreSQL 17 (Docker Compose, Testcontainers, CI) **and** 18 (Neon runs 18.6; Render applies migrations at
  * start-up, so a migration that only works on 17 would break the next staging start). No Spring context.
  *
  * <p>Each test migrates its own new schema in a container started by this class, so no test cleans
@@ -70,7 +70,7 @@ class MigrationCompatibilityIT {
         try (Connection connection = connect(schema)) {
             assertThat(queryString(connection, "SHOW server_version")).startsWith(image.substring("postgres:".length(), image.indexOf('.')));
             assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success"))
-                    .isEqualTo("8");
+                    .isEqualTo("9");
         }
     }
 
@@ -186,7 +186,7 @@ class MigrationCompatibilityIT {
             Map<String, String> constraintsBefore = walletConstraints(connection);
             String triggersBefore = walletTriggers(connection);
 
-            flyway(schema, null).migrate();
+            flyway(schema, "8").migrate();
 
             assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("8");
             // Every wallet, balance and ledger entry is unchanged, byte for byte (ids and times included).
@@ -237,7 +237,7 @@ class MigrationCompatibilityIT {
 
             // Once the cause is gone, the next start applies V8 normally.
             execute(connection, "ALTER TABLE wallet_transactions RENAME CONSTRAINT injected_direction TO ck_wallet_transactions_direction");
-            flyway(schema, null).migrate();
+            flyway(schema, "8").migrate();
             assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("8");
             insertEntry(connection, wallet, "ROULETTE_STAKE", -5, 995, "stake-after-v8");
         }
@@ -328,7 +328,7 @@ class MigrationCompatibilityIT {
             assertThat(after.get(5)).isEqualTo("8,2,1,1,0,0,2,2");
 
             // V8 (W4-03) adds no table; the check recognises it as the Week 4 ledger state.
-            flyway(schema, null).migrate();
+            flyway(schema, "8").migrate();
             List<String> v8 = readOnlyScript(connection, "verify-migrations.sql");
 
             assertThat(v8.get(1).split("\\|")).allSatisfy(row -> assertThat(row).endsWith(",t"))
@@ -337,6 +337,247 @@ class MigrationCompatibilityIT {
             assertThat(v8.get(3)).isEqualTo(after.get(3));
             assertThat(v8.get(4)).isEqualTo("0");
             assertThat(v8.get(5)).isEqualTo("8,2,1,1,0,0,2,2");
+
+            // V9 (W4-05) adds the two roulette tables; they are expected, not unexpected.
+            flyway(schema, null).migrate();
+            List<String> v9 = readOnlyScript(connection, "verify-migrations.sql");
+
+            assertThat(v9.get(1).split("\\|")).allSatisfy(row -> assertThat(row).endsWith(",t"))
+                    .filteredOn(row -> row.contains(",SQL,")).hasSize(9);
+            assertThat(v9.get(2)).isEqualTo("9,0,V9: Week 4 roulette rounds");
+            assertThat(v9.get(3)).doesNotContain(",f").contains("roulette_rounds,9,t", "roulette_bets,9,t");
+            assertThat(v9.get(4)).isEqualTo("0");
+            assertThat(v9.get(5)).isEqualTo("8,2,1,1,0,0,2,2");
+        }
+    }
+
+    // ------------------------------------------------------------------ V9: roulette rounds (W4-05)
+
+    @Test
+    void v9AddsTheEmptyRouletteTablesAndChangesNothingElse() throws SQLException {
+        // A database at V8 with players, wallets and ledger entries of every type (the state after a
+        // future V8 rollout); V9 must not touch any of it.
+        String schema = migrated("6");
+        try (Connection connection = connect(schema)) {
+            insertUser(connection, "alice@example.com");
+            insertUser(connection, "bob@example.com", "PLAYER", "DISABLED");
+            insertUser(connection, "admin@example.com", "ADMIN", "ACTIVE");
+            flyway(schema, "8").migrate();
+            UUID wallet = UUID.fromString(queryString(connection, "SELECT id FROM wallets ORDER BY id LIMIT 1"));
+            insertEntry(connection, wallet, "ROULETTE_STAKE", -30, 970, "roulette-round:r1:stake");
+            insertEntry(connection, wallet, "ROULETTE_PAYOUT", 360, 1330, "roulette-round:r1:payout");
+            execute(connection, "UPDATE wallets SET balance = 1330 WHERE id = '" + wallet + "'");
+            Map<String, String> tablesBefore = untouchedTables(connection);
+            String ledgerBefore = rows(connection, "wallets") + rows(connection, "wallet_transactions");
+            Map<String, String> constraintsBefore = walletConstraints(connection);
+            String triggersBefore = walletTriggers(connection);
+
+            flyway(schema, null).migrate();
+
+            assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("9");
+            assertThat(rows(connection, "wallets") + rows(connection, "wallet_transactions")).isEqualTo(ledgerBefore);
+            assertThat(untouchedTables(connection)).isEqualTo(tablesBefore);
+            assertThat(walletConstraints(connection)).isEqualTo(constraintsBefore);
+            assertThat(walletTriggers(connection)).isEqualTo(triggersBefore);
+            assertThat(verification(connection)).containsExactly("0,0,0,0", "2,1,2,2");
+            assertThat(queryString(connection, "SELECT (SELECT count(*) FROM roulette_rounds) || ':' || (SELECT count(*) FROM roulette_bets)"))
+                    .isEqualTo("0:0");
+            // The new tables carry exactly the planned constraints and both append-only triggers.
+            assertThat(constraintNames(connection, "roulette_rounds")).containsExactly("ck_roulette_rounds_balance",
+                    "ck_roulette_rounds_distinct_entries", "ck_roulette_rounds_number", "ck_roulette_rounds_payout",
+                    "ck_roulette_rounds_payout_entry", "ck_roulette_rounds_stake", "fk_roulette_rounds_payout_entry",
+                    "fk_roulette_rounds_stake_entry", "fk_roulette_rounds_user", "roulette_rounds_pkey",
+                    "uq_roulette_rounds_payout_entry", "uq_roulette_rounds_request", "uq_roulette_rounds_stake_entry");
+            assertThat(constraintNames(connection, "roulette_bets")).containsExactly("ck_roulette_bets_amount",
+                    "ck_roulette_bets_category", "ck_roulette_bets_option", "ck_roulette_bets_payout", "fk_roulette_bets_round",
+                    "roulette_bets_pkey", "uq_roulette_bets_selection");
+            assertThat(queryString(connection, """
+                    SELECT string_agg(tgrelid::regclass::text || '.' || tgname, ',' ORDER BY tgname COLLATE "C") FROM pg_trigger
+                    WHERE NOT tgisinternal AND tgrelid IN ('roulette_rounds'::regclass, 'roulette_bets'::regclass)"""))
+                    .isEqualTo("roulette_bets.trg_roulette_bets_append_only,roulette_rounds.trg_roulette_rounds_append_only");
+        }
+    }
+
+    @Test
+    void roundsFollowTheirRules() throws SQLException {
+        try (Connection connection = connect(migrated(null))) {
+            Ledger ledger = ledger(connection, "rita@example.com");
+            UUID request = UUID.randomUUID();
+            execute(connection, roundSql(UUID.randomUUID(), ledger.user(), request, 17, 30, 360, 1330, ledger.stake(), ledger.payout()));
+            // A losing round has no payout entry.
+            long otherStake = insertEntry(connection, ledger.wallet(), "ROULETTE_STAKE", -50, 1280, "roulette-round:r2:stake");
+            execute(connection, roundSql(UUID.randomUUID(), ledger.user(), UUID.randomUUID(), 8, 50, 0, 1280, otherStake, null));
+
+            long freshStake = insertEntry(connection, ledger.wallet(), "ROULETTE_STAKE", -10, 1270, "roulette-round:r3:stake");
+            long freshPayout = insertEntry(connection, ledger.wallet(), "ROULETTE_PAYOUT", 20, 1290, "roulette-round:r3:payout");
+            UUID user = ledger.user();
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 37, 10, 20, 1290, freshStake, freshPayout),
+                    "ck_roulette_rounds_number");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), -1, 10, 20, 1290, freshStake, freshPayout),
+                    "ck_roulette_rounds_number");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 0, 20, 1290, freshStake, freshPayout),
+                    "ck_roulette_rounds_stake");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, -1, 1290, freshStake, freshPayout),
+                    "ck_roulette_rounds_payout");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, 20, -1, freshStake, freshPayout),
+                    "ck_roulette_rounds_balance");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, 20, 9007199254740992L, freshStake,
+                    freshPayout), "ck_roulette_rounds_balance");
+            // A payout entry exactly when something was won.
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, 0, 1290, freshStake, freshPayout),
+                    "ck_roulette_rounds_payout_entry");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, 20, 1290, freshStake, null),
+                    "ck_roulette_rounds_payout_entry");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, 20, 1290, freshStake, freshStake),
+                    "ck_roulette_rounds_distinct_entries");
+            // One round per request and player; an entry belongs to one round only.
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, request, 5, 10, 20, 1290, freshStake, freshPayout),
+                    "uq_roulette_rounds_request");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, 20, 1290, ledger.stake(), freshPayout),
+                    "uq_roulette_rounds_stake_entry");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, 20, 1290, freshStake, ledger.payout()),
+                    "uq_roulette_rounds_payout_entry");
+            // Every reference must exist.
+            assertViolation(connection, roundSql(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 5, 10, 20, 1290, freshStake,
+                    freshPayout), "fk_roulette_rounds_user");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, 20, 1290, 999_999, freshPayout),
+                    "fk_roulette_rounds_stake_entry");
+            assertViolation(connection, roundSql(UUID.randomUUID(), user, UUID.randomUUID(), 5, 10, 20, 1290, freshStake, 999_999L),
+                    "fk_roulette_rounds_payout_entry");
+            assertViolation(connection, "INSERT INTO roulette_rounds (id, user_id, winning_number, total_stake, total_payout, "
+                    + "balance_after, stake_transaction_id) VALUES ('" + UUID.randomUUID() + "', '" + user + "', 5, 10, 0, 1290, "
+                    + freshStake + ")", null);
+            // The same request id of another player is a different request.
+            UUID other = insertUser(connection, "sam@example.com");
+            execute(connection, roundSql(UUID.randomUUID(), other, request, 5, 10, 20, 1290, freshStake, freshPayout));
+            assertThat(queryString(connection, "SELECT count(*) FROM roulette_rounds")).isEqualTo("3");
+        }
+    }
+
+    @Test
+    void betsAllowExactlyTheOptionOfTheirCategory() throws SQLException {
+        try (Connection connection = connect(migrated(null))) {
+            Ledger ledger = ledger(connection, "bea@example.com");
+            UUID round = UUID.randomUUID();
+            execute(connection, roundSql(round, ledger.user(), UUID.randomUUID(), 17, 30, 360, 1330, ledger.stake(), ledger.payout()));
+            // One valid bet of every category and option (payouts for 17: straight 17, black, odd, low, second dozen win).
+            execute(connection, betSql(round, "STRAIGHT", null, 17, 10, 360));
+            execute(connection, betSql(round, "STRAIGHT", null, 0, 10, 0));
+            execute(connection, betSql(round, "STRAIGHT", null, 36, 10, 0));
+            for (String[] option : new String[][] {{"RED_BLACK", "RED", "0"}, {"RED_BLACK", "BLACK", "20"}, {"EVEN_ODD", "EVEN", "0"},
+                    {"EVEN_ODD", "ODD", "20"}, {"LOW_HIGH", "LOW", "20"}, {"LOW_HIGH", "HIGH", "0"}, {"DOZEN", "FIRST", "0"},
+                    {"DOZEN", "SECOND", "30"}, {"DOZEN", "THIRD", "0"}}) {
+                execute(connection, betSql(round, option[0], option[1], null, 10, Long.parseLong(option[2])));
+            }
+            assertThat(queryString(connection, "SELECT count(*) FROM roulette_bets")).isEqualTo("12");
+
+            // The number only for STRAIGHT, within 0-36; a selection only for the other categories, with their own options.
+            assertViolation(connection, betSql(round, "STRAIGHT", null, 37, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "STRAIGHT", null, -1, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "STRAIGHT", null, null, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "STRAIGHT", "RED", 5, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "RED_BLACK", "RED", 5, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "RED_BLACK", null, null, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "RED_BLACK", "GREEN", null, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "EVEN_ODD", "RED", null, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "LOW_HIGH", "EVEN", null, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "DOZEN", "FOURTH", null, 10, 0), "ck_roulette_bets_option");
+            assertViolation(connection, betSql(round, "DOZEN", "first", null, 10, 0), "ck_roulette_bets_option");
+            // No other category (no columns, splits or variants).
+            assertViolation(connection, betSql(round, "COLUMN", "FIRST", null, 10, 0), "ck_roulette_bets_category");
+            assertViolation(connection, betSql(round, "SPLIT", null, 17, 10, 0), "ck_roulette_bets_category");
+            // Amounts and exact payout multiples (36x, 3x, 2x or nothing).
+            assertViolation(connection, betSql(round, "STRAIGHT", null, 5, 0, 0), "ck_roulette_bets_amount");
+            assertViolation(connection, betSql(round, "STRAIGHT", null, 5, 9007199254740992L, 0), "ck_roulette_bets_amount");
+            assertViolation(connection, betSql(round, "STRAIGHT", null, 5, 10, 350), "ck_roulette_bets_payout");
+            assertViolation(connection, betSql(round, "DOZEN", "FIRST", null, 10, 20), "ck_roulette_bets_payout");
+            assertViolation(connection, betSql(round, "RED_BLACK", "RED", null, 10, 30), "ck_roulette_bets_payout");
+            assertViolation(connection, betSql(round, "EVEN_ODD", "ODD", null, 10, -20), "ck_roulette_bets_payout");
+            // A selection at most once per round; a different number is a different selection.
+            assertViolation(connection, betSql(round, "STRAIGHT", null, 17, 5, 0), "uq_roulette_bets_selection");
+            assertViolation(connection, betSql(round, "RED_BLACK", "RED", null, 5, 0), "uq_roulette_bets_selection");
+            execute(connection, betSql(round, "STRAIGHT", null, 18, 5, 0));
+            assertViolation(connection, betSql(UUID.randomUUID(), "STRAIGHT", null, 1, 5, 0), "fk_roulette_bets_round");
+            assertThat(queryString(connection, "SELECT count(*) FROM roulette_bets")).isEqualTo("13");
+        }
+    }
+
+    @Test
+    void roundsAndBetsAreAppendOnlyAndKeepTheirReferences() throws SQLException {
+        try (Connection connection = connect(migrated(null))) {
+            Ledger ledger = ledger(connection, "ana@example.com");
+            UUID round = UUID.randomUUID();
+            execute(connection, roundSql(round, ledger.user(), UUID.randomUUID(), 17, 10, 360, 1330, ledger.stake(), ledger.payout()));
+            execute(connection, betSql(round, "STRAIGHT", null, 17, 10, 360));
+
+            assertTriggerRejects(connection, "UPDATE roulette_rounds SET winning_number = 5", "roulette_rounds is append-only: UPDATE rejected");
+            assertTriggerRejects(connection, "UPDATE roulette_rounds SET total_payout = 0, payout_transaction_id = NULL",
+                    "roulette_rounds is append-only: UPDATE rejected");
+            assertTriggerRejects(connection, "DELETE FROM roulette_rounds", "roulette_rounds is append-only: DELETE rejected");
+            assertTriggerRejects(connection, "UPDATE roulette_bets SET payout = 0", "roulette_bets is append-only: UPDATE rejected");
+            assertTriggerRejects(connection, "DELETE FROM roulette_bets", "roulette_bets is append-only: DELETE rejected");
+            // The referenced ledger entries stay (their own trigger and the foreign keys).
+            assertTriggerRejects(connection, "DELETE FROM wallet_transactions WHERE id = " + ledger.stake(),
+                    "wallet_transactions is append-only: DELETE rejected");
+            assertThat(queryString(connection, "SELECT count(*) || ':' || (SELECT count(*) FROM roulette_bets) FROM roulette_rounds"))
+                    .isEqualTo("1:1");
+
+            // A rolled-back round leaves nothing (it is never half stored).
+            connection.setAutoCommit(false);
+            long stake = insertEntry(connection, ledger.wallet(), "ROULETTE_STAKE", -10, 1320, "roulette-round:rolled-back:stake");
+            UUID rolledBack = UUID.randomUUID();
+            execute(connection, roundSql(rolledBack, ledger.user(), UUID.randomUUID(), 3, 10, 0, 1320, stake, null));
+            execute(connection, betSql(rolledBack, "DOZEN", "FIRST", null, 10, 30));
+            connection.rollback();
+            connection.setAutoCommit(true);
+            assertThat(queryString(connection, "SELECT count(*) || ':' || (SELECT count(*) FROM roulette_bets) FROM roulette_rounds"))
+                    .isEqualTo("1:1");
+        }
+    }
+
+    @Test
+    void theForeignKeysProveExistenceNotOwnership() throws SQLException {
+        // Documented gap (docs/plans/week-04.md §5.7): the database proves that a round's entries exist and
+        // keeps them, but not that they belong to the round's player. RouletteService (W4-06) writes both
+        // from one operation; the W4-08 reconciliation detects any mismatch. This test pins the behaviour.
+        try (Connection connection = connect(migrated(null))) {
+            Ledger ledger = ledger(connection, "owner@example.com");
+            UUID stranger = insertUser(connection, "stranger@example.com"); // no wallet at all
+
+            execute(connection, roundSql(UUID.randomUUID(), stranger, UUID.randomUUID(), 17, 30, 360, 1330, ledger.stake(),
+                    ledger.payout()));
+
+            // ON DELETE RESTRICT: the account of a round cannot be deleted (no wallet blocks it here).
+            assertViolation(connection, "DELETE FROM users WHERE id = '" + stranger + "'", "fk_roulette_rounds_user");
+        }
+    }
+
+    @Test
+    void aFailedV9LeavesV8AndCanBeRepeated() throws SQLException {
+        String schema = migrated("8");
+        try (Connection connection = connect(schema)) {
+            insertUser(connection, "alice@example.com");
+            String before = rows(connection, "users") + rows(connection, "wallets") + rows(connection, "wallet_transactions");
+            // Fault injection in this throw-away schema only: a table of the same name makes V9's second
+            // CREATE TABLE fail after its function and first table were created in the same transaction.
+            execute(connection, "CREATE TABLE roulette_bets (injected INT)");
+
+            assertThatThrownBy(() -> flyway(schema, null).migrate()).isInstanceOf(FlywayException.class)
+                    .hasMessageContaining("roulette_bets");
+
+            // Rolled back as a whole: no function, no rounds table, V9 not recorded, nothing else changed.
+            assertThat(queryString(connection, "SELECT to_regclass('roulette_rounds') IS NULL")).isEqualTo("t");
+            assertThat(queryString(connection, "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                    + "WHERE p.proname = 'reject_row_change' AND n.nspname = current_schema()")).isEqualTo("0");
+            assertThat(queryString(connection, "SELECT count(*) FROM flyway_schema_history WHERE version = '9'")).isEqualTo("0");
+            assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("8");
+            assertThat(rows(connection, "users") + rows(connection, "wallets") + rows(connection, "wallet_transactions")).isEqualTo(before);
+
+            // Once the cause is gone, the next start applies V9 normally.
+            execute(connection, "DROP TABLE roulette_bets");
+            flyway(schema, null).migrate();
+            assertThat(queryString(connection, "SELECT max(version::int)::text FROM flyway_schema_history WHERE success")).isEqualTo("9");
+            assertThat(queryString(connection, "SELECT to_regclass('roulette_bets') IS NOT NULL")).isEqualTo("t");
         }
     }
 
@@ -644,6 +885,42 @@ class MigrationCompatibilityIT {
     private static String entrySql(UUID wallet, String type, long amount, long balanceAfter, String key) {
         return "INSERT INTO wallet_transactions (wallet_id, type, amount, balance_after, idempotency_key) VALUES ('"
                 + wallet + "', '" + type + "', " + amount + ", " + balanceAfter + ", '" + key + "')";
+    }
+
+    /** A player with a wallet of 1,330 coins: starting entry, a stake of 30 and a payout of 360. */
+    private record Ledger(UUID user, UUID wallet, long stake, long payout) {
+    }
+
+    private static Ledger ledger(Connection connection, String email) throws SQLException {
+        UUID user = insertUser(connection, email);
+        UUID wallet = insertWallet(connection, user, 1330);
+        insertEntry(connection, wallet, "STARTING_BALANCE", 1000, 1000, "starting-balance");
+        long stake = insertEntry(connection, wallet, "ROULETTE_STAKE", -30, 970, "roulette-round:r1:stake");
+        long payout = insertEntry(connection, wallet, "ROULETTE_PAYOUT", 360, 1330, "roulette-round:r1:payout");
+        return new Ledger(user, wallet, stake, payout);
+    }
+
+    private static String roundSql(UUID id, UUID user, UUID request, int winningNumber, long totalStake, long totalPayout,
+                                   long balanceAfter, long stakeEntry, Long payoutEntry) {
+        return "INSERT INTO roulette_rounds (id, user_id, request_id, winning_number, total_stake, total_payout, balance_after, "
+                + "stake_transaction_id, payout_transaction_id) VALUES ('" + id + "', '" + user + "', '" + request + "', "
+                + winningNumber + ", " + totalStake + ", " + totalPayout + ", " + balanceAfter + ", " + stakeEntry + ", "
+                + (payoutEntry == null ? "NULL" : payoutEntry) + ")";
+    }
+
+    private static String betSql(UUID round, String category, String selection, Integer number, long amount, long payout) {
+        return "INSERT INTO roulette_bets (round_id, category, selection, number, amount, payout) VALUES ('" + round + "', '"
+                + category + "', " + (selection == null ? "NULL" : "'" + selection + "'") + ", "
+                + (number == null ? "NULL" : number) + ", " + amount + ", " + payout + ")";
+    }
+
+    /**
+     * The constraint names of a table, sorted. NOT NULL constraints are left out: PostgreSQL 18 records them
+     * in {@code pg_constraint} (type {@code n}), 17 does not.
+     */
+    private static List<String> constraintNames(Connection connection, String table) throws SQLException {
+        return List.of(queryString(connection, "SELECT string_agg(conname, ',' ORDER BY conname COLLATE \"C\") FROM pg_constraint "
+                + "WHERE contype <> 'n' AND conrelid = '" + table + "'::regclass").split(","));
     }
 
     private static String queryString(Connection connection, String sql) throws SQLException {

@@ -41,7 +41,7 @@ class CasinoSimulatorApplicationIT {
     @Test
     void appliesFlywayMigrationsOnStartup() {
         assertThat(flyway.info().pending()).isEmpty();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
 
         Integer functionCount = jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM pg_proc WHERE proname = 'set_updated_at'", Integer.class);
@@ -66,7 +66,7 @@ class CasinoSimulatorApplicationIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"))
                 .andExpect(jsonPath("$.database.status").value("UP"))
-                .andExpect(jsonPath("$.database.schemaVersion").value("8"))
+                .andExpect(jsonPath("$.database.schemaVersion").value("9"))
                 .andExpect(jsonPath("$.version").isNotEmpty());
     }
 
