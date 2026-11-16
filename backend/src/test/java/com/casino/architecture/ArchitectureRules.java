@@ -8,8 +8,13 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+import java.util.SplittableRandom;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.random.RandomGenerator;
 
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.CompositeArchRule;
@@ -24,8 +29,8 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 /**
  * Architecture rules of the modular monolith: module boundaries (ADR-0001), layered packages inside
  * each module (ADR-0004) and their enforcement with ArchUnit (ADR-0005). The rule ids R1–R12 match
- * {@code docs/plans/week-02.md} §9; R13–R14 match {@code docs/plans/week-03.md} §9 (R15 was retired in
- * W4-03, {@code docs/plans/week-04.md}).
+ * {@code docs/plans/week-02.md} §9; R13–R14 match {@code docs/plans/week-03.md} §9; R16–R17 match
+ * {@code docs/plans/week-04.md} (R15 was retired in W4-03; ids are not reused).
  *
  * <p>The rules are parameterised by the root package, so {@code ArchitectureRulesTest} can prove
  * against a small fixture that every rule actually detects its violation.
@@ -36,9 +41,13 @@ final class ArchitectureRules {
     static final List<String> BUSINESS_MODULES =
             List.of("auth", "user", "wallet", "game", "learning", "responsibleplay", "admin");
 
-    /** Layer packages inside a module (ADR-0004). */
+    /**
+     * Layer packages inside a module (ADR-0004). {@code model} (W4-04, Q7) holds plain domain types and
+     * pure rules that a module's controller, service and entity layers share (R17); it is not part of the
+     * module's public API.
+     */
     static final List<String> LAYERS =
-            List.of("controller", "service", "repository", "entity", "dto", "config", "exception");
+            List.of("controller", "service", "repository", "entity", "dto", "model", "config", "exception");
 
     /** Layers of a module that other modules may use: its public API. */
     static final List<String> PUBLIC_API_LAYERS = List.of("service", "dto", "exception");
@@ -167,6 +176,45 @@ final class ArchitectureRules {
 
     // R15 (the test-only ledger types were not used by production code) was retired in W4-03 together
     // with those types (docs/plans/week-04.md, option D). Its id is not reused.
+
+    /**
+     * R16: no weak or predictable randomness (W4-04). Game outcomes come from {@link SecureRandom}, seeded by
+     * the JDK. Forbidden: constructing {@link Random} (with or without a seed, e.g. the time), extending it,
+     * {@code Math.random()}, {@link ThreadLocalRandom}, {@link SplittableRandom}, the default or named
+     * {@link RandomGenerator}s, and seeding a {@code SecureRandom}. Constructing and using a {@code SecureRandom}
+     * stays allowed: the rule names {@code Random}'s own constructors, not those of its subclass.
+     */
+    ArchRule noWeakRandomness() {
+        return noClasses().that().resideInAPackage(root + "..")
+                .should().callConstructor(Random.class)
+                .orShould().callConstructor(Random.class, long.class)
+                .orShould().beAssignableTo(Random.class)
+                .orShould().callMethod(Random.class, "setSeed", long.class)
+                .orShould().callMethod(Math.class, "random")
+                .orShould().callMethod(StrictMath.class, "random")
+                .orShould().dependOnClassesThat().haveFullyQualifiedName(ThreadLocalRandom.class.getName())
+                .orShould().dependOnClassesThat().haveFullyQualifiedName(SplittableRandom.class.getName())
+                .orShould().dependOnClassesThat().haveFullyQualifiedName("java.util.random.RandomGeneratorFactory")
+                .orShould().callMethod(RandomGenerator.class, "getDefault")
+                .orShould().callMethod(RandomGenerator.class, "of", String.class)
+                .orShould().callConstructor(SecureRandom.class, byte[].class)
+                .orShould().callMethod(SecureRandom.class, "setSeed", long.class)
+                .orShould().callMethod(SecureRandom.class, "setSeed", byte[].class)
+                .as("R16 randomness comes only from an unseeded java.security.SecureRandom");
+    }
+
+    /**
+     * R17: {@code model} packages hold plain domain types and pure rules (W4-04, Q7): no Spring, JPA,
+     * Hibernate or servlet types, and no other layer of any module. So entities, DTOs and services can all
+     * use them without a dependency on each other, and the rules stay testable without a context.
+     */
+    ArchRule modelsArePlainDomainTypes() {
+        return noClasses().that().resideInAPackage(root + "..model..")
+                .should().dependOnClassesThat().resideInAnyPackage("org.springframework..", "jakarta.persistence..",
+                        "org.hibernate..", "jakarta.servlet..", root + "..controller..", root + "..service..",
+                        root + "..repository..", root + "..entity..", root + "..dto..", root + "..config..")
+                .as("R17 model packages hold plain domain types: no Spring, JPA, Hibernate, servlet or other layer");
+    }
 
     /** R10: dependencies are injected through constructors. */
     ArchRule noFieldInjection() {

@@ -55,4 +55,10 @@ class ModuleArchitectureTest {
 
     @ArchTest
     static final ArchRule walletUsesUserOnlyThroughDtos = RULES.walletUsesUserOnlyThroughDtos();
+
+    @ArchTest
+    static final ArchRule noWeakRandomness = RULES.noWeakRandomness();
+
+    @ArchTest
+    static final ArchRule modelsArePlainDomainTypes = RULES.modelsArePlainDomainTypes();
 }

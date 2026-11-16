@@ -5,6 +5,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
+
+import com.casino.game.service.RouletteWheel;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +35,9 @@ class CasinoSimulatorApplicationIT {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private List<RouletteWheel> wheels;
+
     @Test
     void appliesFlywayMigrationsOnStartup() {
         assertThat(flyway.info().pending()).isEmpty();
@@ -44,6 +50,14 @@ class CasinoSimulatorApplicationIT {
         assertThat(jdbcTemplate.queryForList(
                 "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'spring_session%'", String.class))
                 .containsExactlyInAnyOrder("spring_session", "spring_session_attributes");
+    }
+
+    @Test
+    void theOnlyRouletteWheelIsTheSecureRandomWheel() {
+        // W4-04: no other wheel (fixed, seeded, test) exists in the application context.
+        assertThat(wheels).singleElement()
+                .satisfies(wheel -> assertThat(wheel.getClass().getName()).isEqualTo("com.casino.game.service.SecureRandomRouletteWheel"))
+                .satisfies(wheel -> assertThat(wheel.spin()).isBetween(0, 36));
     }
 
     @Test
