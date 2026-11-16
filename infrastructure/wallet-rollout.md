@@ -4,11 +4,31 @@ This runbook brings the Week 3 wallet (Flyway **V6** and **V7**, `GET /api/v1/wa
 `GET /api/v1/wallet/transactions`) to the staging environment:
 
 ```
-Vercel (frontend, auto-deploys main) ──/api──▶ Render staging backend ──▶ Neon branch staging (V5 today)
+Vercel (frontend, auto-deploys main) ──/api──▶ Render staging backend ──▶ Neon branch staging (V5 before, V7 after)
 ```
 
-**Nothing in this runbook has been done.** It prepares a future, separately approved deployment.
+**Status: executed on 2026-11-15** with the project owner's approval; see the
+[rollout record](#rollout-record-2026-11-15) below. The steps after it are kept unchanged as the
+historical procedure and as the template for later migrations (Week 4: `docs/plans/week-04.md` §15).
 Neon `production` is never touched: every command here uses the `staging` branch only.
+
+## Rollout record (2026-11-15)
+
+| Step | Result |
+|---|---|
+| Merge | Week 3 merged into `main` (PR #9, merge commit `b07e656`), CI green |
+| Restore point | Neon branch `staging-before-week-03` created from `staging` at V5 before the deploy. **Kept**; it is not deleted without a separate approval |
+| Deploy | Manual Render deploy of `main` (Auto-Deploy stays Off); the backend started successfully |
+| Migration | Flyway applied V6 and V7 to Neon `staging` at start-up: V5 → **V7** |
+| Backfill (V7) | The one existing `PLAYER` received a wallet with **1,000** coins and one `STARTING_BALANCE` entry |
+| `GET /api/v1/wallet` | `200`, `balance` 1000 |
+| `GET /api/v1/wallet/transactions` | `200`, one `STARTING_BALANCE` entry |
+| Read-only integrity checks (`verify-wallets.sql`) | **0** violations |
+| Registration | Still closed (`APP_REGISTRATION_ENABLED=false`) |
+| Neon `production` | Untouched |
+
+No rollback was needed. Later migrations follow their own approved runbook; they do not re-run V6
+or V7.
 
 **Approval.** Each step marked **APPROVAL** changes a shared system and needs an explicit,
 separate go-ahead from the project owner at the time it is done. Read-only steps (marked
@@ -202,7 +222,9 @@ editing `flyway_schema_history` breaks later starts.
 ## After the rollout
 
 - Update [docs/database.md → Neon](../docs/database.md#neon) (staging at V7, date) and the status
-  in the [README](../README.md) (documentation change, its own pull request).
-- Delete `staging-before-week-03` once the rollout is accepted (**APPROVAL**).
+  in the [README](../README.md) (documentation change, its own pull request). *Done in W4-01
+  (2026-11-15).*
+- Delete `staging-before-week-03` once the rollout is accepted (**APPROVAL**). *Not done: the branch
+  is kept by decision of the project owner.*
 - Registration stays closed until it is opened on purpose
   ([render/README.md](render/README.md#registrations-on-a-public-url)).
