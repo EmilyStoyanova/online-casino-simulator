@@ -1,12 +1,14 @@
 # Week 4 Plan — European Roulette Engine
 
-- **Status:** Revision 6. W4-01 reviewed 2026-11-15: direction approved; Q2–Q6, Q10 and Q14
+- **Status:** Revision 8. W4-01 reviewed 2026-11-15: direction approved; Q2–Q6, Q10 and Q14
   approved with corrections (§13.1). W4-02 contract 0.5.0 approved (Q1a, Q13, Q16, Q18). W4-03 (V8,
   production ledger types) approved. W4-04 rules and secure wheel approved 2026-11-16 (§4.7; Q7,
   Q7a, Q9, R16); checkpoint pushed (`058dcb3`). W4-05 persistence approved (§5.7; Q8, Q11, Q19).
-  **W4-06 atomic spin service done, pending review** (§7.6; Q17 and the §5.7 approach approved
-  2026-11-16). V8 and V9 are applied to Testcontainers only, **not to any Neon branch** (staging stays
-  at V7). No spin endpoint yet (W4-07).
+  W4-06 atomic spin service (§7.6; Q17 and the §5.7 approach approved 2026-11-16); checkpoint pushed
+  (`c570b51`). W4-07 endpoint `POST /api/v1/games/roulette/spins` approved 2026-11-19 (§6.6; Q10
+  approved). **W4-08 concurrency, ledger integrity and coverage done, pending review** (§5.8; Q18 scope
+  reviewed). V8 and V9 are applied to Testcontainers only, **not to any Neon branch** (staging stays
+  at V7); `verify-roulette.sql` has not been run against Neon.
   Decisions still marked *Proposed* need approval before the task that depends on them starts (§13).
 - **Stage:** 2 — Virtual currency and game logic (Weeks 3–4)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`), §4 (Week 4),
@@ -36,6 +38,8 @@
 | 4 | 2026-11-16 | W4-03 approved; W4-04: `game.model` rules and enums, secure wheel, R16, R17, opt-in chi-square diagnostic, JaCoCo for the game packages (§3, §4.6, §4.7, §10.5, §10.6) |
 | 5 | 2026-11-16 | W4-04 approved, Q7a in ADR-0004; W4-05: V9, `RouletteRound`/`RouletteBet`, `RouletteRoundRepository`, cleanup list, ledger-consistency gap analysis (§5.7) |
 | 6 | 2026-11-16 | W4-05 approved; W4-06: `WalletService.lockWallet`, `RouletteService.spin`, `PlayedRound`, Q17 replay, failure and ownership tests (§7.6) |
+| 7 | 2026-11-18 | W4-07: `RouletteController`, request and response DTOs, strict JSON values (Q10), canonical `Idempotency-Key` (Q18), `PLAYER` rule for `/api/v1/games/**`, planned marker removed (§6.6) |
+| 8 | 2026-11-19 | W4-07 approved; W4-08: `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, `verify-roulette.sql`, `verify-migrations.sql` with round counts, JaCoCo rule proven for `game.service`, Q18 scope review (§5.8) |
 
 ---
 
@@ -157,7 +161,7 @@ session principal in the controller. `wallet` never depends on `game`.
 
 ---
 
-## 3. Module structure (W4-04: `model` and the wheel exist; the rest is proposed)
+## 3. Module structure (implemented in W4-04 to W4-07)
 
 ```
 com.casino.game                 depends on: common, wallet (service, dto, exception)
@@ -172,9 +176,10 @@ com.casino.game                 depends on: common, wallet (service, dto, except
 │                RouletteService     — spin(): the transaction of one round (§7, W4-06)
 ├── repository/  RouletteRoundRepository — save, findByUserIdAndRequestId (W4-05)
 ├── entity/      RouletteRound, RouletteBet (@Immutable, no setters; W4-05)
-└── dto/         RouletteSpinRequest, RouletteBet, RouletteSpinResult, RouletteSettledBet,
-                 bet validation constraints (exactly the option of the category, no duplicate
-                 selections) (W4-07); they use the model enums directly
+├── dto/         RouletteSpinRequest, RouletteBetRequest (schema RouletteBet), RouletteSpinResult,
+│                RouletteSettledBet, constraints OneOptionPerCategory and DistinctSelections,
+│                StrictJson deserializers (Q10) (W4-07); they use the model enums directly
+└── controller/  RouletteController — POST /api/v1/games/roulette/spins (W4-07)
 ```
 
 - **No `config` and no `exception` package** in Week 4: limits are contract constants (§4.5), and
@@ -290,7 +295,7 @@ only.
 | Option property of another category | must be omitted (`null` = omitted) | `400 VALIDATION_FAILED`, e.g. field `bets[i].dozen` |
 | Same selection twice in one spin | not allowed | `400 VALIDATION_FAILED`, field `bets` |
 | Unknown category or option value, wrong JSON type | not allowed | `400 MALFORMED_REQUEST` (existing convention) |
-| **Strict integers:** `amount` and `number` written with a fraction or exponent (`10.5`, `10.0`, `1e1`) or as a string (`"10"`) | rejected, never rounded or converted | `400 MALFORMED_REQUEST`; the Jackson mechanism is verified and configured in W4-07 |
+| **Strict integers:** `amount` and `number` written with a fraction or exponent (`10.5`, `10.0`, `1e1`) or as a string (`"10"`) | rejected, never rounded or converted | `400 MALFORMED_REQUEST`; per-field deserializers, implemented in W4-07 (§6.6) |
 | Total stake ≤ current balance | checked under the wallet lock | `409 INSUFFICIENT_FUNDS`, nothing written |
 
 - The limits are **constants** in the contract (`minimum`/`maximum`/`maxItems`) and in the DTO
@@ -525,8 +530,9 @@ And globally:
 7. All Week 3 wallet invariants (`WalletTestData.ledgerViolations()`, `verify-wallets.sql`) still
    hold.
 
-`infrastructure/neon/verify-roulette.sql` (W4-08, read-only) counts violations of 1, 3–6; it runs in
-`MigrationCompatibilityIT` under `default_transaction_read_only = on`, like the Week 3 scripts.
+`infrastructure/neon/verify-roulette.sql` (W4-08, read-only) counts violations of 1–6 (2 in full, not only
+the multiple: §5.8); it runs in `MigrationCompatibilityIT` under `default_transaction_read_only = on`, like the
+Week 3 scripts.
 `verify-migrations.sql` learns the V9 state (tables `roulette_rounds`, `roulette_bets`).
 
 ### 5.6 Implemented in W4-03 (pending review)
@@ -639,7 +645,7 @@ module):
 `CASCADE`); guards G1–G5 unchanged.
 
 **Read-only script:** `verify-migrations.sql` recognises `V9: Week 4 roulette rounds` and expects the two
-tables from V9 on (tested at V5, V7, V8 and V9). `verify-roulette.sql` (the reconciliation) stays in W4-08.
+tables from V9 on (tested at V5, V7, V8 and V9). `verify-roulette.sql` (the reconciliation) is implemented in W4-08 (§5.8).
 
 **Cross-module ledger consistency — what the database proves and what it does not.** A foreign key proves
 that the referenced ledger entry exists and keeps it; it does not prove that the entry is the round's own.
@@ -675,6 +681,103 @@ would be a bug, not a user error). This can be revisited if a second writer of r
   and rolls back its ledger entries too; a round needs a bet.
 - `MigrationsIT`, `CasinoSimulatorApplicationIT` (schema version 9), `ProductionArtifactIT` (V1–V9).
 
+### 5.8 Implemented in W4-08 (pending review)
+
+**Concurrency** (`RouletteConcurrencyIT`, PostgreSQL, deterministic wheel, the production lock timeout of
+5 s asserted, threads released together by a latch, more threads than the 10 pooled connections). Every
+outcome is either the expected result or the one expected exception; anything else (a lock timeout, a
+unique-key violation) fails the test with its cause. None occurred.
+
+| Scenario | Result |
+|---|---|
+| A — 20 parallel losing spins of 100 coins, different keys, one wallet of 1,000 (AC-W4-08.1) | 10 rounds and 10 `INSUFFICIENT_FUNDS`; balance 0; the committed rounds report the balances 900, 800, … 0 (each saw the previous commit); 10 draws (a rejected spin draws nothing); 10 `ROULETTE_STAKE` entries summing to −1,000, no payout entry, no orphan |
+| B — 10 parallel copies of one request (same key and bets: a winning straight bet and a losing red bet) (AC-W4-08.2) | 10 successes with one equal result; one draw, one round, two bets, one stake and one payout entry; balance 1,330 |
+| C1 — 20 parallel spins of two players, winning and losing (AC-W4-08.3) | Alice 2,600 and Bob 625, exactly start − Σ stakes + Σ payouts; 10 stake and 5 payout entries each; no entry in the other player's wallet. The wheel always shows 17 and the stakes before any payout stay below 1,000, so the expected state does not depend on the order |
+| C2 — independent wallet locks (AC-W4-08.3) | Alice's spin is held inside its draw: her wallet is locked (`FOR UPDATE NOWAIT` from another connection → `55P03`), Bob's is not, and Bob's spin completes meanwhile; then Alice's completes. Asserted by lock state and latches, not by timing |
+
+**Ledger integrity** (`RoundLedgerIntegrityIT`, AC-W4-08.4): 90 seeded steps (fixed seed, fixed list of
+winning numbers with four zeros) for three players: 47 rounds with 1–6 bets of every category (7 on zero,
+25 without payout), 7 replays with reordered bets, 9 reused keys with another amount, 27 unaffordable spins
+and 10 failures injected at the round insert (each retried successfully; 57 numbers drawn in all). After
+every step, balances, rounds, bets, ledger entries and draws equal an in-memory model, and
+`verify-roulette.sql`, `verify-wallets.sql` and `ledgerViolations()` report 0. At the end every stored round
+is checked in Java against §5.5 (totals, each bet's payout via `RouletteRules.payout`, the stake and payout
+entries' owner, type, signed amount, reference, key and order, `balance_after`, every roulette entry
+referenced exactly once) and equals the result its spin and replays returned. The event counts are asserted
+exactly, so a change of the seed, the draws or the service's behaviour is visible.
+
+**`infrastructure/neon/verify-roulette.sql`** (read-only; for `readonly-query.sh` at V9 only; never run
+against Neon yet). Statement 1 has eleven counters, each 0 on valid data, also with empty tables:
+
+| Counter | Rule (§5.5) |
+|---|---|
+| `rounds_without_1_to_10_bets` | 1 |
+| `rounds_with_totals_not_matching_bets` | 1 |
+| `bets_with_wrong_payout` | 2 in full: the payout for the winning number (36×/2×/3× or 0; zero wins only a straight bet on 0), stronger than the planned "multiple only" |
+| `rounds_with_missing_entries` | 3–4 (also made impossible by V9's foreign keys and `ck_roulette_rounds_payout_entry`; kept as a fail-closed check) |
+| `entries_of_another_player` | 3–4, ownership |
+| `entries_with_wrong_type` | 3–4 |
+| `entries_with_wrong_amount` | 3–4 |
+| `entries_with_wrong_reference` | 3–4, reference and ledger key |
+| `payouts_not_after_their_stake` | 4 |
+| `rounds_with_wrong_balance_after` | 5 |
+| `roulette_entries_not_in_exactly_one_round` | 6 (an orphan entry, or one entry serving two rounds) |
+
+Statement 2 reports rounds, bets, players with rounds, winning rounds, stake and payout entries (expected:
+stake entries = rounds, payout entries = winning rounds). Comparisons are NULL-safe (`IS DISTINCT FROM`,
+`IS NOT TRUE`, `LEFT JOIN`), so a missing value counts as a violation. Rule 7 stays with
+`verify-wallets.sql`.
+
+**Proof that it detects violations** (`MigrationCompatibilityIT`, PostgreSQL 17.11 and 18.6): a fresh V9
+schema, players without rounds and four consistent rounds (a win, zero, a loss, a round where every category
+wins) report 0, and `verify-wallets.sql` still reports 0. Then thirteen steps each write rows that V9
+accepts but that break a rule (entries in another player's wallet, a payout entry of another type, a wrong
+stake amount, a `NULL` reference, another round's key, a payout before its stake, a wrong `balance_after`,
+totals not matching the bets, eleven bets, a straight bet paid on another number, a dozen paid on zero, an
+orphan stake, a round without bets, one entry used by two rounds). After each step the counters equal the
+expected cumulative counts exactly; the last step increments five counters at once.
+`rounds_with_missing_entries` cannot be provoked: the schema rejects such rows.
+
+**`verify-migrations.sql`**: statement 6 also counts `roulette_rounds` and `roulette_bets` (`NULL` before V9).
+Tested at V5, V7, V8 and V9 (empty) and at V9 with rounds. Every script runs under
+`default_transaction_read_only = on` (`ReadOnlyScripts`, extracted from `MigrationCompatibilityIT` and shared
+with the two new suites), so no statement can need write permission.
+
+**JaCoCo** (AC-W4-08.5): the `check` execution runs in the `verify` phase on the merged unit and integration
+data and fails the build below 80 % lines or 70 % branches for `com.casino.wallet.service`,
+`com.casino.game.model` and `com.casino.game.service` (unchanged since W4-04; no threshold lowered, nothing
+excluded). Measured on the merged data of the W4-08 `verify`: `game.service` 64/64 lines and 32/32
+branches (100 %/100 %), `game.model` 105/105 and 58/58, `wallet.service` 118/118 and 68/68 ("All coverage
+checks have been met"). Proof that the rule evaluates `game.service` (not committed): the same `check`
+execution with an untracked copy of the POM requiring 65 covered lines in that package failed the build with
+"Rule violated for package com.casino.game.service: lines covered count is 64, but expected minimum is 65";
+the copy was deleted.
+
+**Q18 scope review.** `CanonicalUuidParameters` registers its editor for every `UUID` that Spring MVC's
+data binder converts (header, query, path and cookie values, unannotated simple parameters). The only such
+parameter in the application is the spin's `Idempotency-Key`: the other controllers take the user id from
+the session principal, JSON bodies are read by Jackson (not by the binder), no handler uses form or
+model-attribute binding, and the actuator endpoints do not use the MVC binder. **No existing endpoint's
+behaviour changed**, so no correction is needed. `RouletteSpinIT.theIdempotencyKeyIsTheOnlyUuidBoundFromTheRequest`
+pins the finding: a new UUID parameter anywhere fails it and must be reviewed.
+
+**Remaining limitations** (unchanged, §5.7): the ownership, type, amount and reference of a round's entries,
+the bet totals and the payout for the winning number are guaranteed by the single writer and detected by
+`verify-roulette.sql`, not rejected by the schema. The concurrency guarantees rest on the wallet row lock
+taken before the round lookup; the unique keys remain the last line of defence (a violation would roll the
+spin back as a `500`; none occurred in the tests).
+
+| AC | Proven by |
+|---|---|
+| AC-W4-08.1 | `RouletteConcurrencyIT.twentyCompetingSpinsOfOnePlayerSpendExactlyTheBalance` |
+| AC-W4-08.2 | `RouletteConcurrencyIT.tenParallelCopiesOfOneRequestPlayOneRound` |
+| AC-W4-08.3 | `RouletteConcurrencyIT.mixedSpinsOfTwoPlayersInParallelEndWithTheExactBalances`, `…aSpinOfOnePlayerDoesNotWaitForAnotherPlayersLockedWallet` |
+| AC-W4-08.4 | `RoundLedgerIntegrityIT` |
+| AC-W4-08.5 | JaCoCo `check` in `./mvnw verify` (above) |
+| AC-W4-08.6 | `MigrationCompatibilityIT` (both versions), `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT` |
+
+**Unchanged:** all production code, V1–V9, the contract, the frontend, Render, Vercel and Neon.
+
 ---
 
 ## 6. API contract (design-first; implemented in W4-02 as `openapi.yaml` 0.5.0)
@@ -688,7 +791,7 @@ would be a bug, not a user error). This can be revisited if a second writer of r
    `info.version` → **0.5.0**. **Review gate.**
 2. **W4-03** adds the two values to `WalletEntryType` (the published response enum) together with V8
    and the real ledger types, and removes the `x-planned-enum-values` listing.
-3. **W4-07** implements the operation ①–⑥ and removes the operation's marker.
+3. **W4-07** implements the operation ①–⑥ and removes the operation's marker (done, §6.6).
 4. No new error code: `ProblemCode` and the contract `code` enum stay equal (AC-0.4 of Week 3).
 
 ### 6.2 Operation
@@ -812,6 +915,100 @@ would be a bug, not a user error). This can be revisited if a second writer of r
   CSRF `403`, a player `404` until W4-07).
 - **Unchanged:** all production code (no controller, DTO, enum, entity or migration), V1–V7,
   `ProblemCode`, the frontend, Render, Vercel and Neon.
+
+### 6.6 Implemented in W4-07 (approved 2026-11-19)
+
+**Controller.** `game.controller.RouletteController`, `POST /api/v1/games/roulette/spins`
+(`spinRoulette`, tag `Roulette`). It reads the player from the session principal, takes the
+`Idempotency-Key` header as a `UUID`, validates the body (`@Valid`), maps it to `RouletteWager`s and
+calls `RouletteService.spin` (§7.6), whose transaction is unchanged. A new round and a replay both
+answer `200` with `RouletteSpinResult.from(PlayedRound)`. The controller has no other logic: no
+balance, odds, payout or number is read from the request.
+
+**Security.** `SecurityConfig` gains `/api/v1/games` and `/api/v1/games/**` → `hasRole("PLAYER")`
+(anonymous `401`, administrator `403 ACCESS_DENIED`). CSRF is the existing filter for every unsafe
+method (`403 CSRF_TOKEN_INVALID`); an ended session is `401 SESSION_EXPIRED`. `Cache-Control: no-store`
+comes from the existing header configuration and is asserted on every tested response.
+
+**Request DTOs** (`game.dto`, contract schemas `RouletteSpinRequest` and `RouletteBet`):
+- `RouletteSpinRequest(bets)`: `@NotNull`, `@Size(min = 1, max = RouletteService.MAX_BETS)`, every
+  element `@NotNull @Valid`; `@DistinctSelections` reports the same `(category, option)` twice on field
+  `bets`, whatever the amounts.
+- `RouletteBetRequest` (flat, Q1a): `category` required; `number` `@Min(0) @Max(36)`; `color`,
+  `parity`, `range`, `dozen` use the `game.model` enums directly (springdoc `enumAsRef`, so the
+  generated schemas carry the contract's names); `amount` `@NotNull @Min(1)
+  @Max(RouletteService.MAX_AMOUNT)`. `@OneOptionPerCategory` reports a missing option on its own field
+  (`bets[i].color`: "must not be null") and the option property of another category on that field
+  (`bets[i].dozen`: "must be omitted for this category"). JSON `null` for an option counts as omitted
+  (Q17).
+- Unknown properties are ignored (existing convention), so `winningNumber`, `payout`, `balance`,
+  `userId` or `seed` in the body have no effect (AC-W4-07.5).
+
+**Q10 — strict JSON values (`game.dto.StrictJson`).** Per-field `@JsonDeserialize`, no global Jackson
+setting, so no other endpoint changes:
+- `amount` and `number` accept only a JSON integer token (`VALUE_NUMBER_INT`): `10.5`, `10.0`, `1e1`,
+  `"10"`, booleans, arrays and objects are an input mismatch → `400 MALFORMED_REQUEST`; nothing is
+  rounded or converted. A token beyond `int32`/`int64` is also malformed; integers within the type
+  but outside the limits reach Bean Validation → `400 VALIDATION_FAILED`.
+- `amount: null` is malformed (not an integer token), while a **missing** `amount` is
+  `400 VALIDATION_FAILED` on `bets[i].amount` (the deserializer's absent value is `null`, not its
+  null value). The contract text states both (wording added, no schema change).
+- **Finding:** Jackson 3 binds a JSON number to an enum by position, so `"category": 0` would have been
+  read as `STRAIGHT`. Every enum field therefore uses `StrictJson.EnumName`: only a JSON string with the
+  exact value name; anything else → `400 MALFORMED_REQUEST`.
+
+**Q18 — canonical `Idempotency-Key` (`common.exception.CanonicalUuidParameters`).** A `@ControllerAdvice`
+with an `@InitBinder` that registers a `UUID` editor: the value must match
+`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$` before
+`UUID.fromString`; otherwise the conversion fails → `400 MALFORMED_REQUEST` (existing mapping). So
+`1-1-1-1-1` is rejected, and upper- and lower-case spellings are the same key (compared as a `UUID`
+value). It lives in `common.exception` beside the other web-binding advice (R5). A missing header is
+`400 MALFORMED_REQUEST` as before.
+
+**Response DTOs.** `RouletteSpinResult` (all properties required) and `RouletteSettledBet`
+(`@JsonInclude(NON_NULL)`: only the bet's own option property, the others omitted), built from
+`PlayedRound`/`SettledWager`.
+
+**Contract.** `x-implementation-status: planned` and "(planned)" removed from `spinRoulette`; the
+"European roulette" and wallet sections and `ProblemDetail.code` no longer say "planned"; wording for
+`amount: null` and a missing amount added. No schema, status or code changed; `ProblemCode` unchanged.
+`OpenApiContractTest`: no operation is planned any more. `OpenApiContractIT`: the springdoc document
+equals the contract (zero differences, now including the spin) and a new test validates `200`, an
+identical replay, `400` ×3, `401`, `403` (CSRF, administrator), `409` (key reuse, insufficient funds)
+against the contract at runtime.
+
+**Tests (W4-07):**
+- `RouletteControllerTest` (13, `@WebMvcTest` with the real `SecurityConfig`, mocked service): exact
+  JSON of a played round; every category and option bound to its selection; ignored extra properties
+  and `null` options; ten non-canonical keys and a missing key, case equivalence; strict integers
+  (seventeen non-integer or out-of-type values for `amount` and `number`); unknown, lower-case or
+  numeric enum values and malformed bodies; no, missing, `null` and eleven bets, a `null` bet; amounts
+  0, −5, 1,001 and missing, a missing category; the option rules per category; duplicates (and
+  complementary selections allowed); service exceptions → `409` ×3 and `503`, an unexpected one →
+  generic `500` without details; anonymous, administrator and CSRF cases. Every response is validated
+  against the contract and has `no-store`.
+- `RouletteSpinIT` (8, full context, PostgreSQL, real sign-in and CSRF, deterministic wheel): all five
+  categories in one spin with exact payouts, balance and history through `GET /api/v1/wallet` and
+  `GET /api/v1/wallet/transactions` (`ROULETTE_STAKE`/`ROULETTE_PAYOUT`); identical, reordered and
+  upper-case-key replays (identical body, one draw, ledger unchanged); key reuse with other bets → `409`
+  and nothing written, the same key for another player plays a round; insufficient funds → `409`, no
+  draw; thirteen rejected requests (`400`) change nothing and the key stays unused; client values for the
+  result, payout, balance or another user are ignored; anonymous, administrator, missing and forged
+  CSRF, ended session; the handler mappings contain the spin as the only game operation and the wallet
+  stays read-only.
+
+| AC | Proven by |
+|---|---|
+| AC-W4-07.1 | `RouletteSpinIT`, `OpenApiContractIT` (zero differences, runtime validation) |
+| AC-W4-07.2 | `RouletteSpinIT` (replays, conflict), `OpenApiContractIT` |
+| AC-W4-07.3 | `RouletteControllerTest`, `RouletteSpinIT` (Q10, Q18) |
+| AC-W4-07.4 | `RouletteControllerTest`, `RouletteSpinIT`, `AccessRulesContractIT` |
+| AC-W4-07.5 | `RouletteSpinIT`, `RouletteControllerTest` |
+| AC-W4-07.6 | `OpenApiContractTest`, `OpenApiContractIT`, `RouletteSpinIT` (handler mappings) |
+| AC-W4-07.7 | `RouletteSpinIT` |
+
+**Unchanged:** `RouletteService`, `RouletteRules`, the wheel, the wallet module, V1–V9, `ProblemCode`,
+the frontend, Render, Vercel and Neon.
 
 ---
 
@@ -1020,6 +1217,8 @@ lookup:
 - Spins of different players do not block each other.
 - Reads (`GET /wallet`, history) take no lock and see either the state before or after a round,
   never in between.
+- **Verified in W4-08** (`RouletteConcurrencyIT`, §5.8): competing spins of one player, parallel copies of
+  one request, and two players whose wallet locks are proven independent by lock state.
 
 ---
 
@@ -1144,7 +1343,8 @@ unknown type, fractional amount, quoted number → `MALFORMED_REQUEST`; ignored 
 
 JaCoCo `check` covers **`com.casino.game.model` and `com.casino.game.service`** with the wallet's
 thresholds (≥ 80 % lines, ≥ 70 % branches; plan §7, P-W3-14) since W4-04 (earlier than the W4-08 of
-revision 1). The wallet rule stays.
+revision 1). The wallet rule stays. W4-08 confirms that the rule is enforced in `verify` and proves once
+that it evaluates `com.casino.game.service` (§5.8).
 
 ### 10.7 Determinism
 
@@ -1167,8 +1367,8 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day. **Endpoint tasks follow*
 | W4-04 | **Rules and RNG (done, approved, §4.7):** `game.model` (the category and option enums of §6.3, `RouletteSelection`, `RouletteWager`, `RouletteSettlement`, `RouletteRules`), `RouletteWheel`, `SecureRandomRouletteWheel`; R16, R17; JaCoCo for the game packages; `RouletteRulesTest`, `SecureRandomRouletteWheelTest`, opt-in `SecureRandomRouletteWheelStatisticsTest` | M | W4-02 (names) |
 | W4-05 | **Persistence (done, pending review, §5.7):** V9; `RouletteRound`, `RouletteBet` (`@Immutable`); `RouletteRoundRepository`; `TestDatabase` table list; `MigrationCompatibilityIT` V9; `RouletteRoundRepositoryIT` | M | W4-03 |
 | W4-06 | **Spin service (done, pending review, §7.6):** `WalletService.lockWallet`; `RouletteService.spin` (§7.1), replay and key reuse, `PlayedRound` result (mapped to `RouletteSpinResult` in W4-07); `RouletteServiceTest`, `RouletteServiceIT`, `WalletServiceTest` (+) | L | W4-04, W4-05 |
-| W4-07 | **Endpoint `POST /api/v1/games/roulette/spins`** (①–⑥): DTOs with validation, `RouletteController`, `SecurityConfig` rule, strict JSON numbers (Q10); `RouletteControllerTest`, `RouletteSpinIT`, `OpenApiContractIT`, `AccessRulesContractIT`; marker removed | M | W4-06 |
-| W4-08 | **Integrity, concurrency, coverage:** `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, JaCoCo rule for `com.casino.game.service`; `verify-roulette.sql`, `verify-migrations.sql` (V9 state), both tested read-only on PG 17/18 | M | W4-07 |
+| W4-07 | **Endpoint `POST /api/v1/games/roulette/spins` (done, approved, §6.6)** (①–⑥): DTOs with validation, `RouletteController`, `SecurityConfig` rule, strict JSON numbers (Q10); `RouletteControllerTest`, `RouletteSpinIT`, `OpenApiContractIT`, `AccessRulesContractIT`; marker removed | M | W4-06 |
+| W4-08 | **Integrity, concurrency, coverage (done, pending review, §5.8):** `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, JaCoCo rule for `com.casino.game.service`; `verify-roulette.sql`, `verify-migrations.sql` (V9 state), both tested read-only on PG 17/18 | M | W4-07 |
 | W4-09 | **Documentation and rollout preparation:** `architecture.md` (game module, R16, R15 retired), `database.md` (V8/V9), `api.md` (spin, 0.5.0, payout table), README, `infrastructure/roulette-rollout.md` (V8/V9 runbook, §15); ADR-0003 needs no change | M | W4-03…W4-08 |
 | W4-10 | **Verification and pull request:** `./mvnw verify` (PG 17/18, JaCoCo), frontend checks unchanged, real-HTTP check on a throwaway local stack, option D gate, PR. **No staging rollout.** | M | all |
 
@@ -1321,7 +1521,7 @@ marked approved without an explicit review decision.
 | Q7a | `model` as a layer package with purity rule R17 | `model` added to `ArchitectureRules.LAYERS`; R17: no Spring, JPA, Hibernate, servlet or other layer in `..model..`; `RouletteRules` lives there too (§4.7) | **Approved 2026-11-16** (W4-04 review); recorded as Amendment 1 of ADR-0004 | — |
 | Q8 | Round immutability | Append-only triggers on both tables, new generic `reject_row_change()` | **Approved 2026-11-16**; implemented in W4-05 | — |
 | Q9 | Statistical test | Deterministic tests are the gate; chi-square (370,000 draws, critical value 91.502 at 10⁻⁶) as an opt-in diagnostic, not in CI (§10.5) | **Approved 2026-11-16** (W4-03 review); implemented in W4-04 | — |
-| Q10 | Strict integers | `10.5`, `10.0`, `1e1`, `"10"` → `400 MALFORMED_REQUEST`; never rounded or converted. The Jackson mechanism (global coercion settings or per-field deserialization) is verified and chosen in W4-07; no existing endpoint has numeric body fields | **Approved 2026-11-15** (mechanism reviewed with W4-07) | — |
+| Q10 | Strict integers | `10.5`, `10.0`, `1e1`, `"10"` → `400 MALFORMED_REQUEST`; never rounded or converted. The Jackson mechanism (global coercion settings or per-field deserialization) is verified and chosen in W4-07; no existing endpoint has numeric body fields | **Approved 2026-11-15**; implemented in W4-07 with per-field deserializers, no global setting (`StrictJson`, §6.6); mechanism approved 2026-11-19 | — |
 | Q11 | Round tables reference `users` and `wallet_transactions` by foreign key | Yes, `ON DELETE RESTRICT` (database level only; no Java dependency; ids only in the entity) | **Approved 2026-11-16**; implemented in W4-05 | — |
 | Q12 | ArchUnit ids | Retire R15 (option D, approved); add R16 (no weak randomness) | R15 removal **approved** (option D, done in W4-03); R16 **approved 2026-11-16**, implemented in W4-04 | — |
 | Q13 | Contract version and compatibility | 0.5.0: new planned operation + two planned `WalletTransactionType` values; existing wallet endpoints unchanged (clients treat unknown types generically, documented since 0.4.0) | **Approved 2026-11-15** (W4-02 review) | — |
@@ -1329,11 +1529,11 @@ marked approved without an explicit review decision.
 | Q15 | Staging rollout of V8/V9 | After Week 4, separately approved, with `infrastructure/roulette-rollout.md` (§15) | Proposed | rollout only |
 | Q16 | Planned enum values in the contract | New marker `x-planned-enum-values` (tooling in `OpenApiContract`), so the ledger types are designed in W4-02 without touching production enums before W4-03 | **Approved 2026-11-15** as temporary (W4-02 review); the listing was removed in W4-03, the tooling stays | — |
 | Q17 | Normalization for idempotency | Content = set of (category, option, amount), order-independent, `null` = omitted, unknown properties ignored; key compared as a UUID value (§8.3) | **Approved 2026-11-16**; implemented in W4-06 (domain values rebuilt from the stored bets, no hash or extra column) | — |
-| Q18 | Strict canonical UUID for `Idempotency-Key` | 36-character `8-4-4-4-12` form, either case; non-canonical forms → `400 MALFORMED_REQUEST` | **Approved 2026-11-15** (W4-02 review) | — |
+| Q18 | Strict canonical UUID for `Idempotency-Key` | 36-character `8-4-4-4-12` form, either case; non-canonical forms → `400 MALFORMED_REQUEST` | **Approved 2026-11-15** (W4-02 review); implemented in W4-07 (`CanonicalUuidParameters`, §6.6); scope reviewed in W4-08: no other endpoint binds a UUID (§5.8) | — |
 | Q19 | Round storage of the option | `roulette_bets.category` + `selection` + `number` with one `CHECK` per pair (§5.3) | **Approved 2026-11-16**; implemented in W4-05 | — |
 | — | Removal of `TEST_CREDIT`/`TEST_DEBIT` (option D) | Implemented in W4-03 as a release gate | **Approved 2026-11-13** (Week 3 Q15) | — |
 
-**Material blockers.** None left for W4-01 to W4-06 (Q17 and the §5.7 approach approved 2026-11-16). W4-07 needs no further decision; the strict-integer mechanism (Q10) and the canonical-UUID parsing (Q18) are reviewed with it.
+**Material blockers.** None left for W4-01 to W4-06 (Q17 and the §5.7 approach approved 2026-11-16). W4-07 is approved (Q10 mechanism included); W4-08 needed no decision. The Q18 scope finding (§5.8) asks for none.
 Before **W4-06**: Q17. No blocker concerns the approved scope, the wallet or a cloud resource.
 
 ### 13.2 Risks
