@@ -8,7 +8,9 @@
   (`c570b51`). W4-07 endpoint `POST /api/v1/games/roulette/spins` approved 2026-11-19 (§6.6; Q10
   approved). W4-08 concurrency, ledger integrity and coverage reviewed and committed (§5.8; Q18 scope
   reviewed; checkpoint `523c5cc`). W4-09 documentation alignment and rollout runbook approved 2026-11-19
-  (§15.4). **Next: W4-10** (verification and pull request; not started). V8 and V9 are applied to Testcontainers and local databases only, **not to any Neon
+  (§15.4; checkpoint `1f8cb9d`). **W4-10 local verification done, pending review** (§15.5): full
+  `verify`, frontend checks, option D gate, real-HTTP smoke test and the Week 3 compatibility experiment;
+  the pull request is prepared but not opened. V8 and V9 are applied to Testcontainers and local databases only, **not to any Neon
   branch** (staging stays at V7); `verify-roulette.sql` has not been run against Neon; no step of
   `infrastructure/roulette-rollout.md` has been executed.
   Decisions still marked *Proposed* need approval before the task that depends on them starts (§13).
@@ -43,6 +45,7 @@
 | 7 | 2026-11-18 | W4-07: `RouletteController`, request and response DTOs, strict JSON values (Q10), canonical `Idempotency-Key` (Q18), `PLAYER` rule for `/api/v1/games/**`, planned marker removed (§6.6) |
 | 8 | 2026-11-19 | W4-07 approved; W4-08: `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, `verify-roulette.sql`, `verify-migrations.sql` with round counts, JaCoCo rule proven for `game.service`, Q18 scope review (§5.8) |
 | 9 | 2026-11-19 | W4-08 reviewed (`523c5cc`); W4-09: documentation aligned with the implementation (architecture, database, API, README, infrastructure), `infrastructure/roulette-rollout.md` (V7 → V9 runbook, not executed), approval gates and W4-10 readiness (§15.4); stale "pending review" task labels updated to the recorded approvals |
+| 10 | 2026-11-19 | W4-09 approved (`1f8cb9d`); W4-10: local verification evidence, `game/package-info.java` Javadoc corrected, Week 3 build on V9 verified locally (scenarios A and B) and the rollback statements updated from "expected" to the observed results (§15.3, §15.5) |
 
 ---
 
@@ -1373,7 +1376,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day. **Endpoint tasks follow*
 | W4-07 | **Endpoint `POST /api/v1/games/roulette/spins` (done, approved, §6.6)** (①–⑥): DTOs with validation, `RouletteController`, `SecurityConfig` rule, strict JSON numbers (Q10); `RouletteControllerTest`, `RouletteSpinIT`, `OpenApiContractIT`, `AccessRulesContractIT`; marker removed | M | W4-06 |
 | W4-08 | **Integrity, concurrency, coverage (done, reviewed, §5.8):** `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, JaCoCo rule for `com.casino.game.service`; `verify-roulette.sql`, `verify-migrations.sql` (V9 state), both tested read-only on PG 17/18 | M | W4-07 |
 | W4-09 | **Documentation and rollout preparation (done, approved, §15.4):** `architecture.md` (game module, R16, R15 retired), `database.md` (V8/V9), `api.md` (spin, 0.5.0, payout table), README, `infrastructure/roulette-rollout.md` (V8/V9 runbook, §15); ADR-0003 needs no change | M | W4-03…W4-08 |
-| W4-10 | **Verification and pull request:** `./mvnw verify` (PG 17/18, JaCoCo), frontend checks unchanged, real-HTTP check on a throwaway local stack, option D gate, PR. **No staging rollout.** | M | all |
+| W4-10 | **Verification and pull request (local verification done, pending review, §15.5; PR not opened):** `./mvnw verify` (PG 17/18, JaCoCo), frontend checks unchanged, real-HTTP check on a throwaway local stack, option D gate, PR. **No staging rollout.** | M | all |
 
 ```mermaid
 graph LR
@@ -1551,7 +1554,7 @@ Before **W4-06**: Q17. No blocker concerns the approved scope, the wallet or a c
 | R6 | Lost update / negative balance under parallel spins | Wallet row lock; `INSUFFICIENT_FUNDS` under the lock; DB `CHECK` | AC-W4-08.1, AC-W4-08.3 |
 | R7 | Option D cleanup breaks wallet tests or leaves a trace | One change (W4-03), all suites green, artifact class scan | AC-W4-03.x |
 | R8 | V8 constraint swap blocks the ledger during the Render start | One `ALTER TABLE`, tiny table; old instance only reads | `MigrationCompatibilityIT`, runbook |
-| R9 | **Application rollback after spins exist**: Week 3 code cannot map `ROULETTE_*` ledger rows (Hibernate enum), so the history of players who played would answer `500` | Prefer roll-forward; rollback to Week 3 code only before the first spin, or together with a database restore (§15.3) | `roulette-rollout.md` §8 (point of no return) and §11 (W4-09) |
+| R9 | **Application rollback after spins exist**: Week 3 code cannot map `ROULETTE_*` ledger rows (Hibernate enum), so the history of players who played would answer `500` | Prefer roll-forward; rollback to Week 3 code only before the first spin, or together with a database restore (§15.3) | `roulette-rollout.md` §8 (point of no return) and §11 (W4-09); **confirmed locally in W4-10** with the Week 3 build: `500` on the history of players who played, roll forward restores it (§15.5) |
 | R10 | Silent truncation of fractional amounts | Strict number parsing (Q10) | AC-W4-07.3 |
 | R11 | Flaky statistical test | Significance 10⁻⁶; deterministic tests everywhere else | §10.5 |
 | R12 | Scope creep (extra bet categories, history, UI, limits) | §1.2; review gates W4-01/W4-02 | review |
@@ -1627,6 +1630,11 @@ build (`b07e656`) has **not** been started on a V8 or V9 schema. An application 
 conditional and unverified; the runbook keeps the database restore as its fallback
 (`roulette-rollout.md` §6, §11).
 
+*Update (W4-10):* the Week 3 build has now been started on V9 in an approved local experiment (§15.5).
+Before the first round the expectation holds (start-up, balance, history and registration work); after
+rounds exist the history of players who played answers `500`, exactly as R9 predicted. Verified on local
+PostgreSQL 17.11 only, not on Render/Neon.
+
 ### 15.4 Implemented in W4-09 (approved 2026-11-19)
 
 Documentation only. No production Java, frontend, Flyway (V1–V9), configuration or contract file was
@@ -1642,7 +1650,7 @@ changed; no test was added or changed; no command was run against Neon, Render o
 | `docs/api.md` | Authentication table row for the spin; `schemaVersion` 9 on the branch versus 7 on `main`/staging; deployment status of the spin; payout calculation with the worked example; wallet balance and history after a round; idempotent replay table; error table and two examples; contract history 0.5.0 approved (no longer "pending review") |
 | `infrastructure/README.md`, `render/README.md`, `wallet-rollout.md` | The new runbook listed and linked; staging state "Week 4 not deployed"; expected `schemaVersion` after a Week 4 rollout |
 | this plan | Revision 9; task labels of W4-02, W4-03, W4-05, W4-06 and W4-08 updated from "pending review" to their recorded approvals; Q15 kept *Proposed*; clarification after §15.3 that Week 3 compatibility with V8/V9 is untested |
-| Week 3 compatibility wording (review of W4-09) | In the runbook (§2, §6, §10, §11) and `database.md` the compatibility of the Week 3 build with a V8/V9 schema and the application rollback are stated as **expected, not tested**; the runbook names what the tests prove and what they do not, and keeps the database restore as the fallback |
+| Week 3 compatibility wording (review of W4-09) | In the runbook (§2, §6, §10, §11) and `database.md` the compatibility of the Week 3 build with a V8/V9 schema and the application rollback are stated as **expected, not tested**; the runbook names what the tests prove and what they do not, and keeps the database restore as the fallback. *Superseded in W4-10 by the observed results of the local experiment (§15.5)* |
 
 **Runbook** `infrastructure/roulette-rollout.md` (V7 → V9), modelled on `wallet-rollout.md`:
 preconditions P1–P10 (including "no new environment variable", "merged migrations = V1–V9 with V1–V7
@@ -1679,6 +1687,95 @@ throwaway local stack, pull request) can start; it has not been started. Known i
 `com.casino.game.package-info.java` still describes Week 4 as "in progress" with rounds and the endpoint
 as future work; it is a Javadoc comment in production code, so W4-09 did not change it (correction
 approved for W4-10).
+
+### 15.5 W4-10 local verification (2026-11-19, pending review)
+
+Everything below ran on the developer machine against disposable local resources (Testcontainers and
+throwaway `postgres:17.11-alpine` containers with random credentials, jars started from an empty
+directory so no `.env` was imported, no Spring profile). **No command touched Neon, Render, Vercel or
+GitHub**; CI has not run yet (it runs when the pull request is opened).
+
+**Change:** `com.casino.game.package-info.java` Javadoc now describes the implemented module (no code).
+
+**Backend `./mvnw -B -ntp verify`** (working tree of `1f8cb9d` plus the Javadoc fix; 8 min 45 s): BUILD
+SUCCESS. Surefire **468** tests, 0 failures, 0 errors, **2 skipped** (the opt-in
+`SecureRandomRouletteWheelStatisticsTest` and one `NeonProfileTest` case, both intentional); Failsafe
+**296** tests, 0 failures, 0 errors, 0 skipped. Same counts as the W4-08 baseline.
+
+| Suite | Tests | Suite | Tests |
+|---|---|---|---|
+| `MigrationCompatibilityIT` (PostgreSQL 17.11 and 18.6) | 21 + 21 | `RouletteSpinIT` | 9 |
+| `RouletteConcurrencyIT` | 4 | `RoundLedgerIntegrityIT` | 1 (90 seeded steps) |
+| `RouletteServiceIT` / `RouletteServiceTest` | 18 / 8 | `RouletteControllerTest` | 13 |
+| `RouletteRulesTest` | 152 | `RouletteRoundRepositoryIT` | 6 |
+| `OpenApiContractTest` / `OpenApiContractIT` / `AccessRulesContractIT` | 37 / 15 / 4 | `ModuleArchitectureTest` / `ArchitectureRulesTest` | 16 / 16 |
+| `ProductionArtifactIT` | 2 | `MigrationsIT` | 11 |
+| Wallet: `WalletServiceTest` 29, `WalletServiceIT` 10, `WalletConcurrencyIT` 6, `LedgerIntegrityIT` 2, `WalletLockTimeoutIT` 3, `WalletOpeningIT` 8, `WalletIT` 9, `WalletTransactionsIT` 10, `WalletRepositoryIT` 10 | all green | | |
+
+**JaCoCo** ("All coverage checks have been met"; merged unit + integration data): `wallet.service`
+118/118 lines, 68/68 branches; `game.model` 105/105, 58/58; `game.service` 64/64, 32/32.
+
+**Chi-square diagnostic** (once, separately, not a gate):
+`./mvnw test -Dtest=SecureRandomRouletteWheelStatisticsTest -Droulette.statistics=true` → 370,000 draws,
+chi-square **50.771** (36 degrees of freedom; critical value 91.502 at 10⁻⁶; mean under fairness 36):
+passed. W4-04's run gave 35.637; both are ordinary values for a fair wheel.
+
+**Frontend** (`npm ci`, `lint`, `typecheck`, `test`, `build`): all green; Vitest 15 files, 132 tests. No
+file under `frontend/` differs from `main` (`b07e656`).
+
+**Option D gate (AC-W4-03.2–03.6) on the packaged jar:** no `TEST_CREDIT`, `TEST_DEBIT`, `test-callbacks`
+or `afterMigrate` in any application class or resource (`BOOT-INF/classes`, byte search); the jar packages
+exactly V1–V9 and each is byte-identical to the repository file; V1–V7 are unchanged since `main`; the three
+ledger enums are `STARTING_BALANCE`, `ROULETTE_STAKE`, `ROULETTE_PAYOUT`; no test Flyway callback or
+location override exists; `ProductionArtifactIT` (2) green.
+
+**Real-HTTP smoke test** (packaged jar, empty disposable database → Flyway V1–V9, throwaway bootstrap
+administrator): **40/40 checks passed**; all **46 recorded responses conform to `openapi.yaml`**, checked
+with the project's own `OpenApiContract.validateResponse` (the validator was shown to reject a tampered
+body and an undocumented status). Covered: registration `201` (CSRF required), session cookie, CSRF
+`403` without or with a forged token (also for a signed-in player), a spin with all five categories and
+payouts recomputed independently, a winning and a losing round, `GET /wallet` after every round,
+history (entry count, running `balanceAfter`, types and signs, no keys or ids), identical replay (key in
+upper case, bets reordered, `null` option) without any ledger change, `409 IDEMPOTENCY_KEY_REUSED`,
+malformed JSON / `1001` / `10.5` / missing or non-canonical key `400` with nothing written (and the key
+then still usable), anonymous `401`, administrator `403 ACCESS_DENIED` (spin and wallet),
+`409 INSUFFICIENT_FUNDS`, logout `204`. Afterwards `verify-migrations.sql` (`V9: Week 4 roulette rounds`),
+`verify-wallets.sql` and `verify-roulette.sql` reported 0 violations (11 rounds, 19 bets, 2 players) and the
+application log had no `ERROR` line. Outcomes came from the real `SecureRandom` wheel (no test hook exists
+in the packaged artifact); each result was checked against the rules instead, and deterministic outcomes
+remain covered by `RouletteSpinIT`. A first run reported 8 failures that were caused by the smoke script,
+not the application: under `csrf.spa()` every response re-issues the `XSRF-TOKEN` cookie, so its "no token"
+requests had carried a valid token; the corrected script sends neither cookie nor header for those cases.
+
+**Week 3 build on V9 (approved experiment).** `b07e656` built in a temporary detached worktree; separate
+disposable databases; data created only through the applications' HTTP APIs; nothing written by hand.
+
+| | Scenario A: V7 by Week 3 (2 players) → V8/V9 by Week 4, **no round** → Week 3 | Scenario B: V7 by Week 3 (1 player) → V9 by Week 4 + 3 rounds (2 won) → Week 3 |
+|---|---|---|
+| Flyway compatibility | validated 9 migrations; WARN "newer than the latest available migration (7)"; no migration | the same |
+| Start-up | readiness `200` | readiness `200` |
+| Wallet balance | `200`, 1000 | `200`, 1010 (correct) |
+| Wallet history | `200` (`STARTING_BALANCE`) | **`500`** for the player who played: `No enum constant com.casino.wallet.entity.TransactionType.ROULETTE_STAKE`; `200` for a player without rounds |
+| Registration by Week 3 | `201`, wallet and starting entry; `verify-wallets.sql` 0 | `201` |
+| Data | `ERROR` lines 0 | ledger, wallets, rounds, bets and Flyway history byte-identical before and after (md5 fingerprint) |
+| Roll forward | — | Week 4 again: history `200`, `verify-wallets.sql` and `verify-roulette.sql` 0, no `ERROR` |
+
+Conclusion: an application rollback to Week 3 is safe **before** the first round and breaks the history of
+players who played **after** it (R9 confirmed); roll forward repairs it without data changes. Limits: local
+PostgreSQL 17.11 (not Neon 18.6/Render), V8-only state not run separately, no concurrent traffic. The
+runbook (§6, §10, §11) and `database.md` now state these observed results. Temporary resources (worktree,
+containers, jars' processes, credential files) were removed; the developer database `casino-postgres` was
+not touched.
+
+| AC | Result |
+|---|---|
+| AC-W4-10.1 | Local `verify` green (PG 17/18 migrations, JaCoCo wallet and game rules); statistical diagnostic run once separately; frontend checks green and unchanged. **CI pending** (runs on the pull request) |
+| AC-W4-10.2 | Option D gate re-checked on the final artifact (above) |
+| AC-W4-10.3 | Real-HTTP smoke test (above): register → spin (win and loss) → replay → wallet and history; `401`/`403`/`409`/`400`; no `ERROR` |
+| AC-W4-10.4 | No Neon branch, Render service, Vercel project or environment variable touched; Neon staging stays at V7 |
+
+**Remaining gates:** review of W4-10 → commit and push → opening the pull request (CI) → merge (A2) →
+Q15 and the rollout approvals of `roulette-rollout.md`.
 
 ---
 

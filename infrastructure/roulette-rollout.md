@@ -89,11 +89,11 @@ The order matters: A2 may happen earlier (at the end of W4-10), but A1 is done *
 preflight and **immediately before** A3, so the restore point holds the last V7 state.
 
 Why registration stays closed: Week 3 code (the old instance, still serving during the deploy) and
-Week 4 code both open a wallet at registration, so a rolling deploy is not expected to create a player
-without a wallet this time (provided the old instance behaves on the new schema as expected; untested,
-[§6](#6-flyway-v8-and-v9-at-start-up)). Registration nevertheless stays closed as it is today: the
-rollout changes no environment variable, closed registration removes that untested path entirely, and
-a new account would only add data that a restore would lose.
+Week 4 code both open a wallet at registration, so a rolling deploy does not create a player without a
+wallet this time (Week 3 registration on a V9 schema verified locally in W4-10,
+[§6](#6-flyway-v8-and-v9-at-start-up); not on staging). Registration nevertheless stays closed as it is
+today: the rollout changes no environment variable, closed registration removes that path on staging
+entirely, and a new account would only add data that a restore would lose.
 
 ## 3. Read-only preflight at V7
 
@@ -199,7 +199,7 @@ Successfully applied 2 migrations to schema "public", now at version v9 (executi
 Started CasinoSimulatorApplication
 ```
 
-(Message formats as in the Week 3 rollout, Flyway 12.4; timestamps and timings differ.)
+(The Flyway lines are exactly those of the local V7 → V9 runs in W4-10; timestamps and timings differ.)
 
 **Stop the service** (Render → **Suspend**, **APPROVAL REQUIRED**, A6) if the log shows
 `Current version of schema "public": << Empty Schema >>`, a current version other than 7, or
@@ -215,7 +215,7 @@ fails, Render keeps the old instance serving; continue with [§10](#10-failure-h
 | Rows written | none; existing rows are validated against the new checks | none; both tables start empty |
 | Locks | Short `ACCESS EXCLUSIVE` on `wallet_transactions` while the existing rows are validated (a few rows on staging: milliseconds); the old instance's ledger reads wait briefly | Only on the new objects, plus the short locks of the foreign keys on `users` and `wallet_transactions` |
 | If it fails | Rolled back completely; schema stays **V7**, V8 not recorded | Rolled back completely; schema stays **V8**, V9 not recorded |
-| Week 3 build on the new schema | Expected to work (**not tested**): it never writes the new types | Expected to work (**not tested**): it does not map the new tables |
+| Week 3 build on the new schema | Never writes the new types; verified locally on the V9 schema, which contains this change (below) | Does not map the new tables; verified locally before the first round; after it the history of players who played answers `500` (below) |
 
 How Flyway behaves here:
 - It runs once, in the new instance, before the web server accepts requests. The Free plan has no
@@ -230,16 +230,28 @@ How Flyway behaves here:
   players and wallets, including a failed V8 and a failed V9 that leave V7/V8 and apply on the next
   start (`MigrationCompatibilityIT`). They have **not** run against Neon.
 
-**Week 3 compatibility is an expectation, not a verified fact.** What the tests prove: V8 and V9
-leave every existing wallet, ledger row, constraint name and trigger unchanged, and the wallet code
-paths of the **Week 4 build** keep working on a V9 schema (AC-W4-05.5). What has **not** been tested:
-the actual Week 3 build (`main` at `b07e656`) starting and serving on a V8 or V9 schema — neither
-locally nor on staging. The expectation rests on schema analysis: V8 only widens two `CHECK`
-constraints, V9 only adds objects, Hibernate's `validate` checks only the mapped tables and columns,
-and Flyway's default `ignoreMigrationPatterns = *:future` accepts applied migrations that the older
-build does not know. This matters in two places: the old instance that keeps serving during the
-deploy (step 7) and an application rollback ([§11](#11-rollback-and-recovery) row 4). If the old build
-does not behave as expected, the database restore of row 6 is the fallback.
+**Week 3 compatibility — verified locally in W4-10, not on staging.** The actual Week 3 build (`main`
+at `b07e656`, built from an isolated worktree) was started against disposable local PostgreSQL 17.11
+databases that had gone through the same path as staging will: Week 3 created V7 and players, the
+Week 4 build applied V8 and V9 (`docs/plans/week-04.md` §15.5):
+
+| | Scenario A: V9, **no round played** | Scenario B: V9 **with** roulette ledger entries |
+|---|---|---|
+| Flyway | `Successfully validated 9 migrations`; WARN `Schema "public" has a version (9) that is newer than the latest available migration (7) !`; `up to date`, nothing migrated | the same |
+| Start-up | starts, readiness `200` | starts, readiness `200` |
+| `GET /api/v1/wallet` | `200`, correct balance | `200`, correct balance (wallet table only) |
+| `GET /api/v1/wallet/transactions` | `200`, `STARTING_BALANCE` entries | **`500 INTERNAL_ERROR`** for a player who played: `IllegalArgumentException: No enum constant com.casino.wallet.entity.TransactionType.ROULETTE_STAKE`; `200` for a player without rounds |
+| Registration by Week 3 code | `201`, wallet with 1,000 coins and its `STARTING_BALANCE` entry; `verify-wallets.sql` 0 | `201`, as in A |
+| Data | unchanged; no `ERROR` in the log | unchanged (fingerprint of ledger, wallets, rounds, bets and Flyway history identical before and after); one `ERROR` per history request |
+| Roll forward | — | Week 4 started again on the same data: history `200` with the roulette entries, `verify-wallets.sql` and `verify-roulette.sql` 0 |
+
+Limits of this evidence: PostgreSQL 17.11 on a local machine, not Neon's 18.6 behind Render; the V8-only
+state (V9 failed) was not run separately (the tested V9 schema contains V8's change); no concurrent
+traffic during the switch. The old instance that keeps serving during the deploy (step 7) and an
+application rollback before the first round ([§11](#11-rollback-and-recovery) row 4) are therefore
+**locally verified**; after the first round an application-only rollback is **verified to break** the
+history of a player who played (one such player was tested; every player whose ledger contains a
+roulette entry is affected, because such an entry is always among the newest ones of the first page).
 
 ## 7. Read-only post-deployment verification
 
@@ -424,7 +436,7 @@ is **APPROVAL REQUIRED** (A6) and decided with the project owner.
 | Render build fails | Nothing changed (schema V7) | Fix in a new commit and pull request; deploy later |
 | Log: empty schema, current version ≠ 7, or other migrations | Wrong database | **Suspend** the service (A6); compare `.env`/Render values with the staging branch without printing them |
 | Log: V8 fails | Schema stays V7; old instance serves | Read the error; fix in a new commit; [§11](#11-rollback-and-recovery) row 2 |
-| Log: V8 applied, V9 fails | Schema V8; old instance serves Week 3 code (expected to be compatible with V8, not tested; watch its log and the read-only checks) | [§11](#11-rollback-and-recovery) row 3 |
+| Log: V8 applied, V9 fails | Schema V8; old instance serves Week 3 code (compatible with V8's change, verified locally on V9; the V8-only state itself was not run; watch its log and the read-only checks) | [§11](#11-rollback-and-recovery) row 3 |
 | Started, but step 8 is not `V9: Week 4 roulette rounds` | Inconsistent state | Do not run `verify-roulette.sql`; investigate |
 | Step 9 or 10 reports a violation | Data inconsistent | No spin; consider **Suspend** (A6); [§11](#11-rollback-and-recovery) row 6 |
 | Step 11: `schemaVersion` ≠ 9, a spin answers anything but `403`/`401`, or a security check differs | Wrong build or configuration | Stop; application rollback if no round exists ([§11](#11-rollback-and-recovery) row 4) |
@@ -439,9 +451,9 @@ option below is **APPROVAL REQUIRED** (A6).
 |---|---|---|---|
 | 1 | Before step 6 (nothing deployed) | Nothing to undo. The restore point may stay | No change on staging |
 | 2 | V8 failed: schema at V7 | Nothing to undo in the database. Fix the cause in a new commit (V8 itself is not edited: it is applied in local and test databases); deploy again later | Old instance keeps serving |
-| 3 | V8 applied, V9 failed: schema at V8 | Nothing to undo; Week 3 code is expected to work on V8 (not tested, [§6](#6-flyway-v8-and-v9-at-start-up)). Fix the cause in a new commit; the next start applies V9 only | Old instance keeps serving; no roulette tables |
-| 4 | V8 and V9 applied, the new application misbehaves, **no round played** (step 10 / 8.4: `rounds` 0, `stake_entries` 0) | **Application rollback (conditional, unverified):** Render → Deploys → previous deploy → *Rollback*. The schema stays at V9. It is **expected** to work because the Week 3 build never writes the new types and does not map the new tables, and its Flyway (V1–V7 only) should accept the applied V8/V9 as future migrations by default (`ignoreMigrationPatterns = *:future`). **This rollback has not been tested** with the Week 3 build, locally or on staging. If the old build does not start, Render keeps the current instance; then fall back to row 6 | Spin endpoint gone, schema and data kept. Re-deploying the fixed build later needs no migration |
-| 5 | **Rounds exist** (at least one `ROULETTE_*` entry) and the application misbehaves | **Roll forward** with a fix (new commit, pull request, approved deploy). Do **not** roll back to the Week 3 build alone: its ledger enum has no `ROULETTE_STAKE`/`ROULETTE_PAYOUT`, so reading those rows is expected to fail and `GET /api/v1/wallet/transactions` of every player who played would answer `500` (risk R9; from code analysis, not tested) | Data kept; roulette rounds stay consistent with the ledger |
+| 3 | V8 applied, V9 failed: schema at V8 | Nothing to undo; Week 3 code works with V8's change (verified locally on V9, [§6](#6-flyway-v8-and-v9-at-start-up); V8 alone not run separately). Fix the cause in a new commit; the next start applies V9 only | Old instance keeps serving; no roulette tables |
+| 4 | V8 and V9 applied, the new application misbehaves, **no round played** (step 10 / 8.4: `rounds` 0, `stake_entries` 0) | **Application rollback (verified locally, not on staging):** Render → Deploys → previous deploy → *Rollback*. The schema stays at V9. In W4-10 the Week 3 build started on a V9 database without rounds (Flyway validated 9 migrations, warned that the schema is newer than its latest migration 7, migrated nothing), and its balance, history and registration answered `200`/`201` ([§6](#6-flyway-v8-and-v9-at-start-up)). Not exercised on Render or Neon (PostgreSQL 18.6): if the old build does not start there, Render keeps the current instance; then fall back to row 6 | Spin endpoint gone, schema and data kept. Re-deploying the fixed build later needs no migration |
+| 5 | **Rounds exist** (at least one `ROULETTE_*` entry) and the application misbehaves | **Roll forward** with a fix (new commit, pull request, approved deploy). Do **not** roll back to the Week 3 build alone: verified locally in W4-10, it starts and reads balances, but `GET /api/v1/wallet/transactions` of the tested player who played answered `500` (and would for every player with a roulette entry) (`No enum constant …TransactionType.ROULETTE_STAKE`, risk R9); players without rounds are unaffected and no data changes. Starting the Week 4 build again restores the history (verified) | Data kept; roulette rounds stay consistent with the ledger |
 | 6 | The data itself is wrong (a counter of step 9/10/8.4 is not 0), or a return to Week 3 code is required after rounds exist | **Database restore:** point the service at a branch restored from `staging-before-week-04` (or restore `staging` to the noted time in Neon Console), **then** roll the application back as in row 4 | Everything written to `staging` since the restore point is lost: rounds, bets, roulette ledger entries and balance changes, sessions, logins. The V8/V9 rows of `flyway_schema_history` disappear with it, so the next Week 4 deploy applies V8 and V9 again |
 
 Never, in any situation:

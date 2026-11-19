@@ -178,8 +178,8 @@ ALTER TABLE wallet_transactions
   on a database with players and wallets (rows byte-for-byte unchanged, only the two constraint
   definitions differ, triggers identical), the sign and zero rules, a failed V8 that leaves V7 intact
   and applies on the next start, and the read-only scripts at V8.
-- Week 3 code is expected to be compatible with a V8 schema (it never writes the new types; not
-  tested with the Week 3 build itself, see the rollback limitation below). Once roulette rounds
+- Week 3 code is compatible with V8's change (it never writes the new types; the Week 3 build was
+  verified locally on a V9 schema in W4-10, see the rollback limitation below). Once roulette rounds
   exist, Week 3 code could not read their ledger entries; see the rollback limits in
   `docs/plans/week-04.md` §15.3.
 
@@ -305,14 +305,15 @@ The Week 4 rollout uses them in this order: preflight at V7 (`verify-migrations`
 then after the deploy `verify-migrations` (gate: V9), `verify-wallets` and `verify-roulette`
 ([roulette-rollout.md](../infrastructure/roulette-rollout.md)).
 
-**Rollback limitation (V8/V9).** The Week 3 build is **expected** to run on a V8 or V9 schema as long
-as no round exists (V8 widens two checks, V9 only adds objects, and Flyway accepts applied future
-migrations by default), but this has **not been tested** with the Week 3 build itself; the tests prove
-only that existing rows and objects stay unchanged and that the Week 4 build's wallet paths work on V9.
-Once `ROULETTE_*` ledger entries exist, the Week 3 build is expected to fail reading them (the history of
-those players would answer `500`), so a return to Week 3 code then needs a database restore; roll
-forward instead (`docs/plans/week-04.md` §15.3,
-[roulette-rollout.md §11](../infrastructure/roulette-rollout.md#11-rollback-and-recovery)).
+**Rollback limitation (V8/V9), verified locally in W4-10** (`docs/plans/week-04.md` §15.5; disposable
+PostgreSQL 17.11 databases, not Neon). The actual Week 3 build (`b07e656`) starts on a V9 schema: Flyway
+validates the 9 applied migrations, warns that the schema is newer than its latest migration (7) and
+migrates nothing. **Without rounds** its balance, history and registration work. **With rounds** it still
+starts and reads balances, but the history of the tested player who played answered `500`
+(`No enum constant …TransactionType.ROULETTE_STAKE`), as would every player with a roulette entry; players without rounds are unaffected and no data
+changes. Starting the Week 4 build again restores the history. So once `ROULETTE_*` entries exist, roll
+forward; a return to Week 3 code then needs a database restore
+([roulette-rollout.md §11](../infrastructure/roulette-rollout.md#11-rollback-and-recovery)).
 
 ### Users and roles (`users`, V3)
 
