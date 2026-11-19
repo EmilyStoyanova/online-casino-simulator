@@ -38,7 +38,7 @@ Root package `com.casino`. Each direct sub-package is a module:
 | `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 | implemented |
 | `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 | implemented |
 | `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented, on `main`, deployed to staging |
-| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 | in progress: rules, secure wheel, round persistence, atomic spin service and `POST /api/v1/games/roulette/spins` (W4-04 to W4-07) ([`docs/plans/week-04.md`](plans/week-04.md)) |
+| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` ([below](#game-module-week-4)) | 4 | implemented on `feature/week-04-roulette` (W4-04 to W4-08): rules, secure wheel, round persistence, atomic spin service and `POST /api/v1/games/roulette/spins`; **not on `main`, not deployed** ([`docs/plans/week-04.md`](plans/week-04.md)) |
 | `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 | planned |
 | `responsibleplay` | Session limits, breaks, self-exclusion, play-time tracking | 9 | planned |
 | `admin` | Administrative use cases under `/api/v1/admin/**` | 10 | planned |
@@ -197,27 +197,79 @@ database accepts no other type and enforces each sign. The Week 3 test-only type
 
 **Coverage.** JaCoCo checks `com.casino.wallet.service` in every `./mvnw verify` (CI included):
 at least 80 % lines and 70 % branches. Measured in W3-09: 100 % lines (111/111) and 100 % branches
-(62/62).
+(62/62); after `lockWallet` and the exhaustive type mapping of Week 4 (W4-08): 118/118 lines and 68/68
+branches.
 
-### Game module (Week 4, in progress)
+### Game module (Week 4)
 
-Design: [`docs/plans/week-04.md`](plans/week-04.md). Implemented so far (W4-04 to W4-07):
+**Status:** implemented and tested on `feature/week-04-roulette` (W4-04 to W4-08); not merged into
+`main` and **not deployed** (staging runs Weeks 1–3 at schema V7; rollout runbook:
+[infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md), not executed). Design and
+decisions: [`docs/plans/week-04.md`](plans/week-04.md); schema:
+[database.md](database.md#roulette-rounds-and-bets-v9); API:
+[api.md](api.md#roulette-spin-post-apiv1gamesroulettespins). Virtual coins only.
 
 | Package | Classes | Responsibility |
 |---|---|---|
-| `model` | `RouletteBetCategory`, `RouletteBetColor`, `RouletteParity`, `RouletteRange`, `RouletteDozen`, `RouletteNumberColor`; `RouletteSelection` (sealed: one record per category), `RouletteWager`, `RouletteSettlement`; `RouletteRules`; `PlayedRound`, `SettledWager` (the result of a spin) | European roulette rules as pure functions: colors, which selection wins, payouts (stake × 36/2/3 on a win, 0 on a loss), settlement of a spin; integer arithmetic with overflow checks |
-| `service` | `RouletteWheel`, `SecureRandomRouletteWheel` | The winning number: `SecureRandom.nextInt(37)`; the only wheel bean |
-| | `RouletteService` (W4-06) | `spin`: one transaction — validate, `lockWallet`, idempotency lookup (Q17), debit the stake, draw, settle, credit the payout, store the round; the only writer of rounds |
-| `entity` | `RouletteRound` (`Persistable`), `RouletteBet` (W4-05) | `@Immutable` mapping of V9; the player and the ledger entries by id only, no relationship into `user` or `wallet`; bets owned by the round, in request order |
-| `repository` | `RouletteRoundRepository` (W4-05) | `save`, `findByUserIdAndRequestId`; no update or delete |
+| `model` | `RouletteBetCategory`, `RouletteBetColor`, `RouletteParity`, `RouletteRange`, `RouletteDozen`, `RouletteNumberColor`; `RouletteSelection` (sealed: one record per category), `RouletteWager`, `RouletteSettlement`; `RouletteRules`; `PlayedRound`, `SettledWager` (the result of a spin) | European roulette rules as pure functions: colors, which selection wins, payouts (stake × 36/2/3 on a win, 0 on a loss), settlement of a spin; integer arithmetic with overflow checks (`Math.multiplyExact`/`addExact`). Plain Java (R17); one set of enums shared by rules, DTOs and entities |
+| `service` | `RouletteWheel` (interface), `SecureRandomRouletteWheel` (package-private `@Component`) | The winning number: one unseeded `new SecureRandom()`, `nextInt(37)` (rejection sampling, no modulo bias); the only wheel bean. Tests replace it through the test context only; production has no seed or "fixed number" switch |
+| | `RouletteService` (W4-06) | `spin(userId, requestId, wagers)`: one `@Transactional` round (below); the only writer of rounds; limits `MAX_BETS` = 10 and `MAX_AMOUNT` = 1,000 |
+| `entity` | `RouletteRound` (`@Immutable`, `Persistable<UUID>`), `RouletteBet` (`@Immutable`) (W4-05) | Mapping of V9 without setters; the player and the ledger entries by id only, no relationship into `user` or `wallet`; bets owned by the round (unidirectional, `CascadeType.PERSIST`), in request order |
+| `repository` | `RouletteRoundRepository` (W4-05; plain Spring Data `Repository`) | `saveAndFlush` (W4-06; a database rule fails inside the spin's transaction), `findByUserIdAndRequestId` (bets through an entity graph); no update or delete |
 | `dto` | `RouletteSpinRequest`, `RouletteBetRequest` (schema `RouletteBet`), `RouletteSpinResult`, `RouletteSettledBet`; `OneOptionPerCategory`, `DistinctSelections`; `StrictJson` (W4-07) | The contract's request and response shapes with the `model` enums; Bean Validation of limits, the option of each category and duplicate selections; per-field strict JSON values (integers as integer tokens, enum values as exact names), so no global Jackson setting changes |
-| `controller` | `RouletteController` (W4-07) | `POST /api/v1/games/roulette/spins`: the player from the session principal, the `Idempotency-Key` as a `UUID`, delegation to `RouletteService.spin`; `200` for a new round and a replay |
+| `controller` | `RouletteController` (W4-07) | `POST /api/v1/games/roulette/spins`: the player from the session principal, the `Idempotency-Key` as a `UUID`, delegation to `RouletteService.spin`; `200` for a new round and a replay. No balance, number, odds or payout is read from the request |
 
-Every bet has the expected net result −1/37 of its amount (house edge 1/37 ≈ 2.7027 %, return to
-player 36/37 ≈ 97.2973 %), proven exactly by `RouletteRulesTest`. A round is atomic: the stake, the
-payout, the round and its bets commit in one transaction or not at all, and a repeated request with the
-same key and content returns the stored round without touching the wallet. The endpoint takes bets
-only; nothing in the request selects the player, the number, a payout or a balance.
+There is no `config` and no `exception` package: limits are contract constants, and every failure is
+an existing wallet or common exception (no new `ProblemCode`).
+
+**One spin = one database transaction** (`RouletteService.spin`, propagation `REQUIRED`; the wallet
+operations join it):
+
+```
+RouletteController ── session principal, Idempotency-Key, validated bets
+└─ RouletteService.spin                                     @Transactional
+    1. validate (1–10 bets, 1–1,000 coins each, no selection twice) ... before any lock or write
+    2. WalletService.lockWallet(userId) ............................ wallet row lock, bounded wait
+    3. findByUserIdAndRequestId: same content → stored round (replay); other content → 409
+    4. roundId = UUID.randomUUID(); WalletService.debit(ROULETTE_STAKE, total stake,
+       key roulette-round:<roundId>:stake, reference roundId) ..... insufficient funds → 409
+    5. RouletteWheel.spin() → RouletteRules.settle ................. only after the stake is accepted
+    6. if total payout > 0: WalletService.credit(ROULETTE_PAYOUT, …, key …:payout)
+    7. saveAndFlush(round + bets, both ledger entry ids, balance_after, createdAt = clock.instant())
+   commit → RouletteSpinResult (200)
+```
+
+- **Atomic wallet integration (`game → wallet`).** `game` uses only `wallet.service.WalletService`,
+  `wallet.dto` and `wallet.exception` (R3, R13). Stake entry, payout entry, balance change, round and
+  bets commit together or not at all; any exception rolls everything back, nothing is compensated by
+  hand. A failed spin draws no number and leaves its key unused. The result is built from the stored
+  round and sent only after the commit.
+- **Locking.** `WalletService.lockWallet` (W4-06, `MANDATORY`) takes the wallet's existing row lock
+  (`PESSIMISTIC_WRITE`, `APP_WALLET_LOCK_TIMEOUT`) **before** the round lookup, so requests of one player
+  are serialized; the later `debit`/`credit` re-enter the lock the transaction already holds. One spin
+  locks one wallet (deadlock rule). Spins of different players do not wait for each other. A lock
+  timeout is `503 SERVICE_UNAVAILABLE` with nothing written.
+- **Two levels of idempotency.** The client's `Idempotency-Key` (canonical UUID,
+  `CanonicalUuidParameters`) is stored as `roulette_rounds.request_id`, unique per player: the same key
+  and the same content (the bets as a set of category, option and amount, Q17) return the stored round
+  with no wallet operation, draw or write; other content is `409 IDEMPOTENCY_KEY_REUSED`. The ledger
+  keys are server-generated from the round id (`roulette-round:<id>:stake|payout`); the client's key
+  never reaches the ledger. The unique constraints are the last line of defence.
+- **Fairness and transparency.** Every bet has the expected net result −1/37 of its amount (house edge
+  1/37 ≈ 2.7027 %, RTP 36/37 ≈ 97.2973 %), proven exactly over all 37 results by `RouletteRulesTest`;
+  the chi-square diagnostic of the real wheel is opt-in (`-Droulette.statistics=true`). One request plays
+  exactly one round; there is no autoplay, repeat or bonus mechanic.
+- **Architecture rules.** R16 (no weak or seeded randomness in production code) and R17 (`model` is
+  framework-free and depends on no other layer; `model` is a layer package since ADR-0004 Amendment 1)
+  apply to `game` like to every module; R15 is retired (above).
+- **Coverage.** JaCoCo also checks `com.casino.game.model` and `com.casino.game.service` (≥ 80 % lines,
+  ≥ 70 % branches); measured in W4-08: `game.model` 105/105 lines and 58/58 branches, `game.service`
+  64/64 and 32/32.
+- **Accepted limitations.** The database proves that a round's ledger entries exist and cannot be
+  deleted, not that they are the round's own (owner, type, amount, reference); `RouletteService` as the
+  single writer guarantees it and `verify-roulette.sql` detects any violation
+  ([database.md](database.md#roulette-rounds-and-bets-v9)). Responsible-play checks (Week 9) will be
+  added as step 1a of `spin`, before the lock; Week 4 contains no placeholder for them.
 
 ### API design (design-first)
 
@@ -356,6 +408,12 @@ manually on Render, which applied V6 and V7 to Neon `staging` at start-up. The a
 the verification results are in
 [infrastructure/wallet-rollout.md](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15).
 Registration stays closed; Neon `production` is untouched.
+
+Week 4 (roulette, V8/V9) is **not deployed**: it exists only on `feature/week-04-roulette`, and Render
+Auto-Deploy is Off, so even a merge into `main` would not change the backend. Its staging rollout
+(V7 → V9) needs a separate approval and follows
+[infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md) (prepared in W4-09, not
+executed).
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a
 fast feedback loop. The Spring profile `neon` points a local backend at a Neon branch instead

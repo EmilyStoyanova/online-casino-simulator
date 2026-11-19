@@ -1,14 +1,16 @@
 # Week 4 Plan — European Roulette Engine
 
-- **Status:** Revision 8. W4-01 reviewed 2026-11-15: direction approved; Q2–Q6, Q10 and Q14
+- **Status:** Revision 9. W4-01 reviewed 2026-11-15: direction approved; Q2–Q6, Q10 and Q14
   approved with corrections (§13.1). W4-02 contract 0.5.0 approved (Q1a, Q13, Q16, Q18). W4-03 (V8,
   production ledger types) approved. W4-04 rules and secure wheel approved 2026-11-16 (§4.7; Q7,
   Q7a, Q9, R16); checkpoint pushed (`058dcb3`). W4-05 persistence approved (§5.7; Q8, Q11, Q19).
   W4-06 atomic spin service (§7.6; Q17 and the §5.7 approach approved 2026-11-16); checkpoint pushed
   (`c570b51`). W4-07 endpoint `POST /api/v1/games/roulette/spins` approved 2026-11-19 (§6.6; Q10
-  approved). **W4-08 concurrency, ledger integrity and coverage done, pending review** (§5.8; Q18 scope
-  reviewed). V8 and V9 are applied to Testcontainers only, **not to any Neon branch** (staging stays
-  at V7); `verify-roulette.sql` has not been run against Neon.
+  approved). W4-08 concurrency, ledger integrity and coverage reviewed and committed (§5.8; Q18 scope
+  reviewed; checkpoint `523c5cc`). W4-09 documentation alignment and rollout runbook approved 2026-11-19
+  (§15.4). **Next: W4-10** (verification and pull request; not started). V8 and V9 are applied to Testcontainers and local databases only, **not to any Neon
+  branch** (staging stays at V7); `verify-roulette.sql` has not been run against Neon; no step of
+  `infrastructure/roulette-rollout.md` has been executed.
   Decisions still marked *Proposed* need approval before the task that depends on them starts (§13).
 - **Stage:** 2 — Virtual currency and game logic (Weeks 3–4)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`), §4 (Week 4),
@@ -40,6 +42,7 @@
 | 6 | 2026-11-16 | W4-05 approved; W4-06: `WalletService.lockWallet`, `RouletteService.spin`, `PlayedRound`, Q17 replay, failure and ownership tests (§7.6) |
 | 7 | 2026-11-18 | W4-07: `RouletteController`, request and response DTOs, strict JSON values (Q10), canonical `Idempotency-Key` (Q18), `PLAYER` rule for `/api/v1/games/**`, planned marker removed (§6.6) |
 | 8 | 2026-11-19 | W4-07 approved; W4-08: `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, `verify-roulette.sql`, `verify-migrations.sql` with round counts, JaCoCo rule proven for `game.service`, Q18 scope review (§5.8) |
+| 9 | 2026-11-19 | W4-08 reviewed (`523c5cc`); W4-09: documentation aligned with the implementation (architecture, database, API, README, infrastructure), `infrastructure/roulette-rollout.md` (V7 → V9 runbook, not executed), approval gates and W4-10 readiness (§15.4); stale "pending review" task labels updated to the recorded approvals |
 
 ---
 
@@ -81,7 +84,7 @@ game ledger types.
 
 | # | Plan task (Week 4) | Deliverable | Task (§11) |
 |---|---|---|---|
-| — | Design-first prerequisite | `spinRoulette` operation, schemas and the two new ledger types in `openapi.yaml` 0.5.0, marked planned until implemented | W4-02 (done, pending review) |
+| — | Design-first prerequisite | `spinRoulette` operation, schemas and the two new ledger types in `openapi.yaml` 0.5.0, marked planned until implemented | W4-02 (done, approved) |
 | 1 | European roulette rules | `RouletteRules`: numbers 0–36, colors, which numbers each bet covers, payouts (§4) | W4-04 |
 | 2 | 37 possible results 0–36 | `RouletteWheel` returns 0–36, all equally likely | W4-04 |
 | 3 | Cryptographically secure RNG on the server | `SecureRandomRouletteWheel` (`SecureRandom.nextInt(37)`), injectable for tests | W4-04 |
@@ -535,7 +538,7 @@ the multiple: §5.8); it runs in `MigrationCompatibilityIT` under `default_trans
 Week 3 scripts.
 `verify-migrations.sql` learns the V9 state (tables `roulette_rounds`, `roulette_bets`).
 
-### 5.6 Implemented in W4-03 (pending review)
+### 5.6 Implemented in W4-03 (approved 2026-11-16)
 
 **Migration** `V8__add_roulette_wallet_transaction_types.sql` (the name given in the W4-03 task; V1–V7
 unchanged). One `ALTER TABLE` replaces exactly two constraints, keeping their names:
@@ -681,7 +684,7 @@ would be a bug, not a user error). This can be revisited if a second writer of r
   and rolls back its ledger entries too; a round needs a bet.
 - `MigrationsIT`, `CasinoSimulatorApplicationIT` (schema version 9), `ProductionArtifactIT` (V1–V9).
 
-### 5.8 Implemented in W4-08 (pending review)
+### 5.8 Implemented in W4-08 (reviewed; checkpoint `523c5cc`)
 
 **Concurrency** (`RouletteConcurrencyIT`, PostgreSQL, deterministic wheel, the production lock timeout of
 5 s asserted, threads released together by a latch, more threads than the 10 pooled connections). Every
@@ -784,7 +787,7 @@ spin back as a `500`; none occurred in the tests).
 
 ### 6.1 Workflow
 
-1. **W4-02 (done, pending review):** `spinRoulette` with `x-implementation-status: planned` and the
+1. **W4-02 (done, approved 2026-11-15):** `spinRoulette` with `x-implementation-status: planned` and the
    summary suffix "(planned)", its schemas, the `Idempotency-Key` header and tag `Roulette`;
    `WalletTransactionType` gains `ROULETTE_STAKE`/`ROULETTE_PAYOUT`, listed in the new
    `x-planned-enum-values` (Q16) so that no production enum changes before W4-03.
@@ -891,7 +894,7 @@ spin back as a `500`; none occurred in the tests).
   retry with the same key plays the round.
 - **Status `200`, not `201`, for both a new round and a replay** (Q5, approved).
 
-### 6.5 Implemented in W4-02 (pending review)
+### 6.5 Implemented in W4-02 (approved 2026-11-15)
 
 - `backend/src/main/resources/static/openapi.yaml` **0.5.0**: operation, parameter, request and
   response examples (straight + color; every category; win, zero and loss results; every error code
@@ -1087,7 +1090,7 @@ A spin runs a handful of statements under one row lock (lock, lookup, two ledger
 wallet updates, one round and up to 10 bet inserts). The RNG call is in-memory. The lock is held for
 milliseconds, which keeps lock waits on the Render Free instance short (Week 3 risk R12).
 
-### 7.6 Implemented in W4-06 (pending review)
+### 7.6 Implemented in W4-06 (approved; checkpoint `c570b51`)
 
 **Decisions applied (approved 2026-11-16):** Q17 (normalized content = order-independent set of
 `(category, option, amount)` of validated bets, compared as domain values rebuilt from the stored bets;
@@ -1362,14 +1365,14 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day. **Endpoint tasks follow*
 | # | Task | Size | Depends on |
 |---|---|---|---|
 | W4-01 | **This plan** and the Week 3 deployment status in the documentation. **Review gate.** | M | — |
-| W4-02 | **Contract 0.5.0 (done, pending review):** `spinRoulette` (`planned`), `Idempotency-Key`, schemas `RouletteSpinRequest`, `RouletteBet`, `RouletteBetCategory`, `RouletteBetColor`, `RouletteParity`, `RouletteRange`, `RouletteDozen`, `RouletteNumberColor`, `RouletteSpinResult`, `RouletteSettledBet`; tag `Roulette`; payout/probability/RTP text; `WalletTransactionType` + `ROULETTE_STAKE`/`ROULETTE_PAYOUT` in `x-planned-enum-values`; tooling for planned enum values; contract tests. **Review gate.** | M | W4-01 |
-| W4-03 | **Ledger types and option D cleanup (done, pending review, §5.6):** V8; `ROULETTE_STAKE`/`ROULETTE_PAYOUT` in `TransactionType`, `WalletTransactionType` and `WalletEntryType`; remove the contract's `x-planned-enum-values` listing; remove `TEST_CREDIT`/`TEST_DEBIT`, the test callback and its Flyway location, R15 with fixtures, `TestLedgerTypesStayInTestsTest`; move every wallet test to the real types; exhaustive stored → public type mapping; `ProductionArtifactIT` class scan; `MigrationCompatibilityIT` V8 | L | W4-02 |
+| W4-02 | **Contract 0.5.0 (done, approved):** `spinRoulette` (`planned`), `Idempotency-Key`, schemas `RouletteSpinRequest`, `RouletteBet`, `RouletteBetCategory`, `RouletteBetColor`, `RouletteParity`, `RouletteRange`, `RouletteDozen`, `RouletteNumberColor`, `RouletteSpinResult`, `RouletteSettledBet`; tag `Roulette`; payout/probability/RTP text; `WalletTransactionType` + `ROULETTE_STAKE`/`ROULETTE_PAYOUT` in `x-planned-enum-values`; tooling for planned enum values; contract tests. **Review gate.** | M | W4-01 |
+| W4-03 | **Ledger types and option D cleanup (done, approved, §5.6):** V8; `ROULETTE_STAKE`/`ROULETTE_PAYOUT` in `TransactionType`, `WalletTransactionType` and `WalletEntryType`; remove the contract's `x-planned-enum-values` listing; remove `TEST_CREDIT`/`TEST_DEBIT`, the test callback and its Flyway location, R15 with fixtures, `TestLedgerTypesStayInTestsTest`; move every wallet test to the real types; exhaustive stored → public type mapping; `ProductionArtifactIT` class scan; `MigrationCompatibilityIT` V8 | L | W4-02 |
 | W4-04 | **Rules and RNG (done, approved, §4.7):** `game.model` (the category and option enums of §6.3, `RouletteSelection`, `RouletteWager`, `RouletteSettlement`, `RouletteRules`), `RouletteWheel`, `SecureRandomRouletteWheel`; R16, R17; JaCoCo for the game packages; `RouletteRulesTest`, `SecureRandomRouletteWheelTest`, opt-in `SecureRandomRouletteWheelStatisticsTest` | M | W4-02 (names) |
-| W4-05 | **Persistence (done, pending review, §5.7):** V9; `RouletteRound`, `RouletteBet` (`@Immutable`); `RouletteRoundRepository`; `TestDatabase` table list; `MigrationCompatibilityIT` V9; `RouletteRoundRepositoryIT` | M | W4-03 |
-| W4-06 | **Spin service (done, pending review, §7.6):** `WalletService.lockWallet`; `RouletteService.spin` (§7.1), replay and key reuse, `PlayedRound` result (mapped to `RouletteSpinResult` in W4-07); `RouletteServiceTest`, `RouletteServiceIT`, `WalletServiceTest` (+) | L | W4-04, W4-05 |
+| W4-05 | **Persistence (done, approved, §5.7):** V9; `RouletteRound`, `RouletteBet` (`@Immutable`); `RouletteRoundRepository`; `TestDatabase` table list; `MigrationCompatibilityIT` V9; `RouletteRoundRepositoryIT` | M | W4-03 |
+| W4-06 | **Spin service (done, approved, §7.6):** `WalletService.lockWallet`; `RouletteService.spin` (§7.1), replay and key reuse, `PlayedRound` result (mapped to `RouletteSpinResult` in W4-07); `RouletteServiceTest`, `RouletteServiceIT`, `WalletServiceTest` (+) | L | W4-04, W4-05 |
 | W4-07 | **Endpoint `POST /api/v1/games/roulette/spins` (done, approved, §6.6)** (①–⑥): DTOs with validation, `RouletteController`, `SecurityConfig` rule, strict JSON numbers (Q10); `RouletteControllerTest`, `RouletteSpinIT`, `OpenApiContractIT`, `AccessRulesContractIT`; marker removed | M | W4-06 |
-| W4-08 | **Integrity, concurrency, coverage (done, pending review, §5.8):** `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, JaCoCo rule for `com.casino.game.service`; `verify-roulette.sql`, `verify-migrations.sql` (V9 state), both tested read-only on PG 17/18 | M | W4-07 |
-| W4-09 | **Documentation and rollout preparation:** `architecture.md` (game module, R16, R15 retired), `database.md` (V8/V9), `api.md` (spin, 0.5.0, payout table), README, `infrastructure/roulette-rollout.md` (V8/V9 runbook, §15); ADR-0003 needs no change | M | W4-03…W4-08 |
+| W4-08 | **Integrity, concurrency, coverage (done, reviewed, §5.8):** `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, JaCoCo rule for `com.casino.game.service`; `verify-roulette.sql`, `verify-migrations.sql` (V9 state), both tested read-only on PG 17/18 | M | W4-07 |
+| W4-09 | **Documentation and rollout preparation (done, approved, §15.4):** `architecture.md` (game module, R16, R15 retired), `database.md` (V8/V9), `api.md` (spin, 0.5.0, payout table), README, `infrastructure/roulette-rollout.md` (V8/V9 runbook, §15); ADR-0003 needs no change | M | W4-03…W4-08 |
 | W4-10 | **Verification and pull request:** `./mvnw verify` (PG 17/18, JaCoCo), frontend checks unchanged, real-HTTP check on a throwaway local stack, option D gate, PR. **No staging rollout.** | M | all |
 
 ```mermaid
@@ -1526,14 +1529,14 @@ marked approved without an explicit review decision.
 | Q12 | ArchUnit ids | Retire R15 (option D, approved); add R16 (no weak randomness) | R15 removal **approved** (option D, done in W4-03); R16 **approved 2026-11-16**, implemented in W4-04 | — |
 | Q13 | Contract version and compatibility | 0.5.0: new planned operation + two planned `WalletTransactionType` values; existing wallet endpoints unchanged (clients treat unknown types generically, documented since 0.4.0) | **Approved 2026-11-15** (W4-02 review) | — |
 | Q14 | Rules/transparency endpoint | **No separate endpoint in Week 4**; payouts and probabilities in the contract and `api.md` | **Approved 2026-11-15** | — |
-| Q15 | Staging rollout of V8/V9 | After Week 4, separately approved, with `infrastructure/roulette-rollout.md` (§15) | Proposed | rollout only |
+| Q15 | Staging rollout of V8/V9 | After Week 4, separately approved, with `infrastructure/roulette-rollout.md` (§15); runbook prepared in W4-09, nothing executed (§15.4) | Proposed (pending explicit deployment approval) | rollout only |
 | Q16 | Planned enum values in the contract | New marker `x-planned-enum-values` (tooling in `OpenApiContract`), so the ledger types are designed in W4-02 without touching production enums before W4-03 | **Approved 2026-11-15** as temporary (W4-02 review); the listing was removed in W4-03, the tooling stays | — |
 | Q17 | Normalization for idempotency | Content = set of (category, option, amount), order-independent, `null` = omitted, unknown properties ignored; key compared as a UUID value (§8.3) | **Approved 2026-11-16**; implemented in W4-06 (domain values rebuilt from the stored bets, no hash or extra column) | — |
 | Q18 | Strict canonical UUID for `Idempotency-Key` | 36-character `8-4-4-4-12` form, either case; non-canonical forms → `400 MALFORMED_REQUEST` | **Approved 2026-11-15** (W4-02 review); implemented in W4-07 (`CanonicalUuidParameters`, §6.6); scope reviewed in W4-08: no other endpoint binds a UUID (§5.8) | — |
 | Q19 | Round storage of the option | `roulette_bets.category` + `selection` + `number` with one `CHECK` per pair (§5.3) | **Approved 2026-11-16**; implemented in W4-05 | — |
 | — | Removal of `TEST_CREDIT`/`TEST_DEBIT` (option D) | Implemented in W4-03 as a release gate | **Approved 2026-11-13** (Week 3 Q15) | — |
 
-**Material blockers.** None left for W4-01 to W4-06 (Q17 and the §5.7 approach approved 2026-11-16). W4-07 is approved (Q10 mechanism included); W4-08 needed no decision. The Q18 scope finding (§5.8) asks for none.
+**Material blockers.** None left for W4-01 to W4-06 (Q17 and the §5.7 approach approved 2026-11-16). W4-07 is approved (Q10 mechanism included); W4-08 needed no decision. The Q18 scope finding (§5.8) asks for none. W4-09 needed none; W4-10 needs only the review of W4-09. Q15 blocks the staging rollout alone, not W4-10.
 Before **W4-06**: Q17. No blocker concerns the approved scope, the wallet or a cloud resource.
 
 ### 13.2 Risks
@@ -1548,7 +1551,7 @@ Before **W4-06**: Q17. No blocker concerns the approved scope, the wallet or a c
 | R6 | Lost update / negative balance under parallel spins | Wallet row lock; `INSUFFICIENT_FUNDS` under the lock; DB `CHECK` | AC-W4-08.1, AC-W4-08.3 |
 | R7 | Option D cleanup breaks wallet tests or leaves a trace | One change (W4-03), all suites green, artifact class scan | AC-W4-03.x |
 | R8 | V8 constraint swap blocks the ledger during the Render start | One `ALTER TABLE`, tiny table; old instance only reads | `MigrationCompatibilityIT`, runbook |
-| R9 | **Application rollback after spins exist**: Week 3 code cannot map `ROULETTE_*` ledger rows (Hibernate enum), so the history of players who played would answer `500` | Prefer roll-forward; rollback to Week 3 code only before the first spin, or together with a database restore (§15.3) | runbook W4-09 |
+| R9 | **Application rollback after spins exist**: Week 3 code cannot map `ROULETTE_*` ledger rows (Hibernate enum), so the history of players who played would answer `500` | Prefer roll-forward; rollback to Week 3 code only before the first spin, or together with a database restore (§15.3) | `roulette-rollout.md` §8 (point of no return) and §11 (W4-09) |
 | R10 | Silent truncation of fractional amounts | Strict number parsing (Q10) | AC-W4-07.3 |
 | R11 | Flaky statistical test | Significance 10⁻⁶; deterministic tests everywhere else | §10.5 |
 | R12 | Scope creep (extra bet categories, history, UI, limits) | §1.2; review gates W4-01/W4-02 | review |
@@ -1593,7 +1596,9 @@ Both are tested on PostgreSQL 17.11 and 18.6 from a V7 schema with data (the cur
 
 ### 15.3 Staging rollout (separate task after Week 4; every step needs explicit approval)
 
-Prepared in W4-09 as `infrastructure/roulette-rollout.md`, following the executed Week 3 runbook:
+Prepared in W4-09 as [`infrastructure/roulette-rollout.md`](../../infrastructure/roulette-rollout.md)
+(not executed; details in §15.4), following the executed Week 3 runbook. The summary below is the
+approved W4-01 outline and is kept:
 1. Preconditions: Week 4 PR merged with green CI; registration closed; Auto-Deploy Off; quiet window.
 2. Read-only preflight (`verify-migrations.sql`: V7 state, `verify-wallets.sql`: 0 violations;
    record counts).
@@ -1614,6 +1619,66 @@ Prepared in W4-09 as `infrastructure/roulette-rollout.md`, following the execute
   reject it).
 
 Neon production is not touched.
+
+*Clarification (W4-09 review):* "Works" in §15.2 and "safe" above are expectations from schema
+analysis, not test results. The tests prove that V8/V9 leave existing rows, constraint names and
+triggers unchanged and that the Week 4 build's wallet paths work on V9 (AC-W4-05.5); the actual Week 3
+build (`b07e656`) has **not** been started on a V8 or V9 schema. An application rollback is therefore
+conditional and unverified; the runbook keeps the database restore as its fallback
+(`roulette-rollout.md` §6, §11).
+
+### 15.4 Implemented in W4-09 (approved 2026-11-19)
+
+Documentation only. No production Java, frontend, Flyway (V1–V9), configuration or contract file was
+changed; no test was added or changed; no command was run against Neon, Render or Vercel.
+
+**Documentation corrections** (the implementation and `openapi.yaml` 0.5.0 are the source of truth):
+
+| File | Correction |
+|---|---|
+| `README.md` | Status of Week 4: backend implemented and tested on the feature branch, not merged, **not deployed**; new sections "On the Week 4 branch", "Deployed to staging" and "Planned (later weeks)" replace "Not implemented yet", which still said that roulette was planned and that nothing handled game rounds; module lists, coverage rule (game packages), opt-in statistics command, wallet variables "since Week 3" instead of "Week 3 branch", local V8/V9 note, milestones and documentation links (V1–V9, both rollout runbooks) |
+| `docs/architecture.md` | `game` row: implemented on the branch, not on `main`, not deployed; "Game module (Week 4)" now documents every package, the one-transaction spin flow, atomic wallet integration, `lockWallet` before the idempotency lookup, the two key levels, R16/R17 (R15 retired), measured coverage and the accepted limitations; repository method corrected (`saveAndFlush`, not `save`); wallet coverage after W4-08 (118/118, 68/68); deployment view: Week 4 not deployed |
+| `docs/database.md` | Repository method corrected; "Guarantees at a glance" (database versus application level, with the checks that detect each); "Read-only verification scripts" (valid schema versions, what each checks, which have run against Neon: `verify-roulette.sql` never); V8/V9 rollback limitation; links to the Week 4 runbook; `verify-migrations.sql` recognises V9 |
+| `docs/api.md` | Authentication table row for the spin; `schemaVersion` 9 on the branch versus 7 on `main`/staging; deployment status of the spin; payout calculation with the worked example; wallet balance and history after a round; idempotent replay table; error table and two examples; contract history 0.5.0 approved (no longer "pending review") |
+| `infrastructure/README.md`, `render/README.md`, `wallet-rollout.md` | The new runbook listed and linked; staging state "Week 4 not deployed"; expected `schemaVersion` after a Week 4 rollout |
+| this plan | Revision 9; task labels of W4-02, W4-03, W4-05, W4-06 and W4-08 updated from "pending review" to their recorded approvals; Q15 kept *Proposed*; clarification after §15.3 that Week 3 compatibility with V8/V9 is untested |
+| Week 3 compatibility wording (review of W4-09) | In the runbook (§2, §6, §10, §11) and `database.md` the compatibility of the Week 3 build with a V8/V9 schema and the application rollback are stated as **expected, not tested**; the runbook names what the tests prove and what they do not, and keeps the database restore as the fallback |
+
+**Runbook** `infrastructure/roulette-rollout.md` (V7 → V9), modelled on `wallet-rollout.md`:
+preconditions P1–P10 (including "no new environment variable", "merged migrations = V1–V9 with V1–V7
+unchanged", room for one Neon branch) and approvals A1–A7; read-only preflight at V7
+(`verify-migrations.sql`, `verify-wallets.sql`, recorded baseline, stop conditions; `verify-roulette.sql`
+explicitly **not** run before V9); restore point `staging-before-week-04` created directly before the
+deploy (`staging-before-week-03` untouched); merge and manual Render deploy; expected Flyway log and V8/V9
+behaviour (separate transactions, locks, failure states); read-only post-checks with a V9 gate before
+`verify-roulette.sql`; authentication and CSRF smoke checks that cannot write (`403` without token, `401`
+with a token but no session); an optional, separately approved spin of 10 virtual coins from the
+browser console (no cookie copied), its identical replay, wallet and history checks and a reconciliation;
+success criteria; a failure table with stop conditions; rollback before and after the first round
+(point of no return, roll forward, database restore and its data loss); documentation steps after a
+rollout. Every step that changes GitHub `main`, Render, Neon or staging data is marked
+**APPROVAL REQUIRED**. No credentials or connection strings; only the public staging URLs already in the
+repository.
+
+**Remaining approval gates** (none is granted by W4-09):
+
+| Gate | Needed for |
+|---|---|
+| Review of W4-09 (granted 2026-11-19) | Starting W4-10 |
+| Commit and push of W4-09 (granted 2026-11-19, this checkpoint) | Publishing this documentation |
+| W4-10 pull request review and merge into `main` (A2) | Week 4 on `main`; Vercel redeploys an unchanged frontend; Render does not deploy (Auto-Deploy Off) |
+| Q15: explicit deployment approval | Any step of `roulette-rollout.md` that changes shared infrastructure |
+| A1 restore point, A3 Render deploy | Neon `staging` V7 → V9 |
+| A4 sign-in, A5 functional spin | The optional played round on staging (point of no return for an application-only rollback) |
+| A6 suspend/rollback/restore, A7 deleting a restore point | Only if needed |
+
+**Readiness for W4-10.** Code, tests, contract and documentation are aligned; AC-W4-09.1 and
+AC-W4-09.2 are met by the files above (AC-W4-09.2's "APPROVAL" marking is written as
+**APPROVAL REQUIRED**). W4-10 (full `./mvnw verify`, frontend checks, option D gate, real-HTTP check on a
+throwaway local stack, pull request) can start; it has not been started. Known item for W4-10:
+`com.casino.game.package-info.java` still describes Week 4 as "in progress" with rounds and the endpoint
+as future work; it is a Javadoc comment in production code, so W4-09 did not change it (correction
+approved for W4-10).
 
 ---
 

@@ -41,7 +41,7 @@ reports the latest version as `schemaVersion`.
 |---|---|
 | Testcontainers, and a local Docker database started from `feature/week-04-roulette` | **V9** (Flyway applies V8 and V9 at the first start of a build that contains them) |
 | `main` | V7 (since the Week 3 merge, PR #9) |
-| Neon `staging` (used by Render staging) | **V7** since 2026-11-15: Render applied V6 and V7 at the start of the first Week 3 deploy, following the approved [Week 3 rollout runbook](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15). The V5 state is preserved in the Neon branch `staging-before-week-03`. **V8 and V9 are not applied**: the first Render start of a build that contains them would apply them automatically, so that deploy needs its own approval (`docs/plans/week-04.md` §15) |
+| Neon `staging` (used by Render staging) | **V7** since 2026-11-15: Render applied V6 and V7 at the start of the first Week 3 deploy, following the approved [Week 3 rollout runbook](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15). The V5 state is preserved in the Neon branch `staging-before-week-03`. **V8 and V9 are not applied**: the first Render start of a build that contains them would apply them automatically, so that deploy needs its own approval (`docs/plans/week-04.md` §15; runbook [roulette-rollout.md](../infrastructure/roulette-rollout.md), prepared in W4-09, not executed) |
 | Neon `production` | Empty and untouched until the Week 12 release |
 
 ## Current schema (after V9)
@@ -178,7 +178,8 @@ ALTER TABLE wallet_transactions
   on a database with players and wallets (rows byte-for-byte unchanged, only the two constraint
   definitions differ, triggers identical), the sign and zero rules, a failed V8 that leaves V7 intact
   and applies on the next start, and the read-only scripts at V8.
-- Week 3 code is compatible with a V8 schema (it never writes the new types). Once roulette rounds
+- Week 3 code is expected to be compatible with a V8 schema (it never writes the new types; not
+  tested with the Week 3 build itself, see the rollback limitation below). Once roulette rounds
   exist, Week 3 code could not read their ledger entries; see the rollback limits in
   `docs/plans/week-04.md` §15.3.
 
@@ -229,7 +230,7 @@ entries (W4-06); there is no pending state.
   reconciliation checks it (below; `docs/plans/week-04.md` §5.7, §5.8).
 - **Java mapping:** `game.entity.RouletteRound` (`@Immutable`, `Persistable`) and `RouletteBet`
   (`@Immutable`), ids only towards `users` and `wallet_transactions`; `RouletteRoundRepository` has
-  `save` and `findByUserIdAndRequestId` only.
+  `saveAndFlush` (W4-06; `save` until then) and `findByUserIdAndRequestId` only.
 - Tested on PostgreSQL 17.11 and 18.6 (`MigrationCompatibilityIT`): clean V1–V9, V8 → V9 with data (the
   wallet tables unchanged), every constraint by name, the triggers, a failed V9, and the read-only
   migration check at V9 (empty and with rounds) and roulette reconciliation; `RouletteRoundRepositoryIT`
@@ -268,6 +269,50 @@ one stake and one payout entry, ten equal results. Spins of two players do not w
 **Not enforced by the database** (accepted, `docs/plans/week-04.md` §5.7): the ownership, type, amount
 and reference of a round's entries, the bet totals and the payout for the winning number. A second writer
 of rounds or manual SQL could break them; `verify-roulette.sql` would report it.
+
+**Guarantees at a glance** (database level = rejected by PostgreSQL whatever the writer; application
+level = kept by the single writer and detected read-only):
+
+| Guarantee | Database (V6–V9) | Application (`WalletService`, `RouletteService`) | Detected / tested by |
+|---|---|---|---|
+| No negative balance, cap 2⁵³ − 1 | `ck_wallets_balance`, `ck_wallet_transactions_balance` | `INSUFFICIENT_FUNDS`/`BALANCE_LIMIT_EXCEEDED` under the row lock | `verify-wallets.sql`, `LedgerIntegrityIT` |
+| Only known ledger types, each with its sign | `ck_wallet_transactions_type`, `ck_wallet_transactions_direction` (V8) | Exhaustive enum mapping | `MigrationCompatibilityIT` |
+| Ledger, rounds and bets never change | Append-only triggers (V6, V9), `ON DELETE RESTRICT` | `@Immutable` entities, no update/delete methods | `MigrationCompatibilityIT`, `RouletteRoundRepositoryIT` |
+| One round per player and request | `uq_roulette_rounds_request` | Wallet lock before the lookup (§8.2 of the plan) | `RouletteConcurrencyIT` |
+| A stake/payout entry serves one round | Unique entry columns, `ck_roulette_rounds_distinct_entries`, unique ledger keys | Keys `roulette-round:<id>:stake` and `…:payout` | `verify-roulette.sql` |
+| Payout entry exactly when something was won | `ck_roulette_rounds_payout_entry` | Credit only if the total payout > 0 | `verify-roulette.sql` |
+| Valid bet options, no selection twice, payout a valid multiple | `ck_roulette_bets_category`, `_option`, `_payout`, `uq_roulette_bets_selection` | Bean Validation, `RouletteSelection`, `RouletteRules` | `MigrationCompatibilityIT`, `RouletteControllerTest` |
+| Entries belong to the round's player, with its type, amount and reference | — | Single writer, one transaction | `verify-roulette.sql`, `RoundLedgerIntegrityIT` |
+| Bet totals and the exact payout for the winning number | — (multiple only) | `RouletteRules.settle` | `verify-roulette.sql`, `RoundLedgerIntegrityIT` |
+| Bet limits (1–10 bets, 1–1,000 coins) | — (structural bounds only) | Contract constants, DTO validation, `RouletteService` | `RouletteControllerTest`, `RouletteServiceTest` |
+
+### Read-only verification scripts
+
+In [`infrastructure/neon/`](../infrastructure/neon/), run with
+[`readonly-query.sh`](../infrastructure/neon/readonly-query.sh) (one `READ ONLY` transaction that is
+rolled back; credentials from `.env.neon`, never printed). They count rows and never read row contents.
+`MigrationCompatibilityIT` runs the three `verify-*` scripts on PostgreSQL 17.11 and 18.6 under
+`default_transaction_read_only = on`.
+
+| Script | Valid at | Checks | Run against Neon |
+|---|---|---|---|
+| `preflight.sql` | an empty branch | location, no tables, privileges | 2026-11-07 (staging, before V1) |
+| `verify-migrations.sql` | V5, V7, V8, V9 | location (`neon.branch_id`), migration history, `schema_state`, expected and unexpected tables, counts (roulette counts `NULL` before V9) | Week 3 rollout (V5 and V7) |
+| `verify-wallets.sql` | V6 and later | every player has one wallet with one starting entry; every balance equals its ledger | Week 3 rollout (V7) |
+| `verify-roulette.sql` | **V9 only** | the eleven round–ledger counters above | **never**; only after `verify-migrations.sql` reports `V9: Week 4 roulette rounds` |
+
+The Week 4 rollout uses them in this order: preflight at V7 (`verify-migrations`, `verify-wallets`),
+then after the deploy `verify-migrations` (gate: V9), `verify-wallets` and `verify-roulette`
+([roulette-rollout.md](../infrastructure/roulette-rollout.md)).
+
+**Rollback limitation (V8/V9).** The Week 3 build is **expected** to run on a V8 or V9 schema as long
+as no round exists (V8 widens two checks, V9 only adds objects, and Flyway accepts applied future
+migrations by default), but this has **not been tested** with the Week 3 build itself; the tests prove
+only that existing rows and objects stay unchanged and that the Week 4 build's wallet paths work on V9.
+Once `ROULETTE_*` ledger entries exist, the Week 3 build is expected to fail reading them (the history of
+those players would answer `500`), so a return to Week 3 code then needs a database restore; roll
+forward instead (`docs/plans/week-04.md` §15.3,
+[roulette-rollout.md §11](../infrastructure/roulette-rollout.md#11-rollback-and-recovery)).
 
 ### Users and roles (`users`, V3)
 
@@ -533,9 +578,9 @@ jdbc:postgresql://${NEON_DB_HOST}/${NEON_DB_NAME}?sslmode=verify-full&sslfactory
 ### Migration procedure (first migration, V1–V5, done on staging 2026-11-07)
 
 This is the procedure for an **empty** database, kept for a new branch. Later versions on a branch
-that already has a schema (staging: V6 and V7) follow the
-[Week 3 rollout runbook](../infrastructure/wallet-rollout.md) instead; there Render applies them
-at start-up.
+that already has a schema follow their rollout runbook instead, where Render applies them at start-up:
+V6 and V7 the executed [Week 3 rollout runbook](../infrastructure/wallet-rollout.md), V8 and V9 the
+prepared, not yet executed [Week 4 rollout runbook](../infrastructure/roulette-rollout.md).
 
 Flyway applies migrations automatically when the backend starts with the profile, so the backend is
 started against Neon only after the checks below.
@@ -597,8 +642,8 @@ started against Neon only after the checks below.
    - 8 interests, no players, admins, sessions or throttle rows; `wallets`/`ledger_entries` empty.
 
    The same script recognises V7 after the [Week 3 rollout](../infrastructure/wallet-rollout.md)
-   (`schema_state` = `V7: Week 3 wallet schema`) and V8 (`V8: Week 4 ledger types`). It is tested on
-   PostgreSQL 17 and 18 at these states
+   (`schema_state` = `V7: Week 3 wallet schema`), V8 (`V8: Week 4 ledger types`) and V9
+   (`V9: Week 4 roulette rounds`). It is tested on PostgreSQL 17 and 18 at these states
    (`MigrationCompatibilityIT`).
 5. **Later starts** validate the checksums of the applied migrations and apply only new ones.
 

@@ -9,7 +9,8 @@ Vercel (frontend, auto-deploys main) ──/api──▶ Render staging backend 
 
 **Status: executed on 2026-11-15** with the project owner's approval; see the
 [rollout record](#rollout-record-2026-11-15) below. The steps after it are kept unchanged as the
-historical procedure and as the template for later migrations (Week 4: `docs/plans/week-04.md` §15).
+historical procedure and as the template for later migrations (Week 4: `docs/plans/week-04.md` §15
+and the prepared, not yet executed [roulette-rollout.md](roulette-rollout.md)).
 Neon `production` is never touched: every command here uses the `staging` branch only.
 
 ## Rollout record (2026-11-15)
