@@ -37,8 +37,8 @@ Root package `com.casino`. Each direct sub-package is a module:
 | `common` | Shared kernel: web/OpenAPI config, clock, platform status, API error format | 1 | implemented |
 | `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 | implemented |
 | `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 | implemented |
-| `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented on `feature/week-03-wallet`, in review, not deployed |
-| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 | planned |
+| `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented, on `main`, deployed to staging |
+| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` ([below](#game-module-week-4)) | 4 | implemented on `feature/week-04-roulette` (W4-04 to W4-08): rules, secure wheel, round persistence, atomic spin service and `POST /api/v1/games/roulette/spins`; **not on `main`, not deployed** ([`docs/plans/week-04.md`](plans/week-04.md)) |
 | `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 | planned |
 | `responsibleplay` | Session limits, breaks, self-exclusion, play-time tracking | 9 | planned |
 | `admin` | Administrative use cases under `/api/v1/admin/**` | 10 | planned |
@@ -51,13 +51,18 @@ Root package `com.casino`. Each direct sub-package is a module:
 - Expected direction: `auth → user`, **`wallet → user`** (only `user.dto.UserRegistered`), `game → wallet`,
   `game → responsibleplay`, `learning → wallet`, `admin → (learning, responsibleplay, wallet, user)`.
   Cycles are not allowed; in particular `user` never depends on `auth` or `wallet`.
-- Enforcement: ArchUnit rules R1–R15 in `ModuleArchitectureTest`, run with every build
+- Enforcement: ArchUnit rules R1–R14, R16 and R17 in `ModuleArchitectureTest`, run with every build
   (`./mvnw test`, [ADR-0005](decisions/0005-architecture-rules-archunit.md); R1–R12:
-  [`docs/plans/week-02.md`](plans/week-02.md) §9, R13–R15: [`docs/plans/week-03.md`](plans/week-03.md) §9):
+  [`docs/plans/week-02.md`](plans/week-02.md) §9, R13–R14: [`docs/plans/week-03.md`](plans/week-03.md) §9,
+  R16–R17: [`docs/plans/week-04.md`](plans/week-04.md) §4.6, §4.7):
   - R13: `wallet.service.WalletService` is used only by `wallet`, `game`, `learning` and `admin`;
   - R14: `wallet` uses `user` only through `user.dto`;
-  - R15: production code never uses the test-only ledger types `TEST_CREDIT`/`TEST_DEBIT`. `ArchitectureRulesTest` proves that each rule
-  detects its violation. A new module must be added to `ArchitectureRules.BUSINESS_MODULES`.
+  - R16: randomness comes only from an unseeded `java.security.SecureRandom` (no `new Random()`, no
+    `Math.random()`, `ThreadLocalRandom`, `SplittableRandom` or default `RandomGenerator`, no seeding);
+  - R17: `model` packages depend on no framework (Spring, JPA, Hibernate, servlet) and no other layer;
+  - R15 (production code never used the test-only ledger types) was **retired in W4-03** together with
+    those types; its id is not reused. `ArchitectureRulesTest` proves that each rule detects its
+    violation. A new module must be added to `ArchitectureRules.BUSINESS_MODULES`.
 
 ### Layers inside a module
 
@@ -70,6 +75,8 @@ com.casino.<module>
 ├── repository/   database access (Spring Data JPA repositories, other data-access adapters)
 ├── entity/       JPA entities — never returned by controllers
 ├── dto/          request/response records matching the schemas in openapi.yaml
+├── model/        plain domain types and pure rules shared by the other layers (since W4-04; no
+│                 framework, no other layer: R17; not part of the public API)
 ├── config/       module-specific Spring configuration
 └── exception/    module exceptions and their HTTP mapping
 ```
@@ -102,7 +109,7 @@ API: [api.md](api.md#wallet-get-apiv1wallet).
 | Package | Classes | Responsibility |
 |---|---|---|
 | `controller` | `WalletController` | `GET /api/v1/wallet`, `GET /api/v1/wallet/transactions`; the user is the session principal, never a request value |
-| `service` | `WalletService` | Public API of the module: `getWallet`, `listTransactions`, `credit`, `debit`, `openWallet`, `getBalance` |
+| `service` | `WalletService` | Public API of the module: `getWallet`, `listTransactions`, `credit`, `debit`, `openWallet`, `getBalance`, `lockWallet` (W4-06: the row lock for the rest of the caller's transaction, `MANDATORY`) |
 | | `WalletOpener` | `@EventListener` for `user.dto.UserRegistered` |
 | | `TransactionCursor` | Opaque cursor of the history pages |
 | `repository` | `WalletRepository` (+ `WalletLocking`), `WalletTransactionRepository` | Spring Data JPA; no delete methods |
@@ -178,15 +185,91 @@ through the caller's own entries. Responses show only the published types (`Wall
 stored entry of any other type fails the request closed (`500`). `limit` accepts decimal digits only
 (`common.exception.DecimalIntegerParameters`).
 
-**Test-only ledger types.** `TEST_CREDIT`/`TEST_DEBIT` exist so that the integration tests can debit
-and credit before Week 4 brings real types. A test-only Flyway callback allows them in test
-databases; the production schema rejects them, ArchUnit R15 forbids their use in production code,
-and no response type can carry them. They are still compiled into the two enums; their removal is a
-Week 4 task (`docs/plans/week-03.md` §7.8, §7.13).
+**Ledger types (since W4-03, Flyway V8).** `STARTING_BALANCE` (credit, only through `openWallet`),
+`ROULETTE_STAKE` (debit) and `ROULETTE_PAYOUT` (credit). The command enum
+(`wallet.dto.WalletTransactionType`), the stored enum (`wallet.entity.TransactionType`) and the
+published enum (`wallet.dto.WalletEntryType`) have exactly these values; `WalletService` maps them with
+exhaustive `switch` expressions, so a type added to one enum without the others does not compile. The
+database accepts no other type and enforces each sign. The Week 3 test-only types `TEST_CREDIT`/
+`TEST_DEBIT`, their test Flyway callback and ArchUnit R15 were removed in W4-03 (option D,
+`docs/plans/week-03.md` §7.13): tests run on exactly the production schema, and
+`ProductionArtifactIT` fails if either name appears in any packaged class or resource.
 
 **Coverage.** JaCoCo checks `com.casino.wallet.service` in every `./mvnw verify` (CI included):
 at least 80 % lines and 70 % branches. Measured in W3-09: 100 % lines (111/111) and 100 % branches
-(62/62).
+(62/62); after `lockWallet` and the exhaustive type mapping of Week 4 (W4-08): 118/118 lines and 68/68
+branches.
+
+### Game module (Week 4)
+
+**Status:** implemented and tested on `feature/week-04-roulette` (W4-04 to W4-08); not merged into
+`main` and **not deployed** (staging runs Weeks 1–3 at schema V7; rollout runbook:
+[infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md), not executed). Design and
+decisions: [`docs/plans/week-04.md`](plans/week-04.md); schema:
+[database.md](database.md#roulette-rounds-and-bets-v9); API:
+[api.md](api.md#roulette-spin-post-apiv1gamesroulettespins). Virtual coins only.
+
+| Package | Classes | Responsibility |
+|---|---|---|
+| `model` | `RouletteBetCategory`, `RouletteBetColor`, `RouletteParity`, `RouletteRange`, `RouletteDozen`, `RouletteNumberColor`; `RouletteSelection` (sealed: one record per category), `RouletteWager`, `RouletteSettlement`; `RouletteRules`; `PlayedRound`, `SettledWager` (the result of a spin) | European roulette rules as pure functions: colors, which selection wins, payouts (stake × 36/2/3 on a win, 0 on a loss), settlement of a spin; integer arithmetic with overflow checks (`Math.multiplyExact`/`addExact`). Plain Java (R17); one set of enums shared by rules, DTOs and entities |
+| `service` | `RouletteWheel` (interface), `SecureRandomRouletteWheel` (package-private `@Component`) | The winning number: one unseeded `new SecureRandom()`, `nextInt(37)` (rejection sampling, no modulo bias); the only wheel bean. Tests replace it through the test context only; production has no seed or "fixed number" switch |
+| | `RouletteService` (W4-06) | `spin(userId, requestId, wagers)`: one `@Transactional` round (below); the only writer of rounds; limits `MAX_BETS` = 10 and `MAX_AMOUNT` = 1,000 |
+| `entity` | `RouletteRound` (`@Immutable`, `Persistable<UUID>`), `RouletteBet` (`@Immutable`) (W4-05) | Mapping of V9 without setters; the player and the ledger entries by id only, no relationship into `user` or `wallet`; bets owned by the round (unidirectional, `CascadeType.PERSIST`), in request order |
+| `repository` | `RouletteRoundRepository` (W4-05; plain Spring Data `Repository`) | `saveAndFlush` (W4-06; a database rule fails inside the spin's transaction), `findByUserIdAndRequestId` (bets through an entity graph); no update or delete |
+| `dto` | `RouletteSpinRequest`, `RouletteBetRequest` (schema `RouletteBet`), `RouletteSpinResult`, `RouletteSettledBet`; `OneOptionPerCategory`, `DistinctSelections`; `StrictJson` (W4-07) | The contract's request and response shapes with the `model` enums; Bean Validation of limits, the option of each category and duplicate selections; per-field strict JSON values (integers as integer tokens, enum values as exact names), so no global Jackson setting changes |
+| `controller` | `RouletteController` (W4-07) | `POST /api/v1/games/roulette/spins`: the player from the session principal, the `Idempotency-Key` as a `UUID`, delegation to `RouletteService.spin`; `200` for a new round and a replay. No balance, number, odds or payout is read from the request |
+
+There is no `config` and no `exception` package: limits are contract constants, and every failure is
+an existing wallet or common exception (no new `ProblemCode`).
+
+**One spin = one database transaction** (`RouletteService.spin`, propagation `REQUIRED`; the wallet
+operations join it):
+
+```
+RouletteController ── session principal, Idempotency-Key, validated bets
+└─ RouletteService.spin                                     @Transactional
+    1. validate (1–10 bets, 1–1,000 coins each, no selection twice) ... before any lock or write
+    2. WalletService.lockWallet(userId) ............................ wallet row lock, bounded wait
+    3. findByUserIdAndRequestId: same content → stored round (replay); other content → 409
+    4. roundId = UUID.randomUUID(); WalletService.debit(ROULETTE_STAKE, total stake,
+       key roulette-round:<roundId>:stake, reference roundId) ..... insufficient funds → 409
+    5. RouletteWheel.spin() → RouletteRules.settle ................. only after the stake is accepted
+    6. if total payout > 0: WalletService.credit(ROULETTE_PAYOUT, …, key …:payout)
+    7. saveAndFlush(round + bets, both ledger entry ids, balance_after, createdAt = clock.instant())
+   commit → RouletteSpinResult (200)
+```
+
+- **Atomic wallet integration (`game → wallet`).** `game` uses only `wallet.service.WalletService`,
+  `wallet.dto` and `wallet.exception` (R3, R13). Stake entry, payout entry, balance change, round and
+  bets commit together or not at all; any exception rolls everything back, nothing is compensated by
+  hand. A failed spin draws no number and leaves its key unused. The result is built from the stored
+  round and sent only after the commit.
+- **Locking.** `WalletService.lockWallet` (W4-06, `MANDATORY`) takes the wallet's existing row lock
+  (`PESSIMISTIC_WRITE`, `APP_WALLET_LOCK_TIMEOUT`) **before** the round lookup, so requests of one player
+  are serialized; the later `debit`/`credit` re-enter the lock the transaction already holds. One spin
+  locks one wallet (deadlock rule). Spins of different players do not wait for each other. A lock
+  timeout is `503 SERVICE_UNAVAILABLE` with nothing written.
+- **Two levels of idempotency.** The client's `Idempotency-Key` (canonical UUID,
+  `CanonicalUuidParameters`) is stored as `roulette_rounds.request_id`, unique per player: the same key
+  and the same content (the bets as a set of category, option and amount, Q17) return the stored round
+  with no wallet operation, draw or write; other content is `409 IDEMPOTENCY_KEY_REUSED`. The ledger
+  keys are server-generated from the round id (`roulette-round:<id>:stake|payout`); the client's key
+  never reaches the ledger. The unique constraints are the last line of defence.
+- **Fairness and transparency.** Every bet has the expected net result −1/37 of its amount (house edge
+  1/37 ≈ 2.7027 %, RTP 36/37 ≈ 97.2973 %), proven exactly over all 37 results by `RouletteRulesTest`;
+  the chi-square diagnostic of the real wheel is opt-in (`-Droulette.statistics=true`). One request plays
+  exactly one round; there is no autoplay, repeat or bonus mechanic.
+- **Architecture rules.** R16 (no weak or seeded randomness in production code) and R17 (`model` is
+  framework-free and depends on no other layer; `model` is a layer package since ADR-0004 Amendment 1)
+  apply to `game` like to every module; R15 is retired (above).
+- **Coverage.** JaCoCo also checks `com.casino.game.model` and `com.casino.game.service` (≥ 80 % lines,
+  ≥ 70 % branches); measured in W4-08: `game.model` 105/105 lines and 58/58 branches, `game.service`
+  64/64 and 32/32.
+- **Accepted limitations.** The database proves that a round's ledger entries exist and cannot be
+  deleted, not that they are the round's own (owner, type, amount, reference); `RouletteService` as the
+  single writer guarantees it and `verify-roulette.sql` detects any violation
+  ([database.md](database.md#roulette-rounds-and-bets-v9)). Responsible-play checks (Week 9) will be
+  added as step 1a of `spin`, before the lock; Week 4 contains no placeholder for them.
 
 ### API design (design-first)
 
@@ -264,9 +347,9 @@ frontend/src
 | Health | `/actuator/health` (liveness/readiness) and `/api/v1/system/status` |
 | Security | Spring Security and Spring Session JDBC, see [§5.1](#51-security-week-2-extended-in-week-3) and [ADR-0006](decisions/0006-session-authentication-security.md) |
 | Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
-| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Migrations also on PostgreSQL 18.6 (`MigrationCompatibilityIT`). Coverage: JaCoCo, enforced for `com.casino.wallet.service` (≥ 80 % lines, ≥ 70 % branches). Test contexts are cached at most 6 at a time (`src/test/resources/spring.properties`), because each holds its own PostgreSQL container. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. Browser acceptance: Playwright against an isolated real stack (`frontend/e2e`, run locally); full E2E coverage and CI in Week 11 |
+| Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Migrations also on PostgreSQL 18.6 (`MigrationCompatibilityIT`). Coverage: JaCoCo, enforced for `com.casino.wallet.service`, `com.casino.game.model` and `com.casino.game.service` (≥ 80 % lines, ≥ 70 % branches). Test contexts are cached at most 6 at a time (`src/test/resources/spring.properties`), because each holds its own PostgreSQL container. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. Browser acceptance: Playwright against an isolated real stack (`frontend/e2e`, run locally); full E2E coverage and CI in Week 11 |
 | CI | GitHub Actions: backend `mvnw verify` (including the JaCoCo check; coverage report uploaded as `backend-coverage`), frontend lint → typecheck → test → build |
-| Request parameters | Integer query parameters accept decimal digits only (`common.exception.DecimalIntegerParameters`); anything else is `400 MALFORMED_REQUEST`, range violations `400 VALIDATION_FAILED` |
+| Request parameters | Integer query parameters accept decimal digits only (`common.exception.DecimalIntegerParameters`); `UUID` parameters and headers (the `Idempotency-Key`) only the canonical 36-character form, either case (`common.exception.CanonicalUuidParameters`, W4-07); anything else is `400 MALFORMED_REQUEST`, range violations `400 VALIDATION_FAILED`. Numeric and enum fields of the roulette request body are strict JSON values (`game.dto.StrictJson`): no fraction, exponent, string or position number |
 
 ### 5.1 Security (Week 2, extended in Week 3)
 
@@ -278,7 +361,8 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
   - Public: system status, CSRF token, registration, login, logout, interests, health and info,
     Swagger UI and both API descriptions.
   - `/api/v1/admin/**` needs the role `ADMIN` (no endpoints yet). `/api/v1/wallet` and
-    `/api/v1/wallet/**` need the role `PLAYER` (Week 3). Every other `/api/**` path needs a
+    `/api/v1/wallet/**` need the role `PLAYER` (Week 3), and so do `/api/v1/games` and
+    `/api/v1/games/**` (W4-07). Every other `/api/**` path needs a
     session. Everything else is denied.
   - `401` and `403` are Problem Details from `ProblemDetailFactory`.
 - **Authentication:** JSON login and registration endpoints; `DaoAuthenticationProvider` with
@@ -315,13 +399,21 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
 
 | Component | Staging today | Code deployed |
 |---|---|---|
-| Frontend (static build) | Vercel, `https://online-casino-simulator.vercel.app`, same-origin `/api` rewrite to Render; deploys `main` automatically ([infrastructure/vercel](../infrastructure/vercel/README.md)). Cloudflare Pages was the original plan; the final choice is ADR-0007 | `main` (Weeks 1–2 and the deployment foundation) |
+| Frontend (static build) | Vercel, `https://online-casino-simulator.vercel.app`, same-origin `/api` rewrite to Render; deploys `main` automatically ([infrastructure/vercel](../infrastructure/vercel/README.md)). Cloudflare Pages was the original plan; the final choice is ADR-0007 | `main` (Weeks 1–3 and the deployment foundation) |
 | Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render Free, Frankfurt, `https://online-casino-simulator.onrender.com`, profiles `neon,render`, registration closed, Auto-Deploy Off, manual deploys ([infrastructure/render](../infrastructure/render/README.md)) | `main` |
-| Database | Neon (managed PostgreSQL 18), branch `staging`; `production` untouched until Week 12. Local development and tests use 17 | schema **V5** |
+| Database | Neon (managed PostgreSQL 18), branch `staging`; `production` untouched until Week 12. Local development and tests use 17 | schema **V7** |
 
-Week 3 (wallet, V6/V7) is **not deployed**: it is on `feature/week-03-wallet`, locally at V7. Its
-rollout is a separately approved step with its own runbook:
-[infrastructure/wallet-rollout.md](../infrastructure/wallet-rollout.md).
+Week 3 (wallet, V6/V7) is **deployed to staging** (2026-11-15): merged into `main` (PR #9), deployed
+manually on Render, which applied V6 and V7 to Neon `staging` at start-up. The approved runbook and
+the verification results are in
+[infrastructure/wallet-rollout.md](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15).
+Registration stays closed; Neon `production` is untouched.
+
+Week 4 (roulette, V8/V9) is **not deployed**: it exists only on `feature/week-04-roulette`, and Render
+Auto-Deploy is Off, so even a merge into `main` would not change the backend. Its staging rollout
+(V7 → V9) needs a separate approval and follows
+[infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md) (prepared in W4-09, not
+executed).
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a
 fast feedback loop. The Spring profile `neon` points a local backend at a Neon branch instead

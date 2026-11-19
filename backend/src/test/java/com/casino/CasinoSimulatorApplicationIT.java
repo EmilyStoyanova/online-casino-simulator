@@ -5,6 +5,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
+
+import com.casino.game.service.RouletteWheel;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,10 +35,13 @@ class CasinoSimulatorApplicationIT {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private List<RouletteWheel> wheels;
+
     @Test
     void appliesFlywayMigrationsOnStartup() {
         assertThat(flyway.info().pending()).isEmpty();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
 
         Integer functionCount = jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM pg_proc WHERE proname = 'set_updated_at'", Integer.class);
@@ -47,12 +53,20 @@ class CasinoSimulatorApplicationIT {
     }
 
     @Test
+    void theOnlyRouletteWheelIsTheSecureRandomWheel() {
+        // W4-04: no other wheel (fixed, seeded, test) exists in the application context.
+        assertThat(wheels).singleElement()
+                .satisfies(wheel -> assertThat(wheel.getClass().getName()).isEqualTo("com.casino.game.service.SecureRandomRouletteWheel"))
+                .satisfies(wheel -> assertThat(wheel.spin()).isBetween(0, 36));
+    }
+
+    @Test
     void systemStatusReportsDatabaseUpWithCurrentSchemaVersion() throws Exception {
         mockMvc.perform(get("/api/v1/system/status"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"))
                 .andExpect(jsonPath("$.database.status").value("UP"))
-                .andExpect(jsonPath("$.database.schemaVersion").value("7"))
+                .andExpect(jsonPath("$.database.schemaVersion").value("9"))
                 .andExpect(jsonPath("$.version").isNotEmpty());
     }
 

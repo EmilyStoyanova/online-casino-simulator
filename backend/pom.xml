@@ -157,8 +157,9 @@
             <!--
               Coverage (P-W3-14, docs/plans/week-03.md §10.6). The agent records unit tests (jacoco.exec)
               and integration tests (jacoco-it.exec) through @{argLine}; after the integration tests both
-              are merged. `verify` then writes the reports and fails if the wallet business logic
-              (package com.casino.wallet.service) is below 80 % lines or 70 % branches.
+              are merged. `verify` then writes the reports and fails if a checked package (the wallet
+              business logic com.casino.wallet.service and, since W4-04, the roulette engine com.casino.game.model
+              and com.casino.game.service) is below 80 % lines or 70 % branches.
               Placed after Failsafe, so a failing test is reported before the coverage check.
               Reports: target/site/jacoco (unit + integration, the checked data) and
               target/site/jacoco-unit (unit tests only, for comparison).
@@ -234,6 +235,8 @@
                                     <element>PACKAGE</element>
                                     <includes>
                                         <include>com.casino.wallet.service</include>
+                                        <include>com.casino.game.model</include>
+                                        <include>com.casino.game.service</include>
                                     </includes>
                                     <limits>
                                         <limit>

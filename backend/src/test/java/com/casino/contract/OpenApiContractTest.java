@@ -3,6 +3,7 @@ package com.casino.contract;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -13,6 +14,9 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import com.casino.common.exception.ProblemCode;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import io.swagger.v3.core.util.Json31;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.media.Schema;
@@ -27,6 +31,8 @@ class OpenApiContractTest {
     private static final String JSON = "application/json";
     private static final String WALLET_PATH = "/api/v1/wallet";
     private static final String WALLET_TRANSACTIONS_PATH = "/api/v1/wallet/transactions";
+    private static final String SPIN_PATH = "/api/v1/games/roulette/spins";
+    private static final String PROBLEM_JSON = "application/problem+json";
 
     private static final String VALID_UP = """
             {"application":"online-casino-simulator","version":"0.1.0","status":"UP",
@@ -170,12 +176,12 @@ class OpenApiContractTest {
 
     @Test
     void everyOperationIsImplementedAndNoneIsPlanned() {
-        assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.4.0");
+        assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.5.0");
         // GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08),
-        // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10).
+        // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10), the wallet (W3-07, W3-08),
+        // the roulette spin (designed in W4-02, implemented in W4-07).
         assertThat(contract.implementedOperations()).contains("GET " + STATUS_PATH, "GET /api/v1/users/me",
-                "PATCH /api/v1/users/me", "GET " + WALLET_PATH, "GET " + WALLET_TRANSACTIONS_PATH);
-        // The wallet operations designed in W3-02 are implemented (W3-07, W3-08): no planned operation is left (AC-0.7).
+                "PATCH /api/v1/users/me", "GET " + WALLET_PATH, "GET " + WALLET_TRANSACTIONS_PATH, "POST " + SPIN_PATH);
         assertThat(contract.plannedOperations()).isEmpty();
     }
 
@@ -245,7 +251,7 @@ class OpenApiContractTest {
                  "idempotencyKey":"starting-balance"}""")).containsExactly("$: undocumented property 'idempotencyKey'");
         assertThat(contract.validateSchema("WalletTransaction", """
                 {"id":2,"type":"ADMIN_GIFT","amount":5,"balanceAfter":1005,"createdAt":"2026-11-12T09:15:00Z"}"""))
-                .containsExactly("$.type: value 'ADMIN_GIFT' is not one of [STARTING_BALANCE]");
+                .containsExactly("$.type: value 'ADMIN_GIFT' is not one of [ROULETTE_PAYOUT, ROULETTE_STAKE, STARTING_BALANCE]");
         assertThat(contract.validateSchema("WalletTransaction", """
                 {"id":3,"type":"STARTING_BALANCE","amount":1000,"balanceAfter":-1,"createdAt":"2026-11-12T09:15:00Z"}"""))
                 .containsExactly("$.balanceAfter: -1 is less than the minimum 0");
@@ -259,6 +265,207 @@ class OpenApiContractTest {
             assertThat(contract.validateSchema("ProblemDetail",
                     "{\"title\":\"Conflict\",\"status\":409,\"code\":\"" + code.name() + "\"}")).as(code.name()).isEmpty();
         }
+    }
+
+    // ------------------------------------------------------------------ roulette (Week 4, W4-02)
+
+    @Test
+    void theRouletteSpinIsAPlayerOperationWithAnIdempotencyKey() {
+        PathItem item = contract.spec().getPaths().get(SPIN_PATH);
+        assertThat(item.readOperationsMap()).containsOnlyKeys(PathItem.HttpMethod.POST);
+        Operation spin = item.getPost();
+        assertThat(spin.getOperationId()).isEqualTo("spinRoulette");
+        assertThat(spin.getTags()).containsExactly("Roulette");
+        // Implemented in W4-07: the planned marker is gone.
+        assertThat(Objects.requireNonNullElse(spin.getExtensions(), Map.<String, Object>of()))
+                .doesNotContainKey(OpenApiContract.IMPLEMENTATION_STATUS);
+        // A session (the player is the session's) and the CSRF token; no path, query or id parameter.
+        assertThat(spin.getSecurity()).containsExactly(new SecurityRequirement().addList("sessionCookie").addList("csrfHeader"));
+        assertThat(spin.getParameters()).singleElement().satisfies(parameter -> {
+            assertThat(parameter.getName()).isEqualTo("Idempotency-Key");
+            assertThat(parameter.getIn()).isEqualTo("header");
+            assertThat(parameter.getRequired()).isTrue();
+            assertThat(parameter.getSchema().getFormat()).isEqualTo("uuid");
+            // Canonical UUIDs only, in either case.
+            java.util.regex.Pattern canonical = java.util.regex.Pattern.compile(parameter.getSchema().getPattern());
+            assertThat(canonical.matcher("3f2b8c4e-9d1a-4e7b-8c2f-5a6d7e8f9a0b").matches()).isTrue();
+            assertThat(canonical.matcher("3F2B8C4E-9D1A-4E7B-8C2F-5A6D7E8F9A0B").matches()).isTrue();
+            assertThat(canonical.matcher("1-1-1-1-1").matches()).isFalse();
+            assertThat(canonical.matcher("3f2b8c4e9d1a4e7b8c2f5a6d7e8f9a0b").matches()).isFalse();
+        });
+        assertThat(spin.getRequestBody().getRequired()).isTrue();
+        assertThat(spin.getRequestBody().getContent()).containsOnlyKeys(JSON);
+        assertThat(spin.getRequestBody().getContent().get(JSON).getSchema().get$ref())
+                .isEqualTo("#/components/schemas/RouletteSpinRequest");
+        assertThat(spin.getResponses()).containsOnlyKeys("200", "400", "401", "403", "409", "500", "503");
+        assertThat(spin.getResponses().get("200").getContent().get(JSON).getSchema().get$ref())
+                .isEqualTo("#/components/schemas/RouletteSpinResult");
+        assertThat(spin.getResponses().get("401").get$ref()).isEqualTo("#/components/responses/Unauthenticated");
+    }
+
+    @Test
+    void theSpinRequestCarriesBetsOnly() {
+        // Nothing a client could use to choose a result, a payout, a balance or a player (ADR-0003).
+        assertThat(schema("RouletteSpinRequest").getProperties()).containsOnlyKeys("bets");
+        assertThat(schema("RouletteSpinRequest").getRequired()).containsExactly("bets");
+        assertThat(schema("RouletteBet").getProperties())
+                .containsOnlyKeys("category", "number", "color", "parity", "range", "dozen", "amount");
+        assertThat(schema("RouletteBet").getRequired()).containsExactlyInAnyOrder("category", "amount");
+        assertThat(schema("RouletteSettledBet").getProperties())
+                .containsOnlyKeys("category", "number", "color", "parity", "range", "dozen", "amount", "payout");
+        assertThat(schema("RouletteSpinResult").getRequired()).containsExactlyInAnyOrder("roundId", "winningNumber",
+                "winningColor", "bets", "totalStake", "totalPayout", "balance", "createdAt");
+    }
+
+    @Test
+    void betCategoriesAndOptionsAreExactlyTheApprovedOnes() {
+        assertThat(enumOf("RouletteBetCategory")).containsExactly("STRAIGHT", "RED_BLACK", "EVEN_ODD", "LOW_HIGH", "DOZEN");
+        assertThat(enumOf("RouletteBetColor")).containsExactly("RED", "BLACK");
+        assertThat(enumOf("RouletteParity")).containsExactly("EVEN", "ODD");
+        assertThat(enumOf("RouletteRange")).containsExactly("LOW", "HIGH");
+        assertThat(enumOf("RouletteDozen")).containsExactly("FIRST", "SECOND", "THIRD");
+        assertThat(enumOf("RouletteNumberColor")).containsExactly("RED", "BLACK", "GREEN");
+    }
+
+    @Test
+    void betsAreLimitedToTenWholeCoinAmountsOfOneToOneThousand() {
+        String red = "{\"category\":\"RED_BLACK\",\"color\":\"RED\",\"amount\":10}";
+        assertThat(contract.validateSchema("RouletteSpinRequest", """
+                {"bets":[{"category":"STRAIGHT","number":0,"amount":1},{"category":"DOZEN","dozen":"THIRD","amount":1000}]}"""))
+                .isEmpty();
+        assertThat(contract.validateSchema("RouletteSpinRequest", "{\"bets\":[]}")).containsExactly("$.bets: fewer than 1 items");
+        assertThat(contract.validateSchema("RouletteSpinRequest", "{\"bets\":[" + String.join(",", Collections.nCopies(11, red)) + "]}"))
+                .containsExactly("$.bets: more than 10 items");
+        assertThat(betErrors("{\"category\":\"RED_BLACK\",\"color\":\"RED\",\"amount\":0}"))
+                .containsExactly("$.bets[0].amount: 0 is less than the minimum 1");
+        assertThat(betErrors("{\"category\":\"RED_BLACK\",\"color\":\"RED\",\"amount\":1001}"))
+                .containsExactly("$.bets[0].amount: 1001 is greater than the maximum 1000");
+        // Strict integers: never rounded or converted.
+        assertThat(betErrors("{\"category\":\"RED_BLACK\",\"color\":\"RED\",\"amount\":10.5}"))
+                .containsExactly("$.bets[0].amount: expected type [integer] but was NUMBER");
+        assertThat(betErrors("{\"category\":\"RED_BLACK\",\"color\":\"RED\",\"amount\":10.0}"))
+                .containsExactly("$.bets[0].amount: expected type [integer] but was NUMBER");
+        assertThat(betErrors("{\"category\":\"RED_BLACK\",\"color\":\"RED\",\"amount\":\"10\"}"))
+                .containsExactly("$.bets[0].amount: expected type [integer] but was STRING");
+        assertThat(betErrors("{\"category\":\"STRAIGHT\",\"number\":37,\"amount\":10}"))
+                .containsExactly("$.bets[0].number: 37 is greater than the maximum 36");
+        assertThat(betErrors("{\"category\":\"STRAIGHT\",\"number\":-1,\"amount\":10}"))
+                .containsExactly("$.bets[0].number: -1 is less than the minimum 0");
+        assertThat(betErrors("{\"category\":\"RED_BLACK\",\"color\":\"GREEN\",\"amount\":10}"))
+                .containsExactly("$.bets[0].color: value 'GREEN' is not one of [BLACK, RED]");
+        assertThat(betErrors("{\"category\":\"COLUMN\",\"amount\":10}"))
+                .containsExactly("$.bets[0].category: value 'COLUMN' is not one of [DOZEN, EVEN_ODD, LOW_HIGH, RED_BLACK, STRAIGHT]");
+        assertThat(betErrors("{\"category\":\"RED_BLACK\",\"color\":\"RED\"}"))
+                .containsExactly("$.bets[0]: missing required property 'amount'");
+    }
+
+    @Test
+    void theDocumentedSpinExamplesAreValidAndAddUp() throws Exception {
+        Operation spin = contract.spec().getPaths().get(SPIN_PATH).getPost();
+        for (Object request : examples(spin.getRequestBody().getContent().get(JSON))) {
+            assertThat(contract.validateSchema("RouletteSpinRequest", json(request))).as(json(request)).isEmpty();
+        }
+        List<Object> results = examples(spin.getResponses().get("200").getContent().get(JSON));
+        assertThat(results).hasSize(3);
+        for (Object result : results) {
+            String body = json(result);
+            assertThat(contract.validateSchema("RouletteSpinResult", body)).as(body).isEmpty();
+            JsonNode round = readTree(body);
+            int winning = round.get("winningNumber").asInt();
+            assertThat(round.get("winningColor").asText().equals("GREEN")).as(body).isEqualTo(winning == 0);
+            long stake = 0;
+            long payout = 0;
+            for (JsonNode bet : round.get("bets")) {
+                long amount = bet.get("amount").asLong();
+                long multiple = switch (bet.get("category").asText()) {
+                    case "STRAIGHT" -> 36;
+                    case "DOZEN" -> 3;
+                    default -> 2;
+                };
+                assertThat(bet.get("payout").asLong()).as(body).isIn(0L, multiple * amount);
+                stake += amount;
+                payout += bet.get("payout").asLong();
+            }
+            assertThat(round.get("totalStake").asLong()).as(body).isEqualTo(stake);
+            assertThat(round.get("totalPayout").asLong()).as(body).isEqualTo(payout);
+        }
+    }
+
+    @Test
+    void spinErrorsUseTheExistingProblemCodesWithTheirStatus() throws Exception {
+        Operation spin = contract.spec().getPaths().get(SPIN_PATH).getPost();
+        Map<String, Set<String>> expected = Map.of(
+                "400", Set.of("VALIDATION_FAILED", "MALFORMED_REQUEST"),
+                "403", Set.of("CSRF_TOKEN_INVALID", "ACCESS_DENIED"),
+                "409", Set.of("INSUFFICIENT_FUNDS", "IDEMPOTENCY_KEY_REUSED", "BALANCE_LIMIT_EXCEEDED"),
+                "500", Set.of("INTERNAL_ERROR"),
+                "503", Set.of("SERVICE_UNAVAILABLE"));
+        expected.forEach((status, codes) -> {
+            var mediaType = spin.getResponses().get(status).getContent().get(PROBLEM_JSON);
+            assertThat(mediaType.getSchema().get$ref()).as(status).isEqualTo("#/components/schemas/ProblemDetail");
+            Set<String> documented = new TreeSet<>();
+            for (Object example : examples(mediaType)) {
+                String body = json(example);
+                assertThat(contract.validateSchema("ProblemDetail", body)).as(body).isEmpty();
+                JsonNode problem = readTree(body);
+                assertThat(problem.get("status").asInt()).as(body).isEqualTo(Integer.parseInt(status));
+                assertThat(ProblemCode.valueOf(problem.get("code").asText()).allows(Integer.parseInt(status))).as(body).isTrue();
+                documented.add(problem.get("code").asText());
+            }
+            assertThat(documented).as(status).isEqualTo(new TreeSet<>(codes));
+        });
+    }
+
+    @Test
+    void walletTransactionTypesAreExactlyTheProductionTypesWithoutTestTypes() throws Exception {
+        assertThat(enumOf("WalletTransactionType")).containsExactly("STARTING_BALANCE", "ROULETTE_STAKE", "ROULETTE_PAYOUT");
+        // Designed in W4-02 as planned values, implemented with V8 in W4-03: no planned value is left.
+        assertThat(contract.plannedEnumValues("WalletTransactionType")).isEmpty();
+        assertThat(contract.validateSchema("WalletTransaction", """
+                {"id":2,"type":"ROULETTE_STAKE","amount":-10,"balanceAfter":990,"createdAt":"2026-11-20T10:15:30Z"}""")).isEmpty();
+        assertThat(contract.validateSchema("WalletTransaction", """
+                {"id":3,"type":"ROULETTE_PAYOUT","amount":360,"balanceAfter":1350,"createdAt":"2026-11-20T10:15:30Z"}""")).isEmpty();
+        assertThat(contract.spec().getComponents().getSchemas().keySet())
+                .allSatisfy(name -> assertThat(contract.plannedEnumValues(name)).as(name).isEmpty());
+        // The test-only ledger types never reach the public contract (week-03.md §7.13, option D).
+        try (var in = getClass().getClassLoader().getResourceAsStream(OpenApiContract.CONTRACT_RESOURCE)) {
+            assertThat(new String(Objects.requireNonNull(in).readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
+                    .doesNotContain("TEST_CREDIT", "TEST_DEBIT");
+        }
+    }
+
+    // ------------------------------------------------------------------ planned enum values
+
+    @Test
+    void plannedEnumValuesAreSkippedUntilImplemented() {
+        OpenApiContract planned = enumSpec("[A, B]", "x-planned-enum-values: [B]");
+
+        assertThat(planned.plannedEnumValues("Kind")).containsExactly("B");
+        assertThat(planned.differencesTo(enumSpec("[A]", ""), path -> true)).isEmpty();
+        assertThat(planned.differencesTo(enumSpec("[A, B]", ""), path -> true)).containsExactly(
+                "#/components/schemas/Kind enum value B: implemented, but still listed in x-planned-enum-values");
+        // Values that are not planned are still compared.
+        assertThat(planned.differencesTo(enumSpec("[A, C]", ""), path -> true)).containsExactly(
+                "#/components/schemas/Kind enum: contract [A] vs implementation [A, C]");
+    }
+
+    @Test
+    void reportsPlannedEnumValuesInResponses() {
+        OpenApiContract planned = enumSpec("[A, B]", "x-planned-enum-values: [B]");
+
+        assertThat(planned.validateResponse("/a", "GET", 200, JSON, "\"A\"")).isEmpty();
+        assertThat(planned.validateResponse("/a", "GET", 200, JSON, "\"B\"")).containsExactly(
+                "$: value 'B' is listed in x-planned-enum-values; remove it from there when implementing it");
+    }
+
+    @Test
+    void rejectsPlannedEnumValuesOutsideTheEnum() {
+        assertThatIllegalStateException()
+                .isThrownBy(() -> enumSpec("[A]", "x-planned-enum-values: [B]"))
+                .withMessage("#/components/schemas/Kind: x-planned-enum-values [B] are not values of its enum");
+        assertThatIllegalStateException()
+                .isThrownBy(() -> enumSpec("[A]", "x-planned-enum-values: B"))
+                .withMessage("#/components/schemas/Kind: x-planned-enum-values must be a non-empty list");
     }
 
     @Test
@@ -381,6 +588,73 @@ class OpenApiContractTest {
         assertThat(referenced.validateResponse("/a", "GET", 200, JSON, "{}")).isEmpty();
         assertThat(referenced.differencesTo(inline, path -> true)).containsExactly(
                 "GET /a 200 application/json: schema reference differs (contract: Item, implementation: null)");
+    }
+
+    private Schema<?> schema(String name) {
+        return Objects.requireNonNull(contract.spec().getComponents().getSchemas().get(name), name);
+    }
+
+    private List<String> enumOf(String schemaName) {
+        return schema(schemaName).getEnum().stream().map(String::valueOf).toList();
+    }
+
+    /** Violations of a spin request with the single bet {@code bet}. */
+    private List<String> betErrors(String bet) {
+        return contract.validateSchema("RouletteSpinRequest", "{\"bets\":[" + bet + "]}");
+    }
+
+    /** The values of {@code example} and {@code examples} of a media type. */
+    private static List<Object> examples(io.swagger.v3.oas.models.media.MediaType mediaType) {
+        List<Object> values = new ArrayList<>();
+        if (mediaType.getExample() != null) {
+            values.add(mediaType.getExample());
+        }
+        if (mediaType.getExamples() != null) {
+            mediaType.getExamples().values().forEach(example -> values.add(example.getValue()));
+        }
+        assertThat(values).as("documented examples").isNotEmpty();
+        return values;
+    }
+
+    private static String json(Object value) {
+        try {
+            return Json31.mapper().writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    private static JsonNode readTree(String json) {
+        try {
+            return Json31.mapper().readTree(json);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    /** One operation {@code GET /a} returning the enum schema {@code Kind} with {@code values} and {@code extension}. */
+    private static OpenApiContract enumSpec(String values, String extension) {
+        return OpenApiContract.fromYaml("""
+                openapi: 3.1.0
+                info: {title: t, version: '1'}
+                paths:
+                  /a:
+                    get:
+                      operationId: a
+                      responses:
+                        '200':
+                          description: ok
+                          content:
+                            application/json:
+                              schema:
+                                $ref: '#/components/schemas/Kind'
+                components:
+                  schemas:
+                    Kind:
+                      type: string
+                      enum: %s
+                      %s
+                """.formatted(values, extension));
     }
 
     /** The specification {@code yaml} as springdoc would generate it while no planned element is implemented. */

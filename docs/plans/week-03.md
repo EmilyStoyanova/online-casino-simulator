@@ -7,9 +7,12 @@
   W3-08 `GET /api/v1/wallet/transactions` reviewed (§7.11); no `planned` operation is left.
   W3-09 integrity, concurrency and coverage verification reviewed (§7.12).
   W3-10 documentation and rollout preparation approved 2026-11-13 (§7.13; P-W3-16 option D).
-  **W3-11 final verification done, pending review** (§7.14); next: the pull request.
-  The wallet stays local until the milestone is approved; staging is at V5.
-  Decisions still marked *Proposed* need approval before the task that depends on them starts.
+  W3-11 final verification done (§7.14).
+  **Completed:** merged into `main` (PR #9, `b07e656`) and deployed to staging on 2026-11-15;
+  Neon `staging` migrated V5 → V7 and verified (§13,
+  [rollout record](../../infrastructure/wallet-rollout.md#rollout-record-2026-11-15)).
+  The text below is the plan as executed; statements such as "not deployed" or "staging is at V5"
+  describe the state at the time they were written. Follow-up: Week 4 (`week-04.md`).
 - **Stage:** 2 — Virtual currency and game logic (Weeks 3–4)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`), §4 (Week 3),
   §5 (database: `wallets`, `wallet_transactions`), §6 (API: `GET /wallet`, `GET /wallet/transactions`),
@@ -31,6 +34,7 @@
 | 2 | 2026-11-09 | Review of W3-01 recorded (§2.2); test-cleanup guard against non-test databases (§6.5); AC-3.2 aligned with the existing `MALFORMED_REQUEST` convention; W3-02 contract (§5.5) |
 | 3 | 2026-11-09 | W3-02 review (C1–C7 approved, C8 reviewed, §5.6); W3-03 persistence (§6.2) and guarded cleanup with its deviations (§6.5) |
 | 4 | 2026-11-09 | W3-04 wallet service (§7.8): verified lock timeout, test-only types (P-W3-16), R13 and R15 |
+| 11 | 2026-11-15 | Status after the merge (PR #9) and the staging rollout (§13); recorded in W4-01. Historical sections unchanged |
 
 ---
 
@@ -1604,6 +1608,13 @@ and failure criteria, rollback options). The summary below is kept.*
    step 2 (approval required).
 
 Neon production is not touched by any of this.
+
+**Executed 2026-11-15 (approved):** PR #9 merged; restore point `staging-before-week-03` created
+(kept); manual Render deploy; Flyway applied V6 and V7 (V5 → V7); the one existing `PLAYER` received
+1,000 coins and one `STARTING_BALANCE` entry; `GET /api/v1/wallet` → `200` with balance 1000; the
+history → one `STARTING_BALANCE` entry; `verify-wallets.sql` → zero violations; registration still
+closed; Neon production untouched. Details:
+[rollout record](../../infrastructure/wallet-rollout.md#rollout-record-2026-11-15).
 
 ---
 

@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 
 import com.casino.RealCsrfToken;
 import com.casino.TestAccounts;
@@ -58,6 +59,7 @@ class OpenApiContractIT {
     private static final String PROFILE = "/api/v1/users/me";
     private static final String WALLET = "/api/v1/wallet";
     private static final String TRANSACTIONS = "/api/v1/wallet/transactions";
+    private static final String SPIN = "/api/v1/games/roulette/spins";
 
     private final OpenApiContract contract = OpenApiContract.load();
 
@@ -89,13 +91,18 @@ class OpenApiContractIT {
     }
 
     @Test
-    void theGeneratedDocumentationNeverShowsTheTestOnlyLedgerTypes() throws Exception {
-        // W3-08: the published type is WalletEntryType (contract values only), never the command type.
+    void theDocumentationShowsExactlyTheProductionLedgerTypes() throws Exception {
+        // W3-08: the published type is WalletEntryType (contract values only). W4-03: the roulette types
+        // are implemented and the retired test-only types appear nowhere.
         String generated = perform(get("/v3/api-docs")).getContentAsString(StandardCharsets.UTF_8);
         String contractFile = perform(get("/openapi.yaml")).getContentAsString(StandardCharsets.UTF_8);
 
-        assertThat(generated).contains("STARTING_BALANCE").doesNotContain("TEST_CREDIT", "TEST_DEBIT");
-        assertThat(contractFile).contains("STARTING_BALANCE").doesNotContain("TEST_CREDIT", "TEST_DEBIT");
+        for (String documentation : new String[] {generated, contractFile}) {
+            assertThat(documentation).contains("STARTING_BALANCE", "ROULETTE_STAKE", "ROULETTE_PAYOUT")
+                    .doesNotContain("TEST_CREDIT", "TEST_DEBIT");
+        }
+        assertThat(OpenApiContract.fromJson(generated).spec().getComponents().getSchemas().get("WalletTransactionType").getEnum())
+                .map(String::valueOf).containsExactly("STARTING_BALANCE", "ROULETTE_STAKE", "ROULETTE_PAYOUT");
     }
 
     @Test
@@ -112,13 +119,14 @@ class OpenApiContractIT {
                 "PATCH /api/v1/users/me",
                 "GET /api/v1/wallet",
                 "GET /api/v1/wallet/transactions",
+                "POST /api/v1/games/roulette/spins",
                 "GET /actuator/health",
                 "GET /actuator/health/liveness",
                 "GET /actuator/health/readiness",
                 "GET /actuator/info");
         // Planned operations cannot be verified at runtime (validateResponse rejects them). When one is
         // implemented, its marker is removed and it moves to the list above with a runtime check.
-        // The wallet operations designed in W3-02 are implemented (W3-07, W3-08): none is left.
+        // The spin designed in W4-02 is implemented in W4-07 (week-04.md §11): none is left.
         assertThat(contract.plannedOperations()).isEmpty();
     }
 
@@ -167,6 +175,49 @@ class OpenApiContractIT {
         } finally {
             testDatabase.reset();
         }
+    }
+
+    @Test
+    void rouletteSpinRespondsAccordingToContract() throws Exception {
+        TestAccounts accounts = new TestAccounts(jdbcTemplate, passwordEncoder);
+        accounts.activePlayerWithWallet("spin@example.com", "correct-horse-battery", walletService);
+        accounts.activeAdministrator("spin-admin@example.com", "correct-horse-battery");
+        RealCsrfToken csrf = RealCsrfToken.fetch(mockMvc);
+        String bets = "{\"bets\":[{\"category\":\"STRAIGHT\",\"number\":17,\"amount\":10},{\"category\":\"RED_BLACK\",\"color\":\"RED\",\"amount\":20}]}";
+        String key = "3f2b8c4e-9d1a-4e7b-8c2f-5a6d7e8f9a0b";
+        try {
+            Cookie player = signIn("spin@example.com", csrf);
+            MockHttpServletResponse played = assertConformsToContract(SPIN, "POST", spin(bets, key).cookie(player).with(csrf), 200);
+            assertThat(played.getHeader(HttpHeaders.CACHE_CONTROL)).contains("no-store");
+            // The replay is the same documented 200.
+            assertThat(assertConformsToContract(SPIN, "POST", spin(bets, key).cookie(player).with(csrf), 200)
+                    .getContentAsString(StandardCharsets.UTF_8)).isEqualTo(played.getContentAsString(StandardCharsets.UTF_8));
+            assertConformsToContract(SPIN, "POST", spin("{\"bets\":[{\"category\":\"STRAIGHT\",\"number\":17,\"amount\":1001}]}",
+                    UUID.randomUUID().toString()).cookie(player).with(csrf), 400);
+            assertConformsToContract(SPIN, "POST", spin(bets, "1-1-1-1-1").cookie(player).with(csrf), 400);
+            assertConformsToContract(SPIN, "POST", spin("{\"bets\":[{\"category\":\"STRAIGHT\",\"number\":17,\"amount\":10.5}]}",
+                    UUID.randomUUID().toString()).cookie(player).with(csrf), 400);
+            assertConformsToContract(SPIN, "POST", spin(bets, key).with(csrf), 401);
+            assertConformsToContract(SPIN, "POST", spin(bets, UUID.randomUUID().toString()).cookie(player), 403);
+            assertConformsToContract(SPIN, "POST", spin(bets, UUID.randomUUID().toString())
+                    .cookie(signIn("spin-admin@example.com", csrf)).with(csrf), 403);
+            // 409: other bets with the used key, and more coins than the wallet holds.
+            assertConformsToContract(SPIN, "POST", spin("{\"bets\":[{\"category\":\"STRAIGHT\",\"number\":18,\"amount\":10}]}", key)
+                    .cookie(player).with(csrf), 409);
+            StringBuilder tenThousand = new StringBuilder("{\"bets\":[");
+            for (int n = 1; n <= 10; n++) {
+                tenThousand.append(n > 1 ? "," : "").append("{\"category\":\"STRAIGHT\",\"number\":").append(n).append(",\"amount\":1000}");
+            }
+            assertConformsToContract(SPIN, "POST", spin(tenThousand.append("]}").toString(), UUID.randomUUID().toString())
+                    .cookie(player).with(csrf), 409);
+            // 503 (lock timeout) and 500: RouletteServiceIT and RouletteControllerTest.
+        } finally {
+            testDatabase.reset();
+        }
+    }
+
+    private static MockHttpServletRequestBuilder spin(String body, String idempotencyKey) {
+        return post(SPIN).contentType(MediaType.APPLICATION_JSON).content(body).header("Idempotency-Key", idempotencyKey);
     }
 
     @Test

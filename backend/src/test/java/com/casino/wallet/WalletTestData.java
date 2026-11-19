@@ -15,7 +15,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Players with wallets for wallet integration tests. Users are inserted directly, bypassing
  * registration (which opens wallets with the starting balance), so each test sets exactly the balance
- * it needs; balances are funded with the test-only type {@code TEST_CREDIT}.
+ * it needs; balances are funded with one {@code ROULETTE_PAYOUT} credit (a real credit type, W4-03).
  */
 public final class WalletTestData {
 
@@ -46,12 +46,12 @@ public final class WalletTestData {
         return user;
     }
 
-    /** A player with a wallet holding {@code balance} coins (one {@code TEST_CREDIT} entry, none for 0). */
+    /** A player with a wallet holding {@code balance} coins (one {@code ROULETTE_PAYOUT} entry, none for 0). */
     public UUID playerWithBalance(String email, long balance) {
         UUID user = player(email);
         transactions.executeWithoutResult(status -> wallets.save(new Wallet(user)));
         if (balance > 0) {
-            walletService.credit(user, new WalletOperation(WalletTransactionType.TEST_CREDIT, balance, "funding", null));
+            walletService.credit(user, new WalletOperation(WalletTransactionType.ROULETTE_PAYOUT, balance, "funding", null));
         }
         return user;
     }

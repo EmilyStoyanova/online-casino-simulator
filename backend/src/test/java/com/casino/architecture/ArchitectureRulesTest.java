@@ -8,7 +8,11 @@ import archfixture.auth.service.OtherModuleRepositoryAccess;
 import archfixture.auth.service.WalletUseOutsideAllowedModules;
 import archfixture.common.exception.CommonDependsOnModule;
 import archfixture.game.service.CredentialsOutsideAuth;
+import archfixture.game.model.SpringAwareModel;
 import archfixture.game.service.GameCycle;
+import archfixture.game.service.PredictableSecureRandom;
+import archfixture.game.service.SecureWheel;
+import archfixture.game.service.WeakRandomness;
 import archfixture.unknownmodule.service.UnknownModule;
 import archfixture.user.config.SecurityOutsideAuth;
 import archfixture.user.controller.EntityReturningController;
@@ -18,7 +22,6 @@ import archfixture.user.service.FieldInjection;
 import archfixture.user.service.MisplacedController;
 import archfixture.user.util.OutsideLayerPackage;
 import archfixture.wallet.service.AccountManagementFromWallet;
-import archfixture.wallet.service.TestTypesInProduction;
 import archfixture.wallet.service.WalletCycle;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -107,8 +110,22 @@ class ArchitectureRulesTest {
     }
 
     @Test
-    void r15DetectsTestLedgerTypesInProductionCodeButAllowsTheEnumsThemselves() {
-        assertViolatedOnlyBy(RULES.testLedgerTypesAreNotUsedByProductionCode(), TestTypesInProduction.class);
+    void r16DetectsWeakAndSeededRandomnessButAllowsSecureRandom() {
+        // archfixture.game.service.SecureWheel uses new SecureRandom().nextInt(37) and is not reported.
+        assertViolatedOnlyBy(RULES.noWeakRandomness(), WeakRandomness.class, PredictableSecureRandom.class);
+        assertThat(RULES.noWeakRandomness().evaluate(FIXTURE).getFailureReport().getDetails())
+                .noneMatch(detail -> detail.contains(SecureWheel.class.getName()))
+                .anyMatch(detail -> detail.contains("Math.random()"))
+                .anyMatch(detail -> detail.contains("ThreadLocalRandom"))
+                .anyMatch(detail -> detail.contains("java.util.Random.<init>(long)"))
+                .anyMatch(detail -> detail.contains("java.security.SecureRandom.<init>("))
+                .anyMatch(detail -> detail.contains("java.security.SecureRandom.setSeed("));
+    }
+
+    @Test
+    void r17DetectsFrameworkTypesInAModelPackageButAllowsPlainTypes() {
+        // archfixture.game.model.PlainRule is plain Java and is not reported.
+        assertViolatedOnlyBy(RULES.modelsArePlainDomainTypes(), SpringAwareModel.class);
     }
 
     /** The rule fails, and every reported violation names one of the expected classes. */

@@ -22,9 +22,13 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  */
 public final class TestDatabase {
 
-    /** Every table a test can write, except the seeded catalogue {@code interests}. */
-    static final String TRUNCATE = "TRUNCATE wallet_transactions, wallets, user_interests, spring_session_attributes, "
-            + "spring_session, auth_throttle, users RESTART IDENTITY";
+    /**
+     * Every table a test can write, except the seeded catalogue {@code interests}. Explicit, without
+     * {@code CASCADE}: a new table that references one of these makes the statement fail instead of being
+     * emptied silently. The roulette tables (V9) reference the ledger and the users, so they come first.
+     */
+    static final String TRUNCATE = "TRUNCATE roulette_bets, roulette_rounds, wallet_transactions, wallets, user_interests, "
+            + "spring_session_attributes, spring_session, auth_throttle, users RESTART IDENTITY";
 
     private final DataSource dataSource;
     private final PostgreSQLContainer container;

@@ -29,6 +29,8 @@ mappings (`spring.jpa.hibernate.ddl-auto=validate`).
 | V5 | `interests`: catalogue of educational interests (stable upper-case `code` as key, `sort_order`, `active`), seeded with 8 fixed entries; `user_interests`: each user's selection, replacing the plan's use of `user_preferences` for interests (primary key `(user_id, interest_code)`, cascade on user deletion, interests referenced by users cannot be deleted, only deactivated) |
 | V6 | `wallets` (one per player, balance `bigint` 0 … 2⁵³ − 1, owner fixed by trigger) and `wallet_transactions` (append-only ledger: `UPDATE`/`DELETE` rejected by trigger, `ON DELETE RESTRICT`, idempotency key unique per wallet, type list `STARTING_BALANCE`). Details: [Wallets and ledger](#wallets-and-ledger-v6-v7) |
 | V7 | Data only: every `PLAYER` (active or disabled) that has no wallet gets one with **1,000** coins and one `STARTING_BALANCE` entry (key `starting-balance`). Admins get none; existing wallets and entries are untouched. Details: [V7](#v7-wallets-for-existing-players) |
+| V8 | Week 4 ledger types: replaces `ck_wallet_transactions_type` (now `STARTING_BALANCE`, `ROULETTE_STAKE`, `ROULETTE_PAYOUT`) and `ck_wallet_transactions_direction` (stake < 0, payout and starting balance > 0). No row, table, key or trigger changes. Details: [V8](#v8-roulette-ledger-types) |
+| V9 | `roulette_rounds` and `roulette_bets` (game module): append-only (generic `reject_row_change()` trigger), rounds unique per player and request, ledger entries referenced by id (`ON DELETE RESTRICT`), bet options checked per category, no selection twice per round. Details: [Roulette rounds and bets](#roulette-rounds-and-bets-v9) |
 
 Flyway records every applied migration in `flyway_schema_history`. `GET /api/v1/system/status`
 reports the latest version as `schemaVersion`.
@@ -37,12 +39,12 @@ reports the latest version as `schemaVersion`.
 
 | Database | Schema version |
 |---|---|
-| Local Docker database and Testcontainers, branch `feature/week-03-wallet` | **V7** (Flyway applies V6 and V7 at the first start of this branch) |
-| `main` | V5 (V6 and V7 arrive with the Week 3 merge) |
-| Neon `staging` (used by Render staging) | **V5**: V6 and V7 have **not** been applied. They run automatically at the first Render start of a build that contains them, so that deploy is a separately approved step: [Week 3 rollout runbook](../infrastructure/wallet-rollout.md) |
+| Testcontainers, and a local Docker database started from `feature/week-04-roulette` | **V9** (Flyway applies V8 and V9 at the first start of a build that contains them) |
+| `main` | V7 (since the Week 3 merge, PR #9) |
+| Neon `staging` (used by Render staging) | **V7** since 2026-11-15: Render applied V6 and V7 at the start of the first Week 3 deploy, following the approved [Week 3 rollout runbook](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15). The V5 state is preserved in the Neon branch `staging-before-week-03`. **V8 and V9 are not applied**: the first Render start of a build that contains them would apply them automatically, so that deploy needs its own approval (`docs/plans/week-04.md` §15; runbook [roulette-rollout.md](../infrastructure/roulette-rollout.md), prepared in W4-09, not executed) |
 | Neon `production` | Empty and untouched until the Week 12 release |
 
-## Current schema (after V7)
+## Current schema (after V9)
 
 ```mermaid
 erDiagram
@@ -52,6 +54,9 @@ erDiagram
     users ||..o{ spring_session : "principal_name = users.id (no foreign key)"
     users ||--o| wallets : "owns, PLAYER only (ON DELETE RESTRICT)"
     wallets ||--o{ wallet_transactions : "ledger (ON DELETE RESTRICT, append-only)"
+    users ||--o{ roulette_rounds : "plays (ON DELETE RESTRICT)"
+    wallet_transactions ||--o| roulette_rounds : "stake / payout entry (ON DELETE RESTRICT, unique)"
+    roulette_rounds ||--|{ roulette_bets : "bets (ON DELETE RESTRICT, append-only)"
 ```
 
 `auth_throttle` stands alone: its keys are HMACs, so it does not reference `users`.
@@ -73,8 +78,8 @@ erDiagram
 |---|---|
 | `id` | `BIGINT GENERATED ALWAYS AS IDENTITY`. Entries of one wallet are inserted only while its row is locked, so their ids increase in commit order per wallet: history order and keyset pagination. Rolled-back inserts leave gaps |
 | `wallet_id` | `fk_wallet_transactions_wallet` → `wallets(id)` `ON DELETE RESTRICT` |
-| `type` | `VARCHAR(30)`, `ck_wallet_transactions_type`: `STARTING_BALANCE` only (each week adds its types in its own migration) |
-| `amount` | `BIGINT`, signed (credit > 0, debit < 0), never 0, within ± (2⁵³ − 1) (`ck_wallet_transactions_amount`); `STARTING_BALANCE` must be positive (`ck_wallet_transactions_direction`) |
+| `type` | `VARCHAR(30)`, `ck_wallet_transactions_type`: `STARTING_BALANCE`, `ROULETTE_STAKE`, `ROULETTE_PAYOUT` (since V8; V6 allowed `STARTING_BALANCE` only; each week adds its types in its own migration) |
+| `amount` | `BIGINT`, signed (credit > 0, debit < 0), never 0, within ± (2⁵³ − 1) (`ck_wallet_transactions_amount`); `STARTING_BALANCE` and `ROULETTE_PAYOUT` positive, `ROULETTE_STAKE` negative (`ck_wallet_transactions_direction`, V8) |
 | `balance_after` | `BIGINT`, 0 … 2⁵³ − 1 (`ck_wallet_transactions_balance`): the balance right after this entry |
 | `idempotency_key` | `VARCHAR(100)`, `^[a-z0-9][a-z0-9:._-]{0,99}$` (`ck_wallet_transactions_key`), unique per wallet (`uq_wallet_transactions_idempotency`). The starting entry always uses `starting-balance` |
 | `reference` | optional `VARCHAR(100)` (e.g. a game round, Week 4); never returned by the API |
@@ -137,8 +142,178 @@ SELECT id, 'STARTING_BALANCE', 1000, 1000, 'starting-balance' FROM new_wallets;
   applied.
 - `created_at` of the backfilled rows is the migration time, not the registration time.
 - Tested on PostgreSQL 17.11 and 18.6 (`MigrationCompatibilityIT`): from a V5 schema with accounts
-  (the current staging state), from V6 with an existing wallet, a re-run, and a fault injected into
+  (the staging state before the Week 3 rollout), from V6 with an existing wallet, a re-run, and a fault injected into
   the ledger insert.
+
+### V8: roulette ledger types
+
+`V8__add_roulette_wallet_transaction_types.sql` (W4-03) prepares the ledger for roulette rounds
+(`docs/plans/week-04.md` §5.2):
+
+```sql
+ALTER TABLE wallet_transactions
+    DROP CONSTRAINT ck_wallet_transactions_type,
+    DROP CONSTRAINT ck_wallet_transactions_direction,
+    ADD CONSTRAINT ck_wallet_transactions_type
+        CHECK (type IN ('STARTING_BALANCE', 'ROULETTE_STAKE', 'ROULETTE_PAYOUT')),
+    ADD CONSTRAINT ck_wallet_transactions_direction
+        CHECK ((type NOT IN ('STARTING_BALANCE', 'ROULETTE_PAYOUT') OR amount > 0)
+           AND (type <> 'ROULETTE_STAKE' OR amount < 0));
+```
+
+- **Only these two constraints change; their names stay.** Every row, wallet, balance and ledger
+  entry stays as it is, and so do the amount and balance bounds, the key format, the unique key per
+  wallet, the foreign keys and the three triggers (append-only ledger, fixed owner, `updated_at`).
+  Existing rows (`STARTING_BALANCE`, amount > 0) satisfy the new rules.
+- The type list is the only place that names the allowed types; the direction rule constrains the
+  sign of the listed types only, so an unknown type is reported as `ck_wallet_transactions_type`
+  (PostgreSQL checks constraints in name order).
+- One `ALTER TABLE`, one Flyway transaction: if it fails, the V6 rules stay in place and V8 is not
+  recorded. Adding the checks validates the existing rows under a short `ACCESS EXCLUSIVE` lock
+  (milliseconds for the few ledger rows on staging).
+- The Week 3 test-only types (`TEST_CREDIT`/`TEST_DEBIT`) were never allowed by the production schema
+  and still are not; their test-only callback was removed with them, so tests now run on exactly the
+  production schema.
+- Tested on PostgreSQL 17.11 and 18.6 (`MigrationCompatibilityIT`): a clean V1–V8 migration, V7 → V8
+  on a database with players and wallets (rows byte-for-byte unchanged, only the two constraint
+  definitions differ, triggers identical), the sign and zero rules, a failed V8 that leaves V7 intact
+  and applies on the next start, and the read-only scripts at V8.
+- Week 3 code is compatible with V8's change (it never writes the new types; the Week 3 build was
+  verified locally on a V9 schema in W4-10, see the rollback limitation below). Once roulette rounds
+  exist, Week 3 code could not read their ledger entries; see the rollback limits in
+  `docs/plans/week-04.md` §15.3.
+
+### Roulette rounds and bets (V9)
+
+`V9__create_roulette_rounds.sql` (W4-05; design: `docs/plans/week-04.md` §5.3, §5.7). Owned by the
+`game` module. A round is written once, complete, in the transaction that also writes its ledger
+entries (W4-06); there is no pending state.
+
+**`roulette_rounds`** — one played round.
+
+| Column | Notes |
+|---|---|
+| `id` | `UUID`, generated by the application before the ledger writes (named in the ledger keys `roulette-round:<id>:stake`/`:payout` and references) |
+| `user_id` | the player; `fk_roulette_rounds_user` → `users(id)` `ON DELETE RESTRICT` |
+| `request_id` | the client's `Idempotency-Key`; `uq_roulette_rounds_request (user_id, request_id)`: one round per request and player |
+| `winning_number` | `SMALLINT` 0–36 (`ck_roulette_rounds_number`) |
+| `total_stake` | 1 … 2⁵³ − 1 (`ck_roulette_rounds_stake`) |
+| `total_payout` | 0 … 2⁵³ − 1 (`ck_roulette_rounds_payout`) |
+| `balance_after` | wallet balance right after the round, 0 … 2⁵³ − 1 (`ck_roulette_rounds_balance`); returned unchanged by a replay |
+| `stake_transaction_id` | the round's `ROULETTE_STAKE` entry; `fk_roulette_rounds_stake_entry` → `wallet_transactions(id)` `RESTRICT`, unique |
+| `payout_transaction_id` | its `ROULETTE_PAYOUT` entry; `fk_roulette_rounds_payout_entry` `RESTRICT`, unique; present exactly when `total_payout > 0` (`ck_roulette_rounds_payout_entry`) and never the stake entry (`ck_roulette_rounds_distinct_entries`) |
+| `created_at` | when the round was played; provided by the application (microsecond precision), database default `now()` |
+
+**`roulette_bets`** — the bets of a round, in request order (identity id).
+
+| Column | Notes |
+|---|---|
+| `id` | `BIGINT IDENTITY`: the order of the bets in the request |
+| `round_id` | `fk_roulette_bets_round` → `roulette_rounds(id)` `RESTRICT` |
+| `category` | `STRAIGHT`, `RED_BLACK`, `EVEN_ODD`, `LOW_HIGH`, `DOZEN` (`ck_roulette_bets_category`; names of the API contract) |
+| `selection` | the option of `RED_BLACK` (`RED`/`BLACK`), `EVEN_ODD` (`EVEN`/`ODD`), `LOW_HIGH` (`LOW`/`HIGH`), `DOZEN` (`FIRST`/`SECOND`/`THIRD`); `NULL` for `STRAIGHT` |
+| `number` | the option of `STRAIGHT`, 0–36; `NULL` otherwise |
+| `amount` | 1 … 2⁵³ − 1 (`ck_roulette_bets_amount`; the API limit of 1,000 is checked by the application) |
+| `payout` | 0 or exactly 36×/3×/2× the amount for `STRAIGHT`/`DOZEN`/even-money (`ck_roulette_bets_payout`) |
+
+- `ck_roulette_bets_option` allows exactly the option of the category (each branch tests `IS NOT NULL`
+  first, because a `CHECK` whose expression is `NULL` passes). `uq_roulette_bets_selection` is
+  `UNIQUE NULLS NOT DISTINCT (round_id, category, selection, number)`: a selection at most once per
+  round (PostgreSQL 15+).
+- **Append-only:** `trg_roulette_rounds_append_only` and `trg_roulette_bets_append_only` call the generic
+  `reject_row_change()` and reject every `UPDATE` and `DELETE` (SQLSTATE `23000`, "… is append-only: …
+  rejected"). The ledger keeps its own `reject_ledger_change()` (V6), unchanged. A rolled-back round
+  leaves nothing (MVCC).
+- **What the foreign keys prove:** that the referenced user and ledger entries exist and cannot be deleted.
+  They do not prove that the entries belong to the round's player, have the right type and amount, or
+  reference the round: the single writer (`RouletteService`, W4-06) guarantees that, and the read-only
+  reconciliation checks it (below; `docs/plans/week-04.md` §5.7, §5.8).
+- **Java mapping:** `game.entity.RouletteRound` (`@Immutable`, `Persistable`) and `RouletteBet`
+  (`@Immutable`), ids only towards `users` and `wallet_transactions`; `RouletteRoundRepository` has
+  `saveAndFlush` (W4-06; `save` until then) and `findByUserIdAndRequestId` only.
+- Tested on PostgreSQL 17.11 and 18.6 (`MigrationCompatibilityIT`): clean V1–V9, V8 → V9 with data (the
+  wallet tables unchanged), every constraint by name, the triggers, a failed V9, and the read-only
+  migration check at V9 (empty and with rounds) and roulette reconciliation; `RouletteRoundRepositoryIT`
+  through JPA.
+- Test cleanup: `TestDatabase` truncates `roulette_bets, roulette_rounds` first (explicit list, no
+  `CASCADE`).
+
+**Round–ledger invariants** (W4-08; kept by `RouletteService`, the only writer of rounds, in the
+transaction that writes the round's ledger entries; checked read-only by
+[`verify-roulette.sql`](../infrastructure/neon/verify-roulette.sql), which reports 0 in every column
+when they hold, also with empty tables):
+- a round has 1–10 bets; `total_stake` and `total_payout` are the sums of its bets, and every bet pays
+  what the winning number pays (36×, 2× or 3× the amount on a win, 0 on a loss; zero wins only a straight
+  bet on 0);
+- its stake entry is a `ROULETTE_STAKE` of `−total_stake` in the round player's wallet with the round id as
+  reference and key `roulette-round:<id>:stake`; its payout entry (exactly when `total_payout > 0`) a
+  `ROULETTE_PAYOUT` of `+total_payout` in the same wallet, same reference, key `…:payout`, newer than the
+  stake entry;
+- `balance_after` is the `balance_after` of the round's last entry;
+- every `ROULETTE_STAKE` and `ROULETTE_PAYOUT` entry belongs to exactly one round;
+- the wallet invariants above (`verify-wallets.sql`) still hold.
+
+The script counts each rule separately (eleven counters) and is NULL-safe (`IS DISTINCT FROM`,
+`LEFT JOIN`): a missing value is counted, never skipped. Run it only at V9 (after `verify-migrations.sql`
+reports `V9: Week 4 roulette rounds`); before V9 the tables do not exist. `MigrationCompatibilityIT` proves
+on PostgreSQL 17.11 and 18.6 that it reports nothing for a fresh V9 schema and for consistent rounds, and
+that each counter finds its own deliberately written inconsistency; `RouletteConcurrencyIT` and
+`RoundLedgerIntegrityIT` run it on rounds played by `RouletteService`. Every run uses
+`default_transaction_read_only = on`, so no statement can write. It has not been run against Neon.
+
+**Concurrency** (W4-08, `RouletteConcurrencyIT`): the spins of one player are serialized by the wallet row
+lock, taken before the round lookup (`docs/plans/week-04.md` §8.2). 20 parallel spins of 100 coins on
+1,000 coins: 10 rounds, 10 `INSUFFICIENT_FUNDS`, balance 0. 10 parallel copies of one request: one round,
+one stake and one payout entry, ten equal results. Spins of two players do not wait for each other.
+
+**Not enforced by the database** (accepted, `docs/plans/week-04.md` §5.7): the ownership, type, amount
+and reference of a round's entries, the bet totals and the payout for the winning number. A second writer
+of rounds or manual SQL could break them; `verify-roulette.sql` would report it.
+
+**Guarantees at a glance** (database level = rejected by PostgreSQL whatever the writer; application
+level = kept by the single writer and detected read-only):
+
+| Guarantee | Database (V6–V9) | Application (`WalletService`, `RouletteService`) | Detected / tested by |
+|---|---|---|---|
+| No negative balance, cap 2⁵³ − 1 | `ck_wallets_balance`, `ck_wallet_transactions_balance` | `INSUFFICIENT_FUNDS`/`BALANCE_LIMIT_EXCEEDED` under the row lock | `verify-wallets.sql`, `LedgerIntegrityIT` |
+| Only known ledger types, each with its sign | `ck_wallet_transactions_type`, `ck_wallet_transactions_direction` (V8) | Exhaustive enum mapping | `MigrationCompatibilityIT` |
+| Ledger, rounds and bets never change | Append-only triggers (V6, V9), `ON DELETE RESTRICT` | `@Immutable` entities, no update/delete methods | `MigrationCompatibilityIT`, `RouletteRoundRepositoryIT` |
+| One round per player and request | `uq_roulette_rounds_request` | Wallet lock before the lookup (§8.2 of the plan) | `RouletteConcurrencyIT` |
+| A stake/payout entry serves one round | Unique entry columns, `ck_roulette_rounds_distinct_entries`, unique ledger keys | Keys `roulette-round:<id>:stake` and `…:payout` | `verify-roulette.sql` |
+| Payout entry exactly when something was won | `ck_roulette_rounds_payout_entry` | Credit only if the total payout > 0 | `verify-roulette.sql` |
+| Valid bet options, no selection twice, payout a valid multiple | `ck_roulette_bets_category`, `_option`, `_payout`, `uq_roulette_bets_selection` | Bean Validation, `RouletteSelection`, `RouletteRules` | `MigrationCompatibilityIT`, `RouletteControllerTest` |
+| Entries belong to the round's player, with its type, amount and reference | — | Single writer, one transaction | `verify-roulette.sql`, `RoundLedgerIntegrityIT` |
+| Bet totals and the exact payout for the winning number | — (multiple only) | `RouletteRules.settle` | `verify-roulette.sql`, `RoundLedgerIntegrityIT` |
+| Bet limits (1–10 bets, 1–1,000 coins) | — (structural bounds only) | Contract constants, DTO validation, `RouletteService` | `RouletteControllerTest`, `RouletteServiceTest` |
+
+### Read-only verification scripts
+
+In [`infrastructure/neon/`](../infrastructure/neon/), run with
+[`readonly-query.sh`](../infrastructure/neon/readonly-query.sh) (one `READ ONLY` transaction that is
+rolled back; credentials from `.env.neon`, never printed). They count rows and never read row contents.
+`MigrationCompatibilityIT` runs the three `verify-*` scripts on PostgreSQL 17.11 and 18.6 under
+`default_transaction_read_only = on`.
+
+| Script | Valid at | Checks | Run against Neon |
+|---|---|---|---|
+| `preflight.sql` | an empty branch | location, no tables, privileges | 2026-11-07 (staging, before V1) |
+| `verify-migrations.sql` | V5, V7, V8, V9 | location (`neon.branch_id`), migration history, `schema_state`, expected and unexpected tables, counts (roulette counts `NULL` before V9) | Week 3 rollout (V5 and V7) |
+| `verify-wallets.sql` | V6 and later | every player has one wallet with one starting entry; every balance equals its ledger | Week 3 rollout (V7) |
+| `verify-roulette.sql` | **V9 only** | the eleven round–ledger counters above | **never**; only after `verify-migrations.sql` reports `V9: Week 4 roulette rounds` |
+
+The Week 4 rollout uses them in this order: preflight at V7 (`verify-migrations`, `verify-wallets`),
+then after the deploy `verify-migrations` (gate: V9), `verify-wallets` and `verify-roulette`
+([roulette-rollout.md](../infrastructure/roulette-rollout.md)).
+
+**Rollback limitation (V8/V9), verified locally in W4-10** (`docs/plans/week-04.md` §15.5; disposable
+PostgreSQL 17.11 databases, not Neon). The actual Week 3 build (`b07e656`) starts on a V9 schema: Flyway
+validates the 9 applied migrations, warns that the schema is newer than its latest migration (7) and
+migrates nothing. **Without rounds** its balance, history and registration work. **With rounds** it still
+starts and reads balances, but the history of the tested player who played answered `500`
+(`No enum constant …TransactionType.ROULETTE_STAKE`), as would every player with a roulette entry; players without rounds are unaffected and no data
+changes. Starting the Week 4 build again restores the history. So once `ROULETTE_*` entries exist, roll
+forward; a return to Week 3 code then needs a database restore
+([roulette-rollout.md §11](../infrastructure/roulette-rollout.md#11-rollback-and-recovery)).
 
 ### Users and roles (`users`, V3)
 
@@ -195,6 +370,7 @@ Registration always creates a `PLAYER`. An `ADMIN` is created only by the start-
 ## Planned tables (from the implementation plan)
 
 `wallets` and `wallet_transactions` (Week 3) are implemented: [Wallets and ledger](#wallets-and-ledger-v6-v7).
+`roulette_rounds` and `roulette_bets` (Week 4) are implemented: [Roulette rounds and bets](#roulette-rounds-and-bets-v9).
 The plan's "row version (optimistic locking)" for `wallets` was replaced by a pessimistic row lock
 (`docs/plans/week-03.md` §7.4).
 
@@ -205,8 +381,6 @@ original plan are listed in
 | Table | Purpose | Week |
 |---|---|---|
 | `user_preferences` | UI preferences (sound, reduced motion, …) | 6 |
-| `roulette_rounds` | Rounds, winning number, timestamps | 4 |
-| `roulette_bets` | Bet type, amount, payout | 4 |
 | `learning_modules` | Educational materials and categories | 7 |
 | `quiz_questions` | Questions and correct answers | 8 |
 | `quiz_attempts` | Submitted answers and results | 8 |
@@ -219,7 +393,10 @@ original plan are listed in
 
 1. A user cannot spend more virtual coins than they own. *Week 3:* `ck_wallets_balance` and
    `ck_wallet_transactions_balance` (never below 0) plus `INSUFFICIENT_FUNDS` under the row lock.
-2. A game round cannot be processed or paid out twice.
+2. A game round cannot be processed or paid out twice. *Week 4:* one round per player and request
+   (`uq_roulette_rounds_request`, looked up under the wallet lock), one stake and at most one payout
+   entry per round (unique entry references and ledger keys), append-only rounds and bets; reconciled
+   read-only by `verify-roulette.sql`.
 3. An educational reward cannot be granted twice for the same eligible completion.
 4. Completed transactions are durable and traceable. *Week 3:* one append-only ledger entry per
    balance change, with a unique idempotency key per wallet.
@@ -328,7 +505,8 @@ accounts, passwords or sessions go there.
 
 | Branch | State |
 |---|---|
-| `staging` | **V5.** V1–V5 were applied on 2026-11-07 with the procedure below (7 tables, 8 seeded interests, then no accounts or sessions). Since then the Render staging backend uses it with registration closed. V6/V7 are **not** applied: they need the separately approved [Week 3 rollout](../infrastructure/wallet-rollout.md), which starts with a read-only count of the accounts that exist now |
+| `staging` | **V7.** V1–V5 were applied on 2026-11-07 with the procedure below (7 tables, 8 seeded interests, then no accounts or sessions); since then the Render staging backend uses it with registration closed. V6 and V7 were applied on 2026-11-15 by the Render start-up of the first Week 3 deploy ([Week 3 rollout record](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15)): the one existing `PLAYER` received a wallet with 1,000 coins and one `STARTING_BALANCE` entry; the read-only integrity checks reported zero violations |
+| `staging-before-week-03` | Restore point of `staging` at V5, created before the Week 3 deploy. Not used by any application; **kept** (deleting it needs a separate approval) |
 | `production` | Empty, unused and untouched until the release (Week 12) |
 
 **Version difference:** Neon runs PostgreSQL 18.6, while the local database and the Testcontainers
@@ -401,9 +579,9 @@ jdbc:postgresql://${NEON_DB_HOST}/${NEON_DB_NAME}?sslmode=verify-full&sslfactory
 ### Migration procedure (first migration, V1–V5, done on staging 2026-11-07)
 
 This is the procedure for an **empty** database, kept for a new branch. Later versions on a branch
-that already has a schema (staging: V6 and V7) follow the
-[Week 3 rollout runbook](../infrastructure/wallet-rollout.md) instead; there Render applies them
-at start-up.
+that already has a schema follow their rollout runbook instead, where Render applies them at start-up:
+V6 and V7 the executed [Week 3 rollout runbook](../infrastructure/wallet-rollout.md), V8 and V9 the
+prepared, not yet executed [Week 4 rollout runbook](../infrastructure/roulette-rollout.md).
 
 Flyway applies migrations automatically when the backend starts with the profile, so the backend is
 started against Neon only after the checks below.
@@ -465,7 +643,8 @@ started against Neon only after the checks below.
    - 8 interests, no players, admins, sessions or throttle rows; `wallets`/`ledger_entries` empty.
 
    The same script recognises V7 after the [Week 3 rollout](../infrastructure/wallet-rollout.md)
-   (`schema_state` = `V7: Week 3 wallet schema`). It is tested on PostgreSQL 17 and 18 at both states
+   (`schema_state` = `V7: Week 3 wallet schema`), V8 (`V8: Week 4 ledger types`) and V9
+   (`V9: Week 4 roulette rounds`). It is tested on PostgreSQL 17 and 18 at these states
    (`MigrationCompatibilityIT`).
 5. **Later starts** validate the checksums of the applied migrations and apply only new ones.
 
