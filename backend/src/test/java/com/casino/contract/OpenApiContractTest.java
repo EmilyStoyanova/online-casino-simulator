@@ -175,14 +175,14 @@ class OpenApiContractTest {
     // ------------------------------------------------------------------ planned elements
 
     @Test
-    void onlyTheRouletteSpinIsPlanned() {
+    void everyOperationIsImplementedAndNoneIsPlanned() {
         assertThat(contract.spec().getInfo().getVersion()).isEqualTo("0.5.0");
         // GET /api/v1/auth/csrf (W2-04), POST /api/v1/auth/register (W2-07), login and logout (W2-08),
-        // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10), the wallet (W3-07, W3-08).
+        // GET /api/v1/interests (W2-09), GET/PATCH /api/v1/users/me (W2-10), the wallet (W3-07, W3-08),
+        // the roulette spin (designed in W4-02, implemented in W4-07).
         assertThat(contract.implementedOperations()).contains("GET " + STATUS_PATH, "GET /api/v1/users/me",
-                "PATCH /api/v1/users/me", "GET " + WALLET_PATH, "GET " + WALLET_TRANSACTIONS_PATH);
-        // W4-02 designs the spin; it is implemented in W4-07 (week-04.md §11).
-        assertThat(contract.plannedOperations()).containsExactly("POST " + SPIN_PATH);
+                "PATCH /api/v1/users/me", "GET " + WALLET_PATH, "GET " + WALLET_TRANSACTIONS_PATH, "POST " + SPIN_PATH);
+        assertThat(contract.plannedOperations()).isEmpty();
     }
 
     // ------------------------------------------------------------------ wallet (Week 3)
@@ -270,13 +270,15 @@ class OpenApiContractTest {
     // ------------------------------------------------------------------ roulette (Week 4, W4-02)
 
     @Test
-    void theRouletteSpinIsAPlannedPlayerOperationWithAnIdempotencyKey() {
+    void theRouletteSpinIsAPlayerOperationWithAnIdempotencyKey() {
         PathItem item = contract.spec().getPaths().get(SPIN_PATH);
         assertThat(item.readOperationsMap()).containsOnlyKeys(PathItem.HttpMethod.POST);
         Operation spin = item.getPost();
         assertThat(spin.getOperationId()).isEqualTo("spinRoulette");
         assertThat(spin.getTags()).containsExactly("Roulette");
-        assertThat(spin.getExtensions()).containsEntry(OpenApiContract.IMPLEMENTATION_STATUS, OpenApiContract.PLANNED);
+        // Implemented in W4-07: the planned marker is gone.
+        assertThat(Objects.requireNonNullElse(spin.getExtensions(), Map.<String, Object>of()))
+                .doesNotContainKey(OpenApiContract.IMPLEMENTATION_STATUS);
         // A session (the player is the session's) and the CSRF token; no path, query or id parameter.
         assertThat(spin.getSecurity()).containsExactly(new SecurityRequirement().addList("sessionCookie").addList("csrfHeader"));
         assertThat(spin.getParameters()).singleElement().satisfies(parameter -> {

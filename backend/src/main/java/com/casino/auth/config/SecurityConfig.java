@@ -76,6 +76,9 @@ public class SecurityConfig {
                         // The virtual wallet is a player feature (P-W3-3): an administrator gets 403 ACCESS_DENIED,
                         // also for unknown wallet paths. The wallet is chosen by the session, never by the request.
                         .requestMatchers("/api/v1/wallet", "/api/v1/wallet/**").hasRole("PLAYER")
+                        // Games are played with the wallet, so they are a player feature too (W4-07): an
+                        // administrator gets 403 ACCESS_DENIED, also for unknown game paths.
+                        .requestMatchers("/api/v1/games", "/api/v1/games/**").hasRole("PLAYER")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 // XSRF-TOKEN cookie (readable by JavaScript) + X-XSRF-TOKEN header on every unsafe method.

@@ -27,7 +27,7 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 | | 2 | Authentication, users, roles, profile & interests | ✅ Done |
 | Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | ✅ Done: Render backend and Vercel frontend deployed and verified (registration closed); Neon `staging` now at V7 |
 | 2 — Virtual currency & game logic | 3 | Virtual wallet and immutable ledger | ✅ Done: merged into `main` (PR #9) and deployed to staging; Neon `staging` migrated V5 → V7 and verified ([rollout record](infrastructure/wallet-rollout.md#rollout-record-2026-11-15)) |
-| | 4 | Roulette engine | 🚧 In progress on `feature/week-04-roulette`, local only ([Week 4 plan](docs/plans/week-04.md)): plan, contract 0.5.0, Flyway V8 ledger types, roulette rules and secure wheel, V9 round persistence, atomic spin service |
+| | 4 | Roulette engine | 🚧 In progress on `feature/week-04-roulette`, local only ([Week 4 plan](docs/plans/week-04.md)): plan, contract 0.5.0, Flyway V8 ledger types, roulette rules and secure wheel, V9 round persistence, atomic spin service, endpoint `POST /api/v1/games/roulette/spins` (backend only) |
 | 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | Planned |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
 | 5 — Statistics & responsible play | 9–10 | Dashboard, limits, admin panel | Planned |

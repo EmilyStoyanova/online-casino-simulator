@@ -31,13 +31,13 @@ The API is **design-first**. The contract
   | `VALIDATION_FAILED` | 400 | Bean Validation failures; `errors` lists `{field, message}` sorted by field, never the rejected value |
   | `MALFORMED_REQUEST` | 400 | Unreadable JSON, wrong JSON types, missing body, missing or unconvertible parameter (integer parameters: decimal digits only, `^-?[0-9]+$`) |
   | `AUTHENTICATION_REQUIRED`, `SESSION_EXPIRED`, `INVALID_CREDENTIALS` | 401 | No session, ended session, failed login |
-  | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID`, `REGISTRATION_DISABLED` | 403 | Missing role (`/api/v1/admin/**`; `/api/v1/wallet/**` for non-players), missing or invalid CSRF token, registration closed by configuration |
+  | `ACCESS_DENIED`, `CSRF_TOKEN_INVALID`, `REGISTRATION_DISABLED` | 403 | Missing role (`/api/v1/admin/**`; `/api/v1/wallet/**` and `/api/v1/games/**` for non-players), missing or invalid CSRF token, registration closed by configuration |
   | `NOT_FOUND` | 404 | Unknown path or resource |
   | `METHOD_NOT_ALLOWED` | 405 | Unsupported method (`Allow` header) |
   | `NOT_ACCEPTABLE` | 406 | No representation matches the `Accept` header (the problem itself is still JSON) |
   | `CONFLICT` | 409 | Generic conflict (e.g. a framework `409`) |
   | `EMAIL_ALREADY_REGISTERED`, `CONCURRENT_MODIFICATION` | 409 | Registration with an existing email; overlapping profile update |
-  | `INSUFFICIENT_FUNDS`, `IDEMPOTENCY_KEY_REUSED`, `BALANCE_LIMIT_EXCEEDED` | 409 | Wallet rules of balance-changing operations (the roulette spin, planned; [wallet](#wallet-rules-both-operations)) |
+  | `INSUFFICIENT_FUNDS`, `IDEMPOTENCY_KEY_REUSED`, `BALANCE_LIMIT_EXCEEDED` | 409 | Wallet rules of balance-changing operations (the roulette spin; [wallet](#wallet-rules-both-operations)) |
   | `CONTENT_TOO_LARGE` | 413 | Request too large |
   | `UNSUPPORTED_MEDIA_TYPE` | 415 | Unsupported request `Content-Type` (`Accept` header lists the supported types) |
   | `TOO_MANY_ATTEMPTS` | 429 | Login and registration throttling; `Retry-After` = whole seconds until the window ends |
@@ -135,6 +135,7 @@ itself (`springdoc.swagger-ui.csrf.enabled`).
 | PATCH | `/api/v1/users/me` | Users | `200` `UserProfile`, `400`, `401`, `403`, `409`, `500` `ProblemDetail` | Updates the display name and/or interests (session and CSRF token required) |
 | GET | `/api/v1/wallet` | Wallet | `200` `Wallet`, `401`, `403`, `500` `ProblemDetail` | Balance of the signed-in player's wallet (`PLAYER` role; read-only) |
 | GET | `/api/v1/wallet/transactions` | Wallet | `200` `WalletTransactionPage`, `400`, `401`, `403`, `500` `ProblemDetail` | Ledger entries of that wallet, newest first, keyset pages (`PLAYER` role; read-only) |
+| POST | `/api/v1/games/roulette/spins` | Roulette | `200` `RouletteSpinResult`, `400`, `401`, `403`, `409`, `500`, `503` `ProblemDetail` | Places 1–10 bets and plays one round of European roulette (`PLAYER` role, CSRF token and `Idempotency-Key` required) |
 | GET | `/actuator/health` | Operations | `200` / `503` `HealthStatus` | Aggregated health incl. health groups |
 | GET | `/actuator/health/liveness` | Operations | `200` / `503` `HealthStatus` | Liveness probe |
 | GET | `/actuator/health/readiness` | Operations | `200` / `503` `HealthStatus` | Readiness probe |
@@ -306,8 +307,9 @@ Example `GET /api/v1/system/status` → `200`:
 - **Players only:** session required (`401 AUTHENTICATION_REQUIRED`/`SESSION_EXPIRED`); a signed-in
   administrator gets `403 ACCESS_DENIED`, because administrators have no wallet. Safe methods: no
   CSRF token. Responses carry `Cache-Control: no-store`.
-- **Read-only:** no operation credits or debits a wallet. Balances change on the server only, as the
-  result of game, learning or reward rules (from Week 4).
+- **Read-only:** no wallet operation credits or debits a wallet. Balances change on the server only, as the
+  result of game, learning or reward rules: since W4-07 a [roulette spin](#roulette-spin-post-apiv1gamesroulettespins)
+  debits its stake and credits its payout.
 - **Coins** are JSON integers (`int64`) from `0` to `9007199254740991` (2^53 − 1), exact in
   JavaScript. A ledger entry has `id`, `type`, `amount` (positive = credit, negative = debit, never
   `0`), `balanceAfter` and `createdAt`; it never contains the idempotency key, the wallet id or the
@@ -323,15 +325,86 @@ Example `GET /api/v1/system/status` → `200`:
   integer, `500 INTERNAL_ERROR` also for a player account without a wallet (a data error; a read
   never creates a wallet).
 
-**Wallet error codes for balance-changing operations (from Week 4).** No implemented operation of
-0.5.0 returns them yet; the planned roulette spin will. They were defined in 0.4.0 so the wallet
-service uses stable codes from the start:
+**Wallet error codes for balance-changing operations (from Week 4).** Returned by the roulette spin
+(since W4-07). They were defined in 0.4.0 so the wallet service uses stable codes from the start:
 
 | `code` | Status | When |
 |---|---|---|
 | `INSUFFICIENT_FUNDS` | 409 | A debit larger than the balance; nothing changes |
 | `IDEMPOTENCY_KEY_REUSED` | 409 | An operation key reused with different values; nothing changes |
 | `BALANCE_LIMIT_EXCEEDED` | 409 | A credit would exceed 2^53 − 1; nothing changes |
+
+### Roulette spin (`POST /api/v1/games/roulette/spins`)
+
+Implemented in W4-07 (contract 0.5.0). Design and implementation record:
+[`docs/plans/week-04.md`](plans/week-04.md) §4, §6, §7, §8.
+
+```http
+POST /api/v1/games/roulette/spins
+Content-Type: application/json
+X-XSRF-TOKEN: <token>
+Idempotency-Key: 3f2b8c4e-9d1a-4e7b-8c2f-5a6d7e8f9a0b
+
+{ "bets": [ { "category": "STRAIGHT", "number": 17, "amount": 10 }, { "category": "RED_BLACK", "color": "RED", "amount": 20 } ] }
+```
+
+`200`:
+
+```json
+{
+  "roundId": "6f1c2a0e-8b3d-4c55-9a7e-2f0d5b1e9c41",
+  "winningNumber": 17,
+  "winningColor": "BLACK",
+  "bets": [
+    { "category": "STRAIGHT", "number": 17, "amount": 10, "payout": 360 },
+    { "category": "RED_BLACK", "color": "RED", "amount": 20, "payout": 0 }
+  ],
+  "totalStake": 30,
+  "totalPayout": 360,
+  "balance": 1330,
+  "createdAt": "2026-11-20T10:15:30.123456Z"
+}
+```
+
+| Category | Option property and values | P(win) | Net winnings | Payout on a win (stake included) |
+|---|---|---|---|---|
+| `STRAIGHT` | `number` 0–36 | 1/37 | 35:1 | 36 × amount |
+| `RED_BLACK` | `color` `RED`/`BLACK` | 18/37 | 1:1 | 2 × amount |
+| `EVEN_ODD` | `parity` `EVEN`/`ODD` | 18/37 | 1:1 | 2 × amount |
+| `LOW_HIGH` | `range` `LOW` (1–18)/`HIGH` (19–36) | 18/37 | 1:1 | 2 × amount |
+| `DOZEN` | `dozen` `FIRST`/`SECOND`/`THIRD` | 12/37 | 2:1 | 3 × amount |
+
+- **Rules:** zero loses every category except a straight bet on `0`. Every bet's expected net result
+  is −1/37 of its amount: house edge 1/37 ≈ 2.7027 %, theoretical RTP 36/37 ≈ 97.2973 %.
+- **Who:** players only, from the session (`401 AUTHENTICATION_REQUIRED`/`SESSION_EXPIRED`, an
+  administrator `403 ACCESS_DENIED`, also for any other path under `/api/v1/games`); CSRF token required
+  (`403 CSRF_TOKEN_INVALID`, checked first). `Cache-Control: no-store` on every response.
+- **Server-authoritative:** the request carries bets only. The server draws the number
+  (`SecureRandom`), computes the payouts and the balance; unknown properties such as `winningNumber`,
+  `payout`, `balance` or `userId` are ignored and change nothing.
+- **Bets:** 1–10, each a `category`, exactly the option property of that category (the others omitted
+  or `null`) and a whole-coin `amount` of 1–1,000; the same selection at most once (complementary ones
+  such as red and black are allowed). The total stake must not exceed the balance
+  (`409 INSUFFICIENT_FUNDS`, checked under the wallet lock; nothing is written and no number drawn).
+- **Strict JSON values:** `amount` and `number` must be JSON integers: `10.5`, `10.0`, `1e1`, `"10"`,
+  booleans, arrays or objects are `400 MALFORMED_REQUEST`, never rounded or converted; `amount: null`
+  too. Category and option values must be the exact names as strings (`"COLUMN"`, color `"GREEN"`, `"red"` or `0` →
+  `400 MALFORMED_REQUEST`).
+- **Validation (`400 VALIDATION_FAILED`, `errors[].field`):** `bets` (none, more than 10, missing, the
+  same selection twice); `bets[i].amount` (outside 1–1,000 or missing); `bets[i].category` (missing);
+  `bets[i].number` (outside 0–36); the missing option (`bets[i].color` … "must not be null"); an option
+  property of another category (`bets[i].dozen` … "must be omitted for this category").
+- **`Idempotency-Key`:** required, a canonical UUID (36 characters `8-4-4-4-12`, either case; upper and
+  lower case are the same key). Missing, `1-1-1-1-1`, without hyphens, in braces or with spaces →
+  `400 MALFORMED_REQUEST`. Generate one per spin attempt and reuse it for its retries.
+- **Replay:** the same key with the same bets (as a set: order, `null` options and unknown properties do
+  not matter) returns the original `200` body, with the original `balance` and `createdAt`, without any
+  wallet operation or draw. The same key with different bets → `409 IDEMPOTENCY_KEY_REUSED`. Keys are
+  per player. A rejected request (`400`, `409`, `500`, `503`) records nothing, so its key stays unused.
+- **Other errors:** `409 BALANCE_LIMIT_EXCEEDED` (payout beyond 2⁵³ − 1), `500 INTERNAL_ERROR`
+  (generic), `503 SERVICE_UNAVAILABLE` (wallet lock timeout; retry with the same key).
+- The round's ledger entries appear in the [wallet history](#wallet-history-get-apiv1wallettransactions)
+  as `ROULETTE_STAKE` (−total stake) and, when something was won, `ROULETTE_PAYOUT` (+total payout).
 
 Example error (`POST /api/v1/system/status` → `405`):
 
@@ -377,42 +450,12 @@ Example validation error (`400`):
   `RouletteSpinResult`, `RouletteSettledBet`, `RouletteNumberColor`), the `Idempotency-Key` header,
   and the ledger types `ROULETTE_STAKE`/`ROULETTE_PAYOUT` (designed as `x-planned-enum-values`,
   implemented in W4-03 with Flyway V8, so the listing was removed). No new error code; the existing
-  wallet operations are unchanged. Design rationale: [`docs/plans/week-04.md`](plans/week-04.md) §4,
-  §6, §8.
+  wallet operations are unchanged. The spin is implemented in W4-07; no operation is `planned` any
+  more. Design rationale: [`docs/plans/week-04.md`](plans/week-04.md) §4, §6, §8.
 
 ## Planned (from the implementation plan)
 
 Each endpoint is added to the contract first, in the week it is implemented.
-
-### Designed in the contract (planned)
-
-**`POST /api/v1/games/roulette/spins`** (Week 4, contract 0.5.0; implemented in W4-07). Players only,
-session and CSRF token, required `Idempotency-Key` (canonical UUID).
-
-```json
-{ "bets": [ { "category": "STRAIGHT", "number": 17, "amount": 10 }, { "category": "RED_BLACK", "color": "RED", "amount": 20 } ] }
-```
-
-| Category | Option property and values | P(win) | Net winnings | Payout on a win (stake included) |
-|---|---|---|---|---|
-| `STRAIGHT` | `number` 0–36 | 1/37 | 35:1 | 36 × amount |
-| `RED_BLACK` | `color` `RED`/`BLACK` | 18/37 | 1:1 | 2 × amount |
-| `EVEN_ODD` | `parity` `EVEN`/`ODD` | 18/37 | 1:1 | 2 × amount |
-| `LOW_HIGH` | `range` `LOW` (1–18)/`HIGH` (19–36) | 18/37 | 1:1 | 2 × amount |
-| `DOZEN` | `dozen` `FIRST`/`SECOND`/`THIRD` | 12/37 | 2:1 | 3 × amount |
-
-- Zero loses every category except a straight bet on `0`. Every bet's expected net result is −1/37
-  of its amount: house edge 1/37 ≈ 2.7027 %, theoretical RTP 36/37 ≈ 97.2973 %.
-- 1–10 bets with different selections, 1–1,000 whole coins each; amounts and numbers must be JSON
-  integers (`10.5`, `10.0`, `"10"` → `400 MALFORMED_REQUEST`).
-- `200` `RouletteSpinResult`: `roundId`, `winningNumber`, `winningColor`, the bets with their
-  `payout`, `totalStake`, `totalPayout`, `balance`, `createdAt`. The request carries bets only:
-  the server draws the number and computes payouts and the balance.
-- The same key with the same content (the same bets as a set) returns the original result without
-  any wallet operation; with different content `409 IDEMPOTENCY_KEY_REUSED`.
-- Errors: `400 VALIDATION_FAILED`/`MALFORMED_REQUEST`, `401`, `403 CSRF_TOKEN_INVALID`/`ACCESS_DENIED`,
-  `409 INSUFFICIENT_FUNDS`/`IDEMPOTENCY_KEY_REUSED`/`BALANCE_LIMIT_EXCEEDED`, `500`,
-  `503 SERVICE_UNAVAILABLE` (wallet lock timeout; retry with the same key).
 
 ### Later weeks
 

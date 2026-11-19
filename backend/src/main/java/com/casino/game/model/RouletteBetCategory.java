@@ -1,11 +1,14 @@
 package com.casino.game.model;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * The five bet categories of European roulette (contract schema {@code RouletteBetCategory}), each with
  * its standard odds. Odds are <b>net winnings</b>: coins won per coin staked, in addition to the
  * returned stake. The <b>payout</b> of a winning bet is the stake plus the net winnings, so
  * {@link #payoutMultiplier()} = {@link #netOdds()} + 1; a losing bet pays nothing.
  */
+@Schema(name = "RouletteBetCategory", enumAsRef = true)
 public enum RouletteBetCategory {
 
     /** One number 0–36: 35:1, payout 36 × the amount. */

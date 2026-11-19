@@ -38,7 +38,7 @@ Root package `com.casino`. Each direct sub-package is a module:
 | `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 | implemented |
 | `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 | implemented |
 | `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented, on `main`, deployed to staging |
-| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 | in progress: rules, secure wheel, round persistence, atomic spin service (W4-04 to W4-06); endpoint follows (W4-07) ([`docs/plans/week-04.md`](plans/week-04.md)) |
+| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` | 4 | in progress: rules, secure wheel, round persistence, atomic spin service and `POST /api/v1/games/roulette/spins` (W4-04 to W4-07) ([`docs/plans/week-04.md`](plans/week-04.md)) |
 | `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 | planned |
 | `responsibleplay` | Session limits, breaks, self-exclusion, play-time tracking | 9 | planned |
 | `admin` | Administrative use cases under `/api/v1/admin/**` | 10 | planned |
@@ -201,7 +201,7 @@ at least 80 % lines and 70 % branches. Measured in W3-09: 100 % lines (111/111) 
 
 ### Game module (Week 4, in progress)
 
-Design: [`docs/plans/week-04.md`](plans/week-04.md). Implemented so far (W4-04 to W4-06):
+Design: [`docs/plans/week-04.md`](plans/week-04.md). Implemented so far (W4-04 to W4-07):
 
 | Package | Classes | Responsibility |
 |---|---|---|
@@ -210,12 +210,14 @@ Design: [`docs/plans/week-04.md`](plans/week-04.md). Implemented so far (W4-04 t
 | | `RouletteService` (W4-06) | `spin`: one transaction — validate, `lockWallet`, idempotency lookup (Q17), debit the stake, draw, settle, credit the payout, store the round; the only writer of rounds |
 | `entity` | `RouletteRound` (`Persistable`), `RouletteBet` (W4-05) | `@Immutable` mapping of V9; the player and the ledger entries by id only, no relationship into `user` or `wallet`; bets owned by the round, in request order |
 | `repository` | `RouletteRoundRepository` (W4-05) | `save`, `findByUserIdAndRequestId`; no update or delete |
+| `dto` | `RouletteSpinRequest`, `RouletteBetRequest` (schema `RouletteBet`), `RouletteSpinResult`, `RouletteSettledBet`; `OneOptionPerCategory`, `DistinctSelections`; `StrictJson` (W4-07) | The contract's request and response shapes with the `model` enums; Bean Validation of limits, the option of each category and duplicate selections; per-field strict JSON values (integers as integer tokens, enum values as exact names), so no global Jackson setting changes |
+| `controller` | `RouletteController` (W4-07) | `POST /api/v1/games/roulette/spins`: the player from the session principal, the `Idempotency-Key` as a `UUID`, delegation to `RouletteService.spin`; `200` for a new round and a replay |
 
 Every bet has the expected net result −1/37 of its amount (house edge 1/37 ≈ 2.7027 %, return to
 player 36/37 ≈ 97.2973 %), proven exactly by `RouletteRulesTest`. A round is atomic: the stake, the
 payout, the round and its bets commit in one transaction or not at all, and a repeated request with the
-same key and content returns the stored round without touching the wallet. `POST
-/api/v1/games/roulette/spins` follows in W4-07.
+same key and content returns the stored round without touching the wallet. The endpoint takes bets
+only; nothing in the request selects the player, the number, a payout or a balance.
 
 ### API design (design-first)
 
@@ -295,7 +297,7 @@ frontend/src
 | Architecture rules | ArchUnit `ModuleArchitectureTest` ([ADR-0005](decisions/0005-architecture-rules-archunit.md)), run with the unit tests |
 | Testing | Backend: unit (JUnit + Mockito), web slices (`@WebMvcTest` + Spring Security Test), ArchUnit, integration and security tests against PostgreSQL (Testcontainers, `*IT`), contract tests against `openapi.yaml`. Migrations also on PostgreSQL 18.6 (`MigrationCompatibilityIT`). Coverage: JaCoCo, enforced for `com.casino.wallet.service`, `com.casino.game.model` and `com.casino.game.service` (≥ 80 % lines, ≥ 70 % branches). Test contexts are cached at most 6 at a time (`src/test/resources/spring.properties`), because each holds its own PostgreSQL container. Frontend: Vitest + React Testing Library, `fetch` stubbed with contract-shaped responses. Browser acceptance: Playwright against an isolated real stack (`frontend/e2e`, run locally); full E2E coverage and CI in Week 11 |
 | CI | GitHub Actions: backend `mvnw verify` (including the JaCoCo check; coverage report uploaded as `backend-coverage`), frontend lint → typecheck → test → build |
-| Request parameters | Integer query parameters accept decimal digits only (`common.exception.DecimalIntegerParameters`); anything else is `400 MALFORMED_REQUEST`, range violations `400 VALIDATION_FAILED` |
+| Request parameters | Integer query parameters accept decimal digits only (`common.exception.DecimalIntegerParameters`); `UUID` parameters and headers (the `Idempotency-Key`) only the canonical 36-character form, either case (`common.exception.CanonicalUuidParameters`, W4-07); anything else is `400 MALFORMED_REQUEST`, range violations `400 VALIDATION_FAILED`. Numeric and enum fields of the roulette request body are strict JSON values (`game.dto.StrictJson`): no fraction, exponent, string or position number |
 
 ### 5.1 Security (Week 2, extended in Week 3)
 
@@ -307,7 +309,8 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
   - Public: system status, CSRF token, registration, login, logout, interests, health and info,
     Swagger UI and both API descriptions.
   - `/api/v1/admin/**` needs the role `ADMIN` (no endpoints yet). `/api/v1/wallet` and
-    `/api/v1/wallet/**` need the role `PLAYER` (Week 3). Every other `/api/**` path needs a
+    `/api/v1/wallet/**` need the role `PLAYER` (Week 3), and so do `/api/v1/games` and
+    `/api/v1/games/**` (W4-07). Every other `/api/**` path needs a
     session. Everything else is denied.
   - `401` and `403` are Problem Details from `ProblemDetailFactory`.
 - **Authentication:** JSON login and registration endpoints; `DaoAuthenticationProvider` with

@@ -76,13 +76,13 @@ info:
       registered. The wallet is always the one of the session's user: no operation takes a wallet
       or user id, so no client can read another user's wallet.
     - The wallet operations only **read** wallets. Balances change on the server alone, as the
-      result of game, learning or reward rules: a roulette spin (`POST /api/v1/games/roulette/spins`,
-      planned) debits its stake and credits its payout. No operation credits or debits a wallet
+      result of game, learning or reward rules: a roulette spin (`POST /api/v1/games/roulette/spins`)
+      debits its stake and credits its payout. No operation credits or debits a wallet
       directly, and no request can set a balance or an amount to credit.
     - Every balance change is an entry in an append-only ledger (`WalletTransaction`). Entries are
       never changed or deleted.
 
-    ## European roulette (planned)
+    ## European roulette
     - Single-zero wheel with the numbers 0–36; the server draws every result with a
       cryptographically secure random number generator, each number with probability exactly
       1/37. No request can choose, preview or influence a result or a payout.
@@ -633,8 +633,7 @@ paths:
     post:
       tags: [Roulette]
       operationId: spinRoulette
-      summary: Place bets and spin the European roulette wheel (planned)
-      x-implementation-status: planned
+      summary: Place bets and spin the European roulette wheel
       description: |
         Plays one round for the session's player: validates the bets, debits their total stake from
         the player's wallet, draws the winning number on the server, evaluates every bet and credits
@@ -650,9 +649,10 @@ paths:
         **Bets** (`RouletteBet`): 1–10 per spin, each with a whole-coin `amount` of 1–1,000, so the
         total stake is 1–10,000 coins. The same selection (category and option) at most once per
         spin. Amounts and numbers must be JSON integers written without a fraction or exponent:
-        `10.5`, `10.0`, `1e1` or `"10"` are rejected with `400 MALFORMED_REQUEST`, never rounded or
-        converted. The total stake must not exceed the current balance (`409 INSUFFICIENT_FUNDS`);
-        this is checked while the wallet is locked, so parallel spins cannot spend the same coins.
+        `10.5`, `10.0`, `1e1` or `"10"` (and `null` for `amount`) are rejected with
+        `400 MALFORMED_REQUEST`, never rounded or converted. The total stake must not exceed the
+        current balance (`409 INSUFFICIENT_FUNDS`); this is checked while the wallet is locked, so
+        parallel spins cannot spend the same coins.
 
         **Idempotency.** Every spin attempt sends a new UUID in `Idempotency-Key` and reuses it for
         every retry of that attempt (for example after a timeout). Keys are scoped to the player:
@@ -803,14 +803,14 @@ paths:
 
             `VALIDATION_FAILED` (the fields are named in `errors`, rejected values are never echoed):
             no bets or more than 10 (`bets`); the same selection twice (`bets`); an `amount` outside
-            1–1,000 (`bets[i].amount`); a missing option or a `number` outside 0–36 (e.g.
+            1–1,000 or missing (`bets[i].amount`); a missing option or a `number` outside 0–36 (e.g.
             `bets[i].number`, `bets[i].color`); an option property that does not belong to the bet's
             category (e.g. `bets[i].dozen` on a `RED_BLACK` bet).
 
             `MALFORMED_REQUEST`: missing `Idempotency-Key` or one that is not a canonical UUID;
             missing, unreadable or non-JSON-object body; an unknown `category` or option value (e.g.
             `"color": "GREEN"`); a wrong JSON type; an amount or number with a fraction or exponent,
-            or written as a string.
+            or written as a string; an `amount` of `null`.
           headers:
             Cache-Control:
               $ref: '#/components/headers/NoStore'
@@ -1746,8 +1746,7 @@ components:
             The wallet codes `INSUFFICIENT_FUNDS` (debit larger than the balance),
             `IDEMPOTENCY_KEY_REUSED` (an operation key reused with different values) and
             `BALANCE_LIMIT_EXCEEDED` (a credit beyond 2^53 − 1) belong to balance-changing
-            operations: they are returned by `POST /api/v1/games/roulette/spins` (planned); no
-            implemented operation of this version returns them.
+            operations: they are returned by `POST /api/v1/games/roulette/spins`.
             New specific codes may be added in later versions, so clients treat an unknown code like
             the generic code of its status class.
           enum:
