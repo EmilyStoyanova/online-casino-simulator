@@ -7,7 +7,7 @@
 -- Run: infrastructure/neon/readonly-query.sh < infrastructure/neon/verify-migrations.sql
 -- readonly-query.sh wraps it in a READ ONLY transaction that is rolled back. Counts only; no row
 -- contents are read. MigrationCompatibilityIT runs these statements (without the psql line below) on
--- PostgreSQL 17 and 18 at V5, V7, V8 and V9.
+-- PostgreSQL 17 and 18 at V5, V7, V8 and V9 (empty and with played rounds).
 
 \conninfo
 
@@ -58,7 +58,8 @@ WHERE table_schema = current_schema()
 
 -- 6. Counts. Before the rollout: players is the number of wallets V7 will open (admins get none),
 --    and wallets/ledger_entries are NULL (the tables do not exist yet). After it: wallets = players
---    and ledger_entries >= players. interests = 8.
+--    and ledger_entries >= players. interests = 8. roulette_rounds/roulette_bets are NULL before V9
+--    and 0 right after it (no round played yet); with rounds, run verify-roulette.sql.
 SELECT (SELECT count(*) FROM interests) AS interests,
        (SELECT count(*) FROM users WHERE role = 'PLAYER') AS players,
        (SELECT count(*) FROM users WHERE role = 'PLAYER' AND status = 'DISABLED') AS disabled_players,
@@ -70,4 +71,10 @@ SELECT (SELECT count(*) FROM interests) AS interests,
        END AS wallets,
        CASE WHEN to_regclass('wallet_transactions') IS NOT NULL
             THEN (xpath('/row/n/text()', query_to_xml('SELECT count(*) AS n FROM wallet_transactions', false, true, '')))[1]::text::bigint
-       END AS ledger_entries;
+       END AS ledger_entries,
+       CASE WHEN to_regclass('roulette_rounds') IS NOT NULL
+            THEN (xpath('/row/n/text()', query_to_xml('SELECT count(*) AS n FROM roulette_rounds', false, true, '')))[1]::text::bigint
+       END AS roulette_rounds,
+       CASE WHEN to_regclass('roulette_bets') IS NOT NULL
+            THEN (xpath('/row/n/text()', query_to_xml('SELECT count(*) AS n FROM roulette_bets', false, true, '')))[1]::text::bigint
+       END AS roulette_bets;

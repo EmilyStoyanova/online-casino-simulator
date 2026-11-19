@@ -226,15 +226,48 @@ entries (W4-06); there is no pending state.
 - **What the foreign keys prove:** that the referenced user and ledger entries exist and cannot be deleted.
   They do not prove that the entries belong to the round's player, have the right type and amount, or
   reference the round: the single writer (`RouletteService`, W4-06) guarantees that, and the read-only
-  reconciliation of W4-08 checks it (`docs/plans/week-04.md` §5.7).
+  reconciliation checks it (below; `docs/plans/week-04.md` §5.7, §5.8).
 - **Java mapping:** `game.entity.RouletteRound` (`@Immutable`, `Persistable`) and `RouletteBet`
   (`@Immutable`), ids only towards `users` and `wallet_transactions`; `RouletteRoundRepository` has
   `save` and `findByUserIdAndRequestId` only.
 - Tested on PostgreSQL 17.11 and 18.6 (`MigrationCompatibilityIT`): clean V1–V9, V8 → V9 with data (the
   wallet tables unchanged), every constraint by name, the triggers, a failed V9, and the read-only
-  migration check at V9; `RouletteRoundRepositoryIT` through JPA.
+  migration check at V9 (empty and with rounds) and roulette reconciliation; `RouletteRoundRepositoryIT`
+  through JPA.
 - Test cleanup: `TestDatabase` truncates `roulette_bets, roulette_rounds` first (explicit list, no
   `CASCADE`).
+
+**Round–ledger invariants** (W4-08; kept by `RouletteService`, the only writer of rounds, in the
+transaction that writes the round's ledger entries; checked read-only by
+[`verify-roulette.sql`](../infrastructure/neon/verify-roulette.sql), which reports 0 in every column
+when they hold, also with empty tables):
+- a round has 1–10 bets; `total_stake` and `total_payout` are the sums of its bets, and every bet pays
+  what the winning number pays (36×, 2× or 3× the amount on a win, 0 on a loss; zero wins only a straight
+  bet on 0);
+- its stake entry is a `ROULETTE_STAKE` of `−total_stake` in the round player's wallet with the round id as
+  reference and key `roulette-round:<id>:stake`; its payout entry (exactly when `total_payout > 0`) a
+  `ROULETTE_PAYOUT` of `+total_payout` in the same wallet, same reference, key `…:payout`, newer than the
+  stake entry;
+- `balance_after` is the `balance_after` of the round's last entry;
+- every `ROULETTE_STAKE` and `ROULETTE_PAYOUT` entry belongs to exactly one round;
+- the wallet invariants above (`verify-wallets.sql`) still hold.
+
+The script counts each rule separately (eleven counters) and is NULL-safe (`IS DISTINCT FROM`,
+`LEFT JOIN`): a missing value is counted, never skipped. Run it only at V9 (after `verify-migrations.sql`
+reports `V9: Week 4 roulette rounds`); before V9 the tables do not exist. `MigrationCompatibilityIT` proves
+on PostgreSQL 17.11 and 18.6 that it reports nothing for a fresh V9 schema and for consistent rounds, and
+that each counter finds its own deliberately written inconsistency; `RouletteConcurrencyIT` and
+`RoundLedgerIntegrityIT` run it on rounds played by `RouletteService`. Every run uses
+`default_transaction_read_only = on`, so no statement can write. It has not been run against Neon.
+
+**Concurrency** (W4-08, `RouletteConcurrencyIT`): the spins of one player are serialized by the wallet row
+lock, taken before the round lookup (`docs/plans/week-04.md` §8.2). 20 parallel spins of 100 coins on
+1,000 coins: 10 rounds, 10 `INSUFFICIENT_FUNDS`, balance 0. 10 parallel copies of one request: one round,
+one stake and one payout entry, ten equal results. Spins of two players do not wait for each other.
+
+**Not enforced by the database** (accepted, `docs/plans/week-04.md` §5.7): the ownership, type, amount
+and reference of a round's entries, the bet totals and the payout for the winning number. A second writer
+of rounds or manual SQL could break them; `verify-roulette.sql` would report it.
 
 ### Users and roles (`users`, V3)
 
@@ -314,7 +347,10 @@ original plan are listed in
 
 1. A user cannot spend more virtual coins than they own. *Week 3:* `ck_wallets_balance` and
    `ck_wallet_transactions_balance` (never below 0) plus `INSUFFICIENT_FUNDS` under the row lock.
-2. A game round cannot be processed or paid out twice.
+2. A game round cannot be processed or paid out twice. *Week 4:* one round per player and request
+   (`uq_roulette_rounds_request`, looked up under the wallet lock), one stake and at most one payout
+   entry per round (unique entry references and ledger keys), append-only rounds and bets; reconciled
+   read-only by `verify-roulette.sql`.
 3. An educational reward cannot be granted twice for the same eligible completion.
 4. Completed transactions are durable and traceable. *Week 3:* one append-only ledger entry per
    balance change, with a unique idempotency key per wallet.

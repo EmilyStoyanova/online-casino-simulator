@@ -38,6 +38,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,6 +47,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.util.ClassUtils;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
@@ -268,6 +270,27 @@ class RouletteSpinIT {
 
         assertThat(handlers).containsOnly(entry(SPINS, Set.of(RequestMethod.POST)), entry("/api/v1/wallet", Set.of(RequestMethod.GET)),
                 entry("/api/v1/wallet/transactions", Set.of(RequestMethod.GET)));
+    }
+
+    @Test
+    void theIdempotencyKeyIsTheOnlyUuidBoundFromTheRequest() {
+        // Q18 scope: CanonicalUuidParameters applies to every UUID that Spring MVC binds from the request (headers,
+        // query, path, cookies; also unannotated simple parameters). Today that is this header only, so no other
+        // endpoint's behaviour changed; a new UUID parameter shows up here and must be reviewed. JSON bodies are
+        // read by Jackson, not by the binder, and no handler uses form or model-attribute binding.
+        List<String> uuidParameters = new ArrayList<>();
+        handlerMapping.getHandlerMethods().forEach((info, method) -> {
+            for (MethodParameter parameter : method.getMethodParameters()) {
+                if (parameter.getParameterType() == UUID.class) {
+                    uuidParameters.add(ClassUtils.getUserClass(method.getBeanType()).getSimpleName() + "." + method.getMethod().getName()
+                            + "(" + java.util.Arrays.stream(parameter.getParameterAnnotations()).map(annotation -> annotation.annotationType())
+                            .filter(type -> type.getPackageName().equals("org.springframework.web.bind.annotation"))
+                            .map(Class::getSimpleName).findFirst().orElse("unannotated") + ")");
+                }
+            }
+        });
+
+        assertThat(uuidParameters).containsExactly("RouletteController.spin(RequestHeader)");
     }
 
     // ------------------------------------------------------------------ helpers

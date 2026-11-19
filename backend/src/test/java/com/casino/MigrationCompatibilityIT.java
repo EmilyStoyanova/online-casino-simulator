@@ -6,8 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -298,7 +296,7 @@ class MigrationCompatibilityIT {
     @Test
     void theMigrationCheckRecognisesTheStagingStateBeforeAndAfterTheWalletRollout() throws SQLException {
         // infrastructure/neon/verify-migrations.sql (W3-10), statements in file order:
-        // 0 location, 1 history, 2 state, 3 expected tables, 4 unexpected tables, 5 counts.
+        // 0 location, 1 history, 2 state, 3 expected tables, 4 unexpected tables, 5 counts (roulette tables from V9).
         String schema = migrated("5");
         try (Connection connection = connect(schema)) {
             insertUser(connection, "grace@example.com");
@@ -315,7 +313,7 @@ class MigrationCompatibilityIT {
             assertThat(before.get(3)).doesNotContain(",f", "wallet").contains("user_interests,5,t");
             assertThat(before.get(4)).isEqualTo("0");
             // 8 interests, 2 players (1 disabled), 1 admin, no sessions or throttle rows, no wallet tables yet.
-            assertThat(before.get(5)).isEqualTo("8,2,1,1,0,0,null,null");
+            assertThat(before.get(5)).isEqualTo("8,2,1,1,0,0,null,null,null,null");
 
             flyway(schema, "7").migrate();
             List<String> after = readOnlyScript(connection, "verify-migrations.sql");
@@ -325,7 +323,7 @@ class MigrationCompatibilityIT {
             assertThat(after.get(2)).isEqualTo("7,0,V7: Week 3 wallet schema");
             assertThat(after.get(3)).doesNotContain(",f").contains("wallets,6,t", "wallet_transactions,6,t");
             assertThat(after.get(4)).isEqualTo("0");
-            assertThat(after.get(5)).isEqualTo("8,2,1,1,0,0,2,2");
+            assertThat(after.get(5)).isEqualTo("8,2,1,1,0,0,2,2,null,null");
 
             // V8 (W4-03) adds no table; the check recognises it as the Week 4 ledger state.
             flyway(schema, "8").migrate();
@@ -336,7 +334,7 @@ class MigrationCompatibilityIT {
             assertThat(v8.get(2)).isEqualTo("8,0,V8: Week 4 ledger types");
             assertThat(v8.get(3)).isEqualTo(after.get(3));
             assertThat(v8.get(4)).isEqualTo("0");
-            assertThat(v8.get(5)).isEqualTo("8,2,1,1,0,0,2,2");
+            assertThat(v8.get(5)).isEqualTo("8,2,1,1,0,0,2,2,null,null");
 
             // V9 (W4-05) adds the two roulette tables; they are expected, not unexpected.
             flyway(schema, null).migrate();
@@ -347,7 +345,7 @@ class MigrationCompatibilityIT {
             assertThat(v9.get(2)).isEqualTo("9,0,V9: Week 4 roulette rounds");
             assertThat(v9.get(3)).doesNotContain(",f").contains("roulette_rounds,9,t", "roulette_bets,9,t");
             assertThat(v9.get(4)).isEqualTo("0");
-            assertThat(v9.get(5)).isEqualTo("8,2,1,1,0,0,2,2");
+            assertThat(v9.get(5)).isEqualTo("8,2,1,1,0,0,2,2,0,0");
         }
     }
 
@@ -552,6 +550,244 @@ class MigrationCompatibilityIT {
         }
     }
 
+    // ------------------------------------------------------------------ W4-08: read-only roulette reconciliation
+
+    /** The violation counters of {@code verify-roulette.sql} (statement 1), in column order. */
+    private static final List<String> ROULETTE_COUNTERS = List.of("rounds_without_1_to_10_bets",
+            "rounds_with_totals_not_matching_bets", "bets_with_wrong_payout", "rounds_with_missing_entries",
+            "entries_of_another_player", "entries_with_wrong_type", "entries_with_wrong_amount", "entries_with_wrong_reference",
+            "payouts_not_after_their_stake", "rounds_with_wrong_balance_after", "roulette_entries_not_in_exactly_one_round");
+
+    @Test
+    void theRouletteCheckReportsNothingForAFreshV9DatabaseAndForConsistentRounds() throws SQLException {
+        try (Connection connection = connect(migrated(null))) {
+            // Fresh V9: no player, no round.
+            assertThat(readOnlyScript(connection, "verify-roulette.sql")).containsExactly(zeros(), "0,0,0,0,0,0");
+            Book book = new Book(connection);
+            UUID alice = book.player("alice@example.com");
+            UUID bob = book.player("bob@example.com");
+            // Players with wallets, still no round.
+            assertThat(readOnlyScript(connection, "verify-roulette.sql")).containsExactly(zeros(), "0,0,0,0,0,0");
+
+            // 17 (black, odd, low, second dozen): a straight win next to a losing red bet.
+            book.round(alice, 17, bet("STRAIGHT", null, 17, 10, 360), bet("RED_BLACK", "RED", null, 20, 0));
+            // Zero: only the straight bet on 0 wins; every other category loses.
+            book.round(alice, 0, bet("STRAIGHT", null, 0, 5, 180), bet("EVEN_ODD", "EVEN", null, 10, 0),
+                    bet("LOW_HIGH", "LOW", null, 10, 0), bet("DOZEN", "FIRST", null, 10, 0), bet("RED_BLACK", "BLACK", null, 10, 0));
+            // A loss has no payout entry.
+            book.round(bob, 8, bet("DOZEN", "THIRD", null, 50, 0));
+            // 36 is red, even, high and in the third dozen: every category wins.
+            book.round(bob, 36, bet("RED_BLACK", "RED", null, 1, 2), bet("EVEN_ODD", "EVEN", null, 1, 2),
+                    bet("LOW_HIGH", "HIGH", null, 1, 2), bet("DOZEN", "THIRD", null, 1, 3), bet("STRAIGHT", null, 36, 1, 36));
+
+            // rounds, bets, players with rounds, winning rounds, stake entries, payout entries.
+            assertThat(readOnlyScript(connection, "verify-roulette.sql")).containsExactly(zeros(), "4,13,2,3,4,3");
+            // The Week 3 wallet check still holds, and the migration check counts the new rows.
+            assertThat(verification(connection)).containsExactly("0,0,0,0", "2,0,2,2");
+            assertThat(readOnlyScript(connection, "verify-migrations.sql").get(5)).isEqualTo("8,2,0,0,0,0,2,9,4,13");
+        }
+    }
+
+    @Test
+    void theRouletteCheckCountsEveryKindOfInconsistency() throws SQLException {
+        // Every step writes rows that V9 accepts (the database cannot see these mistakes, §5.7) but that
+        // break one reconciliation rule. Rows are append-only, so the counters add up step by step.
+        try (Connection connection = connect(migrated(null))) {
+            Book book = new Book(connection);
+            UUID alice = book.player("alice@example.com");
+            UUID bob = book.player("bob@example.com");
+            Entry firstStake = book.round(alice, 17, bet("STRAIGHT", null, 17, 10, 360));
+            Map<String, Long> expected = new LinkedHashMap<>();
+            ROULETTE_COUNTERS.forEach(name -> expected.put(name, 0L));
+            assertThat(rouletteCounters(connection)).isEqualTo(expected);
+
+            // Bob's round, paid from Alice's wallet.
+            UUID round = UUID.randomUUID();
+            Entry stake = book.entry(alice, "ROULETTE_STAKE", -10, key(round, "stake"), round.toString());
+            book.insert(round, bob, 8, 10, 0, stake.balanceAfter(), stake.id(), null, bet("STRAIGHT", null, 1, 10, 0));
+            expectMore(connection, expected, "entries_of_another_player");
+
+            // The payout entry has another type (the amount, key and reference are right).
+            round = UUID.randomUUID();
+            stake = book.entry(bob, "ROULETTE_STAKE", -10, key(round, "stake"), round.toString());
+            Entry payout = book.entry(bob, "STARTING_BALANCE", 20, key(round, "payout"), round.toString());
+            book.insert(round, bob, 17, 10, 20, payout.balanceAfter(), stake.id(), payout.id(), bet("RED_BLACK", "BLACK", null, 10, 20));
+            expectMore(connection, expected, "entries_with_wrong_type");
+
+            // The stake entry debits 25 for a round of 30.
+            round = UUID.randomUUID();
+            stake = book.entry(bob, "ROULETTE_STAKE", -25, key(round, "stake"), round.toString());
+            book.insert(round, bob, 8, 30, 0, stake.balanceAfter(), stake.id(), null, bet("LOW_HIGH", "HIGH", null, 30, 0));
+            expectMore(connection, expected, "entries_with_wrong_amount");
+
+            // No reference at all (NULL must count, not slip through three-valued logic) ...
+            round = UUID.randomUUID();
+            stake = book.entry(bob, "ROULETTE_STAKE", -10, key(round, "stake"), null);
+            book.insert(round, bob, 8, 10, 0, stake.balanceAfter(), stake.id(), null, bet("STRAIGHT", null, 2, 10, 0));
+            expectMore(connection, expected, "entries_with_wrong_reference");
+            // ... and the key of another round.
+            round = UUID.randomUUID();
+            stake = book.entry(bob, "ROULETTE_STAKE", -10, key(UUID.randomUUID(), "stake"), round.toString());
+            book.insert(round, bob, 8, 10, 0, stake.balanceAfter(), stake.id(), null, bet("STRAIGHT", null, 3, 10, 0));
+            expectMore(connection, expected, "entries_with_wrong_reference");
+
+            // The payout was written before the stake.
+            round = UUID.randomUUID();
+            payout = book.entry(alice, "ROULETTE_PAYOUT", 360, key(round, "payout"), round.toString());
+            stake = book.entry(alice, "ROULETTE_STAKE", -10, key(round, "stake"), round.toString());
+            book.insert(round, alice, 17, 10, 360, payout.balanceAfter(), stake.id(), payout.id(), bet("STRAIGHT", null, 17, 10, 360));
+            expectMore(connection, expected, "payouts_not_after_their_stake");
+
+            // The stored balance is not the one after the round's last entry.
+            round = UUID.randomUUID();
+            stake = book.entry(bob, "ROULETTE_STAKE", -10, key(round, "stake"), round.toString());
+            book.insert(round, bob, 8, 10, 0, stake.balanceAfter() + 1, stake.id(), null, bet("STRAIGHT", null, 4, 10, 0));
+            expectMore(connection, expected, "rounds_with_wrong_balance_after");
+
+            // A total stake of 30 for bets of 10 and 10.
+            round = UUID.randomUUID();
+            stake = book.entry(bob, "ROULETTE_STAKE", -30, key(round, "stake"), round.toString());
+            book.insert(round, bob, 8, 30, 0, stake.balanceAfter(), stake.id(), null, bet("STRAIGHT", null, 5, 10, 0),
+                    bet("STRAIGHT", null, 6, 10, 0));
+            expectMore(connection, expected, "rounds_with_totals_not_matching_bets");
+
+            // Eleven bets (the totals add up).
+            round = UUID.randomUUID();
+            stake = book.entry(bob, "ROULETTE_STAKE", -11, key(round, "stake"), round.toString());
+            List<Bet> eleven = new ArrayList<>();
+            for (int number = 1; number <= 11; number++) {
+                eleven.add(bet("STRAIGHT", null, number, 1, 0));
+            }
+            book.insert(round, bob, 0, 11, 0, stake.balanceAfter(), stake.id(), null, eleven.toArray(Bet[]::new));
+            expectMore(connection, expected, "rounds_without_1_to_10_bets");
+
+            // A straight bet on 17 paid on 5, and a dozen paid on zero (both exact multiples, so V9 accepts them).
+            book.round(alice, 5, bet("STRAIGHT", null, 17, 10, 360));
+            expectMore(connection, expected, "bets_with_wrong_payout");
+            book.round(bob, 0, bet("DOZEN", "FIRST", null, 10, 30));
+            expectMore(connection, expected, "bets_with_wrong_payout");
+
+            // A stake without any round.
+            book.entry(bob, "ROULETTE_STAKE", -10, "roulette-round:orphan:stake", null);
+            expectMore(connection, expected, "roulette_entries_not_in_exactly_one_round");
+
+            // A round without bets: no bets, and totals that the bets do not explain.
+            round = UUID.randomUUID();
+            stake = book.entry(bob, "ROULETTE_STAKE", -10, key(round, "stake"), round.toString());
+            book.insert(round, bob, 8, 10, 0, stake.balanceAfter(), stake.id(), null);
+            expectMore(connection, expected, "rounds_without_1_to_10_bets", "rounds_with_totals_not_matching_bets");
+
+            // One entry serving two rounds: the first round's stake as the payout of another round.
+            round = UUID.randomUUID();
+            stake = book.entry(alice, "ROULETTE_STAKE", -10, key(round, "stake"), round.toString());
+            book.insert(round, alice, 17, 10, 360, firstStake.balanceAfter(), stake.id(), firstStake.id(), bet("STRAIGHT", null, 17, 10, 360));
+            expectMore(connection, expected, "entries_with_wrong_type", "entries_with_wrong_amount", "entries_with_wrong_reference",
+                    "payouts_not_after_their_stake", "roulette_entries_not_in_exactly_one_round");
+
+            // A missing entry cannot be written at all (foreign keys and ck_roulette_rounds_payout_entry), so
+            // rounds_with_missing_entries stays 0; the other counters also count a missing entry (LEFT JOIN).
+            assertThat(expected.get("rounds_with_missing_entries")).isZero();
+        }
+    }
+
+    /** {@code verify-roulette.sql} statement 1 as counter name → value. */
+    private static Map<String, Long> rouletteCounters(Connection connection) throws SQLException {
+        String[] values = readOnlyScript(connection, "verify-roulette.sql").get(0).split(",");
+        Map<String, Long> counters = new LinkedHashMap<>();
+        for (int i = 0; i < values.length; i++) {
+            counters.put(i < ROULETTE_COUNTERS.size() ? ROULETTE_COUNTERS.get(i) : "column " + (i + 1), Long.parseLong(values[i]));
+        }
+        return counters;
+    }
+
+    /** Adds one to each named counter and asserts that the script reports exactly the expected counts. */
+    private static void expectMore(Connection connection, Map<String, Long> expected, String... counters) throws SQLException {
+        for (String counter : counters) {
+            assertThat(expected).containsKey(counter);
+            expected.merge(counter, 1L, Long::sum);
+        }
+        assertThat(rouletteCounters(connection)).as("after a step breaking %s", List.of(counters)).isEqualTo(expected);
+    }
+
+    private static String zeros() {
+        return String.join(",", java.util.Collections.nCopies(ROULETTE_COUNTERS.size(), "0"));
+    }
+
+    private static String key(UUID round, String entry) {
+        return "roulette-round:" + round + ":" + entry;
+    }
+
+    private static Bet bet(String category, String selection, Integer number, long amount, long payout) {
+        return new Bet(category, selection, number, amount, payout);
+    }
+
+    private record Bet(String category, String selection, Integer number, long amount, long payout) {
+    }
+
+    private record Entry(long id, long balanceAfter) {
+    }
+
+    /**
+     * Players, ledger entries and rounds written with plain SQL, as {@code RouletteService} writes them:
+     * each wallet's balance and {@code balance_after} follow its entries, so the Week 3 checks hold. Every
+     * part can also be written wrongly on purpose ({@link #entry}, {@link #insert}).
+     */
+    private static final class Book {
+
+        private final Connection connection;
+        private final Map<UUID, UUID> walletOf = new HashMap<>();
+        private final Map<UUID, Long> balanceOf = new HashMap<>();
+
+        Book(Connection connection) {
+            this.connection = connection;
+        }
+
+        /** A player with a wallet opened with 1,000 coins, as at registration. */
+        UUID player(String email) throws SQLException {
+            UUID user = insertUser(connection, email);
+            walletOf.put(user, insertWallet(connection, user, 0));
+            balanceOf.put(user, 0L);
+            entry(user, "STARTING_BALANCE", 1000, "starting-balance", null);
+            return user;
+        }
+
+        /** A ledger entry in the player's wallet; the wallet's balance follows it. */
+        Entry entry(UUID user, String type, long amount, String key, String reference) throws SQLException {
+            long balance = balanceOf.merge(user, amount, Long::sum);
+            long id = Long.parseLong(queryString(connection, "INSERT INTO wallet_transactions (wallet_id, type, amount, balance_after, "
+                    + "idempotency_key, reference) VALUES ('" + walletOf.get(user) + "', '" + type + "', " + amount + ", " + balance + ", '"
+                    + key + "', " + (reference == null ? "NULL" : "'" + reference + "'") + ") RETURNING id"));
+            execute(connection, "UPDATE wallets SET balance = " + balance + " WHERE id = '" + walletOf.get(user) + "'");
+            return new Entry(id, balance);
+        }
+
+        /** A consistent round: stake entry, payout entry when something was won, round and bets. Returns the stake entry. */
+        Entry round(UUID user, int winningNumber, Bet... bets) throws SQLException {
+            UUID round = UUID.randomUUID();
+            long totalStake = 0;
+            long totalPayout = 0;
+            for (Bet bet : bets) {
+                totalStake += bet.amount();
+                totalPayout += bet.payout();
+            }
+            Entry stake = entry(user, "ROULETTE_STAKE", -totalStake, key(round, "stake"), round.toString());
+            Entry payout = totalPayout > 0 ? entry(user, "ROULETTE_PAYOUT", totalPayout, key(round, "payout"), round.toString()) : null;
+            insert(round, user, winningNumber, totalStake, totalPayout, payout == null ? stake.balanceAfter() : payout.balanceAfter(),
+                    stake.id(), payout == null ? null : payout.id(), bets);
+            return stake;
+        }
+
+        /** A round row and its bets exactly as given. */
+        void insert(UUID round, UUID user, int winningNumber, long totalStake, long totalPayout, long balanceAfter, long stakeEntry,
+                    Long payoutEntry, Bet... bets) throws SQLException {
+            execute(connection, roundSql(round, user, UUID.randomUUID(), winningNumber, totalStake, totalPayout, balanceAfter, stakeEntry,
+                    payoutEntry));
+            for (Bet bet : bets) {
+                execute(connection, betSql(round, bet.category(), bet.selection(), bet.number(), bet.amount(), bet.payout()));
+            }
+        }
+    }
+
     @Test
     void aFailedV9LeavesV8AndCanBeRepeated() throws SQLException {
         String schema = migrated("8");
@@ -721,43 +957,11 @@ class MigrationCompatibilityIT {
     }
 
     /**
-     * Runs a read-only check of {@code infrastructure/neon} (psql meta-commands and comments removed)
-     * and returns one result per statement: its rows separated by {@code |}, each row's values by
-     * {@code ,} ({@code null} for SQL NULL).
+     * Runs a read-only check of {@code infrastructure/neon} under {@code default_transaction_read_only = on}
+     * ({@link ReadOnlyScripts}): one result per statement, rows separated by {@code |}, values by {@code ,}.
      */
     private static List<String> readOnlyScript(Connection connection, String file) throws SQLException {
-        String script;
-        try {
-            script = Files.readString(Path.of("..", "infrastructure", "neon", file), StandardCharsets.UTF_8);
-        } catch (IOException ex) {
-            throw new IllegalStateException(ex);
-        }
-        String sql = script.lines().filter(line -> !line.startsWith("\\") && !line.strip().startsWith("--"))
-                .reduce("", (all, line) -> all + line + "\n");
-        List<String> results = new ArrayList<>();
-        // As readonly-query.sh does: any write in the script would fail.
-        execute(connection, "SET default_transaction_read_only = on");
-        try {
-            for (String statement : sql.split(";")) {
-                if (statement.isBlank()) {
-                    continue;
-                }
-                try (Statement query = connection.createStatement(); ResultSet row = query.executeQuery(statement)) {
-                    List<String> rows = new ArrayList<>();
-                    while (row.next()) {
-                        List<String> values = new ArrayList<>();
-                        for (int column = 1; column <= row.getMetaData().getColumnCount(); column++) {
-                            values.add(row.getString(column));
-                        }
-                        rows.add(String.join(",", values));
-                    }
-                    results.add(String.join("|", rows));
-                }
-            }
-        } finally {
-            execute(connection, "SET default_transaction_read_only = off");
-        }
-        return results;
+        return ReadOnlyScripts.run(connection, file);
     }
 
     /** Balance and ledger entries of a user's wallet, or {@code "no wallet"}. */
