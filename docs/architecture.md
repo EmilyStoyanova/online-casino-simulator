@@ -285,7 +285,7 @@ frontend/src
 ├── components/   reusable presentational components (layout, buttons, …)
 ├── pages/        route-level screens
 ├── features/     feature slices: hooks + components per use case (e.g. system-status)
-├── games/        Phaser scenes and game rendering (Week 6)
+├── games/        Phaser scenes and game rendering (since Week 5, W5-P01: the roulette wheel)
 ├── services/     API client and per-resource API functions
 ├── types/        TypeScript types mirroring API contracts
 └── test/         test setup and helpers

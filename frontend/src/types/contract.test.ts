@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import rawContract from '../../../backend/src/main/resources/static/openapi.yaml?raw'
+import { RED_NUMBERS } from '../features/roulette/rouletteNumbers'
 import { IDEMPOTENCY_KEY_HEADER } from '../services/rouletteApi'
 import { historyAfterSpin, spinResult, startingWallet } from '../test/fixtures'
 import {
@@ -75,6 +76,19 @@ describe('contract drift: enums', () => {
     ['WalletTransactionType', WALLET_TRANSACTION_TYPES],
   ])('%s has exactly the values of the frontend', (name, values) => {
     expect(list(schema(name), 'enum')).toEqual([...values])
+  })
+})
+
+describe('contract drift: number colours', () => {
+  it('the red numbers of the wheel and the table are the contract’s list', () => {
+    const description = schema('RouletteBetColor').replace(/\s+/g, ' ')
+    const red = /Red: ([\d, ]+)\./.exec(description)?.[1]
+    const black = /Black: ([\d, ]+)\./.exec(description)?.[1]
+    const parse = (text: string | undefined) => (text ?? '').split(',').map((value) => Number(value.trim()))
+
+    expect(parse(red)).toEqual([...RED_NUMBERS].sort((a, b) => a - b))
+    expect(parse(black)).toHaveLength(18)
+    expect(parse(black).some((value) => RED_NUMBERS.has(value))).toBe(false)
   })
 })
 

@@ -28,7 +28,7 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 | Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | ✅ Done: Render backend and Vercel frontend deployed and verified (registration closed); Neon `staging` now at V7 |
 | 2 — Virtual currency & game logic | 3 | Virtual wallet and immutable ledger | ✅ Done: merged into `main` (PR #9) and deployed to staging; Neon `staging` migrated V5 → V7 and verified ([rollout record](infrastructure/wallet-rollout.md#rollout-record-2026-11-15)) |
 | | 4 | Roulette engine | ✅ Merged into `main` (PR #10, [Week 4 plan](docs/plans/week-04.md)). **Not deployed**: the Render backend still runs the Week 3 build and Neon `staging` stays at V7 until a separately approved [rollout](infrastructure/roulette-rollout.md) |
-| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | 🚧 Week 5 (roulette and wallet UI): [plan](docs/plans/week-05.md) in review |
+| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | 🚧 Week 5 in progress on `feature/week-05-roulette-ui` (roulette and wallet UI, Phaser wheel): [plan](docs/plans/week-05.md) |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
 | 5 — Statistics & responsible play | 9–10 | Dashboard, limits, admin panel | Planned |
 | 6 — QA & release | 11–12 | Testing, deployment, beta release | Planned |
@@ -121,7 +121,8 @@ Details: [`docs/architecture.md`](docs/architecture.md).
 | Testing | JUnit Jupiter, Mockito, Spring Security Test, Testcontainers, ArchUnit, JaCoCo, Vitest, React Testing Library, Playwright (local) |
 | Tooling | Maven Wrapper (Maven 3.9), Docker Compose, GitHub Actions |
 | Hosting (staging) | Vercel (frontend), Render (backend, Docker), Neon (PostgreSQL); final hosting decision in Week 12 (ADR-0007) |
-| Later stages | Phaser (Week 6), Playwright in CI (Week 11) |
+| Game rendering | Phaser 4 (from Week 5: the roulette wheel, W5-P01; animation refinement in Week 6) |
+| Later stages | Playwright in CI (Week 11) |
 
 Exact versions and the reasons for them: [ADR-0002](docs/decisions/0002-technology-baseline.md).
 
@@ -487,7 +488,8 @@ Next milestones:
   `TEST_CREDIT`/`TEST_DEBIT` (release gate, Week 3 plan §7.13). **Not deployed:** the staging rollout
   is a separate, approval-gated step ([runbook](infrastructure/roulette-rollout.md)). Plan:
   [`docs/plans/week-04.md`](docs/plans/week-04.md).
-- **Week 5:** the roulette and wallet user interface — plan in review
+- **Week 5:** the roulette and wallet user interface and the Phaser wheel — in progress on the feature
+  branch (not merged)
   ([`docs/plans/week-05.md`](docs/plans/week-05.md)).
 
 ## Documentation
@@ -498,7 +500,7 @@ Next milestones:
 - [User scenarios](docs/user-scenarios.md)
 - [Architecture decision records](docs/decisions/)
 - [Week 2 implementation plan](docs/plans/week-02.md), [Week 3 implementation plan](docs/plans/week-03.md),
-  [Week 4 implementation plan](docs/plans/week-04.md), [Week 5 implementation plan](docs/plans/week-05.md) (in review)
+  [Week 4 implementation plan](docs/plans/week-04.md), [Week 5 implementation plan](docs/plans/week-05.md) (in progress)
 - Deployment: [Render](infrastructure/render/README.md), [Vercel](infrastructure/vercel/README.md),
   [Week 3 wallet rollout](infrastructure/wallet-rollout.md) (executed),
   [Week 4 roulette rollout](infrastructure/roulette-rollout.md) (prepared, not executed)

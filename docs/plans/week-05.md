@@ -1,10 +1,12 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
-- **Status:** Revision 4. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
+- **Status:** Revision 6. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
   refinements (§14). W5-02 API foundation approved 2026-11-24 (§7.8). W5-03 navigation, `PlayerOnly`
   and player lobby approved 2026-11-24 (§4.4). First checkpoint (W5-01 to W5-03, `bb9e532`) approved
-  and pushed. W5-04 wallet state and balance UI approved 2026-11-24 (§9.4).** Playwright W2-16
-  regression still pending (no JDK in this environment).
+  and pushed. W5-04 wallet state and balance UI approved 2026-11-24 (§9.4) and pushed (`75d42da`).
+  Q13 approved: Phaser starts in Week 5. W5-P01 Phaser integration foundation approved 2026-11-24
+  (§3.4) and committed to the feature branch.** Playwright W2-16 regression still pending (no JDK in
+  this environment).
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -17,8 +19,9 @@
   ([ADR-0006](../decisions/0006-session-authentication-security.md)), technology baseline
   ([ADR-0002](../decisions/0002-technology-baseline.md))
 - **Expected result (plan, Stage 3):** a working roulette with a user interface connected to the
-  backend. Week 5 delivers the interface without animations; Week 6 adds Phaser, round history,
-  statistics, sound and the reduced-motion setting.
+  backend. Week 5 delivers the interface and — since the approved change Q13 — the Phaser wheel:
+  W5-P01 draws it, W5-07 turns it to the server-confirmed number. Week 6 refines the animation and adds
+  round history, statistics, sound and the in-app reduced-motion setting.
 - **Branch:** `feature/week-05-roulette-ui` (from `main` at `94a7305`; pushed to `origin` at the first
   checkpoint `bb9e532`; no pull request, not merged)
 
@@ -28,6 +31,8 @@
 | 2 | 2026-11-24 | W5-01 review applied: Q1–Q12 approved with refinements (§14) — total-stake limit 10,000 (§5.5), pending spins in `sessionStorage` bound to the user (§8.4), odds and rules required (§5.8), V7-backend verification before the merge (§7.7, §16.2); W5-02 implemented (§7.8) |
 | 3 | 2026-11-24 | W5-02 approved; W5-03 implemented: `nav "Main"`, `PlayerOnly`, routes `/roulette` and `/wallet` with progress placeholders, player lobby, skip link, `cardStyles`, `PageHeader` (§4.4); W5-03 approved; first checkpoint (W5-01 to W5-03 committed) |
 | 4 | 2026-11-24 | First checkpoint approved and pushed (`bb9e532`); W5-04 implemented: `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`, `Coins`; balance in the header, lobby, roulette and wallet pages (§9.4); W5-04 approved after one test correction (the session-expiry probe uses the implemented `GET /api/v1/wallet/transactions`) |
+| 5 | 2026-11-24 | W5-04 committed and pushed (`75d42da`); Q13 approved (Phaser in Week 5); new task W5-P01 between W5-04 and W5-05 (§3.4, §12, §13); Phaser statements reconciled (§2, §3, §5.1, §10.2); the obsolete "start over" of §9.3 removed (Q6); W5-P01 implemented; pre-approval lifecycle review with five fixes and browser verification (§3.4) |
+| 6 | 2026-11-24 | W5-P01 approved; checkpoint review before the commit: `WheelPhaserGame` gives `window.onblur`/`onfocus` back their previous values instead of clearing them and leaves no own `addEventListener` property on `document` (§3.4); W5-P01 committed and pushed to the feature branch |
 
 ---
 
@@ -130,12 +135,13 @@ lint → typecheck → test → build.
 | 8 | Handle API errors and interrupted connections | Error classification, retry with the same key, replay, session expiry (§7) | W5-07 |
 | — | README / project request: wallet transaction history | Wallet page with keyset-paginated history (§6); **approved (Q1)**; roulette *round* history stays in Week 6 | W5-05 |
 | — | Plan §7: works on computer and mobile | Responsive layout and accessibility (§10) | W5-08 (and every task) |
+| — | Approved change Q13 (plan v1.1 lists Phaser in Week 6) | Phaser wheel on `/roulette` (W5-P01), turned to the server's number by the spin flow (W5-07); refinement stays in Week 6 | W5-P01, W5-07 |
 
 ### 2.2 Out of scope (Week 5)
 
 | Item | Where it belongs |
 |---|---|
-| Phaser, wheel animation, sound, in-app reduced-motion setting, `user_preferences` | Week 6 |
+| Refinement of the wheel animation (ball, physics-like easing, polish), sound, in-app reduced-motion setting, `user_preferences` | Week 6 (Phaser itself starts in W5-P01, Q13) |
 | Round history (`GET /api/v1/games/roulette/history`), statistics panel | Week 6 |
 | Dashboard, house-edge statistics per player, play limits, breaks, self-exclusion | Week 9 |
 | Admin UI | Week 10 |
@@ -216,7 +222,9 @@ frontend/src
 └── App.tsx                         CHANGED  routes /roulette, /wallet; WalletProvider
 ```
 
-`games/` (Phaser) stays empty until Week 6.
+`games/roulette/` holds the Phaser wheel since W5-P01 (Q13, §3.4): `wheelConfig.ts`,
+`canvasSupport.ts`, `RouletteScene.ts`, `createWheelGame.ts`; the React side is
+`features/roulette/RouletteWheel.tsx` with `rouletteNumbers.ts` and `usePrefersReducedMotion.ts`.
 
 ### 3.3 Layering rules
 
@@ -227,8 +235,167 @@ frontend/src
 3. **Pure modules** (`betSlip.ts`, `rouletteTable.ts`, `spinErrors.ts`, `walletFormat.ts`) have no
    React and no I/O, so they are unit-tested directly.
 4. **Services** are the only callers of `apiClient`; they take and return contract types.
-5. **Week 6 seam:** `SpinResult` is a separate component that receives a `RouletteSpinResult`. Week 6
-   can put the wheel animation in front of it without changing `useSpin` or the API layer.
+5. **Wheel seam:** `SpinResult` is a separate component that receives a `RouletteSpinResult`. W5-07
+   first calls the wheel's handle (`RouletteWheel` → `spinTo(winningNumber)`, W5-P01) and then reveals
+   the result; Week 6 refines the animation without changing `useSpin` or the API layer.
+6. **React and Phaser:** React owns state, wallet data and API calls; Phaser (only in `games/`) owns the
+   drawing and the animation and never decides a number or a payout (§3.4).
+
+### 3.4 Phaser integration (W5-P01; approved 2026-11-24)
+
+**Version and evaluation.** `phaser@4.2.1`, the current `latest` on npm (published 2026-07-09, MIT),
+pinned exactly like the official Phaser + React + TypeScript + Vite template pins its Phaser version.
+Evidence: npm metadata (ESM build `dist/phaser.esm.js` with named exports, bundled type declarations,
+no peer dependencies, one runtime dependency `eventemitter3`); the official template
+(`phaserjs/template-react-ts`) uses Phaser 4 with React 19 and creates/destroys the game in an effect
+with `game.destroy(true)` under `React.StrictMode`; the release notes of 4.1.0 (ESM default export
+fixed) and 4.2.1 (ScaleManager resizing to the parent fixed). The template still uses Vite 6 and
+TypeScript 5.7, so compatibility with **Vite 8 and TypeScript 6** was verified here: `tsc -b`, ESLint,
+Vitest and `vite build` are green with the package's own types. `docs.phaser.io` could not be read
+(HTTP 403); the Phaser 4 API used (renderer `AUTO` with Canvas fallback, `Scale.RESIZE`, `banner`,
+`audio.noAudio`, `autoFocus`, `input`, `Graphics.slice`, `tweens.add`/`killTweensOf`,
+`Game.destroy(removeCanvas)`) was checked in the installed `types/phaser.d.ts`. `npm audit`: 0 runtime
+vulnerabilities (9 moderate pre-existing findings in ESLint's `minimatch`, dev only, unrelated).
+
+**Architecture**
+
+```
+RoulettePage (React)
+└─ RouletteWheel  features/roulette        React: lifecycle, accessibility, reduced motion, ref handle
+     │  canRenderWheel()  (2D canvas?)  no → notice, description stays; Phaser is not downloaded
+     │  loadWheelModule() → dynamic import()   (one shared request; Phaser chunk only on /roulette)
+     ▼
+   createWheelGame  games/roulette           the only module that imports Phaser
+     ├─ canRenderWheel() again (defence)    else WheelUnavailableError
+     └─ new WheelPhaserGame({ type: AUTO, parent, transparent, banner: false, autoFocus: false,
+                   input: { keyboard/mouse/touch/gamepad/windowEvents: false },
+                   audio: { noAudio: true }, scale: { mode: Scale.RESIZE } })
+          ├─ removes on destroy what Phaser's VisibilityHandler leaves on document/window
+          └─ RouletteScene   draws the wheel once (pointer between two pockets), scales it on
+                             resize; spinTo(n) only on request
+   wheelConfig (pure)  order, colours, radii, NEUTRAL_ROTATION, restingRotation(n), spinTargetRotation
+```
+
+- **Ownership:** React owns state, wallet data and API calls; Phaser draws and animates. The scene has
+  no input, no timer, no idle motion and no random source; `spinTo` accepts only 0–36 from its caller
+  and computes the end angle deterministically (5 turns, ease-out, 4.5 s).
+- **Lifecycle:** one game per mounted component. StrictMode's trial mount is cancelled before the
+  chunk arrives (`mounted` flag) and both mounts share one import, so only one game is created; a
+  `then` callback is always asynchronous, so even a cached chunk cannot reach a cancelled mount. The
+  cleanup calls `destroy()`, which removes the global handlers at once and calls
+  `game.destroy(true)`. **Phaser's destroy is asynchronous:** it only sets `pendingDestroy`; the next
+  frame of its loop destroys the scenes, the renderer, the canvas and the loop (`runDestroy`). A game
+  destroyed before it started still starts its loop once to run that destroy. Every remount creates a
+  new host element, so a game still finishing its destroy never shares a host with the new one. The
+  scene releases its resize listener and settles a running `spinTo` on `DESTROY` (game destroy) and on
+  `SHUTDOWN` (scene stop); the TweenManager removes its own tweens. After `destroy()`, `spinTo` rejects
+  ("The wheel is not shown."), also one that was still waiting for the wheel to be drawn.
+- **Accessibility:** the canvas host is `aria-hidden`; a `figure` with a caption and a `details` list
+  ("Pockets clockwise from zero", each number with its colour in text) describes the wheel. Phaser's
+  `autoFocus` is off, so the page keeps the keyboard focus.
+- **Reduced motion:** `usePrefersReducedMotion` (`useSyncExternalStore` on the media query) passes the
+  preference at creation and on change; under reduced motion `spinTo` jumps to the pocket and a
+  running spin ends at once.
+- **Fallback:** no 2D canvas (checked before the chunk is loaded, without creating a WebGL context), a
+  failing chunk or a throwing game → "The wheel picture cannot be shown in this browser", description
+  kept; a failed chunk load is not cached, so a later visit retries. A renderer that cannot be created
+  throws synchronously from `new Game` (Phaser boots synchronously in a loaded page) and takes the same
+  path; without WebGL, `AUTO` uses the Canvas renderer.
+- **No result before the server's:** at rest the pointer sits on the separator between 0 and 26
+  (`NEUTRAL_ROTATION`), so the wheel never shows a number as if it had been drawn.
+- **Week 5 / Week 6 split:** W5-07 calls `RouletteWheel`'s handle `spinTo(result.winningNumber)` after a
+  confirmed spin; Week 6 refines the animation (e.g. ball, polish) and adds sound and the in-app
+  reduced-motion setting.
+
+**Files**
+
+| File | Change |
+|---|---|
+| `package.json`, `package-lock.json` | `"phaser": "4.2.1"` (exact) and its dependency `eventemitter3` 5.0.4 |
+| `features/roulette/rouletteNumbers.ts` (new) | `EUROPEAN_WHEEL_ORDER` (frozen), `RED_NUMBERS` (contract list), `numberColor()`; display only, shared with the table of W5-06 |
+| `games/roulette/wheelConfig.ts` (new) | Pocket geometry, colours of the dark theme, radii, `NEUTRAL_ROTATION`, `pocketIndex`, `pockets`, `restingRotation`, `spinTargetRotation` |
+| `games/roulette/canvasSupport.ts` (new) | `canRenderWheel()` (2D context only; no Phaser import, so the component can call it first) |
+| `games/roulette/RouletteScene.ts` (new) | Rim, 37 slices, separators, accent rings, hub with spokes and cap, upright numerals (system font, no assets), fixed amber pointer; neutral rest; `spinTo`, `setReducedMotion`, resize, `DESTROY`/`SHUTDOWN` handling |
+| `games/roulette/createWheelGame.ts` (new) | Game configuration (all input managers off), `WheelPhaserGame` (cleans up Phaser's `VisibilityHandler`), `WheelGame` handle (`ready`, `spinTo`, `setReducedMotion`, idempotent `destroy`), `WheelUnavailableError` |
+| `features/roulette/usePrefersReducedMotion.ts` (new) | The OS preference, live |
+| `features/roulette/RouletteWheel.tsx` (new) | The component (above); `RouletteWheelHandle` via React 19 `ref` prop |
+| `pages/RoulettePage.tsx` | "The wheel" card next to the balance and the unchanged progress card ("You cannot place bets yet…"); note "The wheel stands still. It will turn only to show a number drawn by the server." |
+| `test/fakeWheelGame.ts` (new), `test/setup.ts` | jsdom has no canvas/WebGL: every test gets a recording fake of `createWheelGame` and a controllable `canRenderWheel` (`vi.mock` in the setup file), so Phaser is never loaded in unit tests; the real modules are tested through `vi.importActual` |
+
+**Tests** (30 files, 325 tests; after W5-04: 24 files, 246 tests):
+
+| File | New tests | Covers |
+|---|---|---|
+| `features/roulette/rouletteNumbers.test.ts` | 8 | 37 unique pockets 0–36; exact European order; 1 green, 18 red (contract list), 18 black; red/black alternate after zero; invalid numbers rejected |
+| `games/roulette/wheelConfig.test.ts` | 42 | Pocket geometry and order; every number 0–36 rests under the pointer; the neutral rest marks no number; spins go clockwise ≥ 5 turns and stop on the requested number; deterministic, `Math.random` never called; invalid numbers rejected |
+| `games/roulette/canvasSupport.test.ts` | 3 | 2D context → true without asking for WebGL; null/undefined context or throwing canvas → false |
+| `games/roulette/createWheelGame.test.ts` | 13 | The real wrapper with a Phaser stand-in: configuration (all input managers off, no audio, banner or focus, `Scale.RESIZE`); no game without canvas; `spinTo` validates at once and waits for the drawn wheel; destroy once, refuses spins afterwards, settles a spin waiting for a wheel destroyed before it was drawn; reduced motion before drawing; Phaser's `visibilitychange` listener and blur/focus handlers removed on destroy, also for a game destroyed before it started; other `visibilitychange` listeners kept; blur/focus handlers assigned before Phaser restored and ones assigned later kept; `document.addEventListener` restored exactly (no own property left, a patched one kept) |
+| `features/roulette/RouletteWheel.test.tsx` | 11 | One game in the `aria-hidden` host; destroyed once on unmount; one game under StrictMode; no game when unmounted before the chunk arrives; destroyed when leaving `/roulette`, one new game on return; caption and the 37 listed pockets with colours, no button; fallback notice with description; no canvas → notice without creating a game; reduced motion at creation and on change (listener removed on unmount); `spinTo` handle forwards and rejects after unmount; source scan: no random source in roulette/game code |
+| `features/roulette/RouletteWheel.loadFailure.test.tsx` | 1 | A rejected dynamic import shows the notice and the description; a later mount loads the chunk again |
+| `types/contract.test.ts` | 1 | The red numbers equal the contract's `RouletteBetColor` list (the drift test's red-number check, planned for W5-06, added here with the first use) |
+
+**Found while testing:** under StrictMode no game was created: in Vitest the second concurrent
+`import()` of the (mocked) module never resolved, so only the cancelled trial mount's callback ran.
+The component now loads the module once per page (`loadWheelModule`), which is also the better design
+(one request); the StrictMode test passes.
+
+**Lifecycle review before approval (2026-11-24).** The installed Phaser 4.2.1 sources and real Chrome
+measurements (Vite dev server, React StrictMode active; DevTools protocol for event listeners; API
+mocked in the browser) found five issues, all fixed in W5-P01:
+
+| Finding (evidence) | Fix | Verified by |
+|---|---|---|
+| `Game.destroy()` emits `DESTROY` to scenes, not `SHUTDOWN` (`Systems#destroy`); the scene only handled `SHUTDOWN`, so a spin running when the game was destroyed never settled (measured: "still pending after 1 s") | Release on `DESTROY` and `SHUTDOWN`; `spinTo` rejects after `destroy()` and when it was waiting for a wheel destroyed before it was drawn | Chrome probe: settles; `createWheelGame.test.ts` |
+| Phaser's `VisibilityHandler` (`Game#start`) adds a `document` `visibilitychange` listener and assigns `window.onblur`/`onfocus`, never removed: **16 listeners after 16 visits** of `/roulette` | `WheelPhaserGame` records what `start` adds and removes it on `destroy` (also when `start` runs after an early destroy); Phaser is not modified | Chrome: 0 after 16 rapid visits, `onblur` cleared; `createWheelGame.test.ts` |
+| `input: false` does not disable Phaser's input: `Config` reads `input.mouse` etc. with a default of `true`, and the mouse manager's `preventDefault` on `wheel` **blocked page scrolling over the canvas (0 px instead of 250 px)** | Every input manager switched off explicitly | Chrome: page scrolls over the wheel; no `wheel`/`keydown`/`mousedown` listener from the game |
+| Without canvas, importing Phaser throws an uncaught `TypeError` in its own feature detection (`CanvasFeatures`, `yellow.onload`) | `canRenderWheel` runs before the chunk is loaded; without canvas Phaser is never downloaded | Chrome with `getContext` → `null`: no error, no chunk request, notice + 37 listed pockets |
+| At rest the pointer marked 0, which could read as a drawn result | `NEUTRAL_ROTATION`: the pointer sits on the separator between 0 and 26 | Screenshot; `wheelConfig.test.ts` |
+
+Also confirmed from the sources: a renderer that cannot be created throws from `new Game` (synchronous
+boot); `ScaleManager` removes its window/document listeners on destroy; no `ResizeObserver` is used;
+the WebGL context is not lost explicitly, but no "too many WebGL contexts" warning appeared after about
+20 created games (no change made). In the measurements, everything returned to the lobby baseline
+(0 canvases, 0 Phaser listeners) after rapid navigation, including visits left before the chunk arrived.
+
+**Checkpoint review (2026-11-24, before the commit).** The approval asked to confirm that the cleanup
+removes only its own listeners and restores global handlers without overwriting other code's changes.
+Two gaps were found and fixed: `removeGlobalHandlers` set `window.onblur`/`onfocus` to `null`, which
+dropped a handler the page had before Phaser overwrote it; and replacing `document.addEventListener`
+during `start` left an own property on `document` that shadowed the inherited method (and any later
+patch of `EventTarget.prototype`). `WheelPhaserGame` now records the previous values and puts them back
+only while the handlers are still this game's, and deletes the temporary property unless `document`
+had its own one, which it then restores. The visibility listener is removed by the exact arguments
+Phaser's `start` passed, so other listeners stay. Three tests were added (two fail with the previous
+code); the production browser check below was repeated with the same results.
+
+**Browser verification (2026-11-24, local only; final).** The production build (`vite preview`) with the
+Vercel Content-Security-Policy header in the installed Google Chrome through Playwright, API mocked in
+the browser (a player with 1,000 coins; no backend, no cloud):
+
+| Check | Result |
+|---|---|
+| Chunk | Not requested on the lobby; requested once per session when `/roulette` opens; not requested without canvas |
+| Rapid navigation (12 round trips, a third without waiting for the wheel) | Lobby: 0 canvases, 0 `visibilitychange`/`resize`, `onblur` cleared; back on `/roulette`: exactly 1 canvas |
+| Scrolling over the wheel (1280 × 600) | Page scrolls (283 → 368 px, the end of the page) |
+| Responsive sizing, horizontal overflow | 320 / 375 / 768 / 1024 / 1280 px: canvas 238 / 293 / 384 / 384 / 384 px, inside the viewport, 0 px overflow |
+| WebGL disabled (`--disable-webgl --disable-3d-apis`) | WebGL unavailable; the Canvas renderer draws the same wheel |
+| No canvas (`getContext` → `null`) | Notice, 37 listed pockets, no error, no chunk |
+| Reduced motion (emulated) | The media query matches; the wheel is drawn and stands still |
+| Result claims | No "won"/"winning number"/"result" text; the pointer marks no number |
+| Console | No errors, no warnings, no CSP violations |
+
+The real scene with deterministic input (dev server, `createWheelGame` called directly, as W5-07 will):
+`spinTo(17)` takes about 4.5 s with full motion and 1–2 ms with reduced motion, and both rest on 17;
+`spinTo(37)` is a `RangeError`; the canvas is removed one frame after `destroy()`. The component's
+reduced-motion wiring is covered by unit tests; no page calls `spinTo` before W5-07. Playwright W2-16 is
+still pending (no JDK).
+
+**Remaining risks:** the Phaser chunk is 1.37 MB (359 kB gzip; Vite's 500 kB warning, accepted for a
+lazy chunk that only `/roulette` loads); the `VisibilityHandler` cleanup depends on Phaser 4.2.1
+internals (`Game#start`), so a Phaser upgrade must re-run the listener check; in a 375 px header the
+balance badge takes its own row (W5-08); no automated visual regression test; one `window`
+`mousedown` listener appeared in the production run after Playwright's clicks and did not grow with
+further visits (0 in a dedicated dev-server check; the game registers no input listeners).
 
 ---
 
@@ -348,8 +515,9 @@ Calm, premium and consistent with the existing pages:
   colour.
 - Typography: the existing system font stack (the CSP allows no external fonts); tabular numerals
   for amounts (`tabular-nums`).
-- Motion: none needed in Week 5 beyond short colour transitions, all covered by the reduced-motion
-  rule. No spinning wheel, no confetti, no flashing (Week 6 owns the wheel).
+- Motion: short colour transitions, covered by the reduced-motion rule, and the Phaser wheel
+  (W5-P01), which stands still and turns only to a number the server returned (W5-07): a few turns
+  with an ease-out, or none at all under reduced motion. No confetti, no flashing, no idle motion.
 - Wins and losses are shown with the **same layout and weight**; a win is not louder than a loss.
 
 ### 5.2 Page layout
@@ -781,7 +949,7 @@ RoulettePage
  │                                         │         also runs if the page was left meanwhile)
  │                                         │       → SpinResult(result), slip cleared
  │                                         ├─ definitive → message, key discarded
- │                                         └─ uncertain → Retry (same K, R) / start over
+ │                                         └─ uncertain → record kept (§8.4); explicit Retry (same K, R)
  └─ SpinResult (server values only)
 ```
 
@@ -902,7 +1070,7 @@ Target: **WCAG 2.2 level AA** for the new pages, checked per task and in W5-08.
 | Contrast | Text ≥ 4.5:1, UI components and focus indicators ≥ 3:1, on felt, red and black cells too |
 | Live regions | Result summary (polite); slip changes (polite, e.g. "Red, 10 coins. Total 30 coins."); errors via `FormAlert` (`role="alert"`) |
 | Focus management | Confirmation heading on open, back to "Review bets" on cancel; result heading after a spin; error message after a failed spin |
-| Motion | No animation required; existing `prefers-reduced-motion` rule; nothing flashes |
+| Motion | The wheel only moves to show a server result and not at all under `prefers-reduced-motion` (also when the preference changes while the page is open); existing CSS rule for transitions; nothing flashes |
 | Forms | Chips in a `fieldset` with `legend`; no placeholder-only labels |
 | Language and wording | `lang="en"`; plain, neutral wording; no pressure ("Last chance", "Hot") |
 
@@ -950,9 +1118,10 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | W5-02 | **API foundation (done, approved 2026-11-24, §7.8):** `RequestOptions.headers`; `types/wallet.ts`, `types/roulette.ts`; `services/walletApi.ts`, `services/rouletteApi.ts`, `services/idempotency.ts`; tests (incl. CSRF retry keeps the key); **Should:** contract drift test (Q12) | M | W5-01 |
 | W5-03 | **Navigation and layout (done, approved 2026-11-24, §4.4):** `cardStyles.ts`, `PageHeader`, `Coins`, `MainNav`, `PlayerOnly`, routes `/roulette` and `/wallet` (placeholder content), `AppLayout` width, lobby home for players, skip link (Should); tests for role-dependent navigation; `vercelConfig.test.ts` cases | M | W5-01 (Q9) |
 | W5-04 | **Wallet state and balance (done, approved 2026-11-24, §9.4):** `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`; stale-response guard; lobby and header show the balance; tests | M | W5-02, W5-03 (Q2, Q3) |
+| W5-P01 | **Phaser integration foundation (Q13; approved 2026-11-24, §3.4):** Phaser 4.2.1 as the only new runtime dependency; `games/roulette/` (wheel geometry, canvas check, `RouletteScene`, `createWheelGame`), `features/roulette/RouletteWheel` (lazy-loaded, StrictMode-safe, accessible HTML description, reduced motion, `spinTo` handle for W5-07), wheel on `/roulette`; no spin control, no client outcome | M | W5-03, W5-04 (Q11, Q13) |
 | W5-05 | **Wallet page and history:** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |
 | W5-06 | **Table, chips and bet slip (no API):** `rouletteTable.ts`, `betSlip.ts`, `RouletteBoard`, `ChipSelector`, `BetSlip`, responsive table layouts; unit and keyboard tests | L | W5-03 (Q5) |
-| W5-07 | **Spin flow:** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-06 (Q4, Q6, Q7, Q10) |
+| W5-07 | **Spin flow:** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; the wheel (W5-P01) turns to the server-confirmed `winningNumber` before the result is revealed; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-P01, W5-06 (Q4, Q6, Q7, Q10, Q13) |
 | W5-08 | **Responsive, accessibility and responsible-play pass:** layouts at all widths, focus management, live regions, contrast, `OddsInfo` (Q8), wording review; fixes and tests; manual check record | M | W5-05, W5-07 |
 | W5-09 | **Documentation:** `architecture.md` §4 (frontend structure, wallet state, spin lifecycle), README (what works today, local walkthrough), `user-scenarios.md` S3 note (animation in Week 6), this plan's implementation records | S | W5-08 |
 | W5-10 | **Verification and pull request preparation:** full frontend checks, local real-stack walkthrough (§16.2) including the older V7 backend (Q10), Playwright W2-16 regression and the W5 scenario (Should), checklist "no client RNG/payout, no browser storage except the pending spin record, no cloud". PR prepared, **not opened without approval** | M | all |
@@ -963,10 +1132,12 @@ graph LR
     W501 --> W503[W5-03 Navigation + layout]
     W502 --> W504[W5-04 Wallet state + balance]
     W503 --> W504
-    W504 --> W505[W5-05 Wallet page + history]
+    W504 --> WP01[W5-P01 Phaser wheel]
+    WP01 --> W505[W5-05 Wallet page + history]
     W503 --> W506[W5-06 Table + chips + slip]
     W502 --> W507[W5-07 Spin flow]
     W504 --> W507
+    WP01 --> W507
     W506 --> W507
     W505 --> W508[W5-08 Responsive + a11y pass]
     W507 --> W508
@@ -974,7 +1145,8 @@ graph LR
     W509 --> W510[W5-10 Verify + PR prep]
 ```
 
-W5-02 and W5-03 are independent; W5-05 and W5-06 can be reviewed in either order.
+W5-02 and W5-03 are independent; W5-05 and W5-06 can be reviewed in either order. W5-P01 (approved
+change Q13) follows W5-04 and precedes W5-05 in the review order; the task ids W5-05 to W5-10 are kept.
 
 **Checkpoints** (all checks green at each; a short review before continuing):
 1. W5-02: the spin client sends the key and keeps it across the CSRF retry;
@@ -1027,6 +1199,18 @@ W5-02 and W5-03 are independent; W5-05 and W5-06 can be reviewed in either order
 | AC-W5-04.3 | Sign-out (and session expiry) clears the balance; a different user never sees the previous balance. |
 | AC-W5-04.4 | A `GET` that started before `applyConfirmedBalance` cannot overwrite the confirmed balance (test with a delayed response). |
 | AC-W5-04.5 | Loading shows a placeholder; a failed load shows "Balance unavailable" and a retry, never `0` or a stale value presented as current. |
+
+### W5-P01 Phaser integration foundation
+
+| ID | Acceptance criterion |
+|---|---|
+| AC-W5-P01.1 | Phaser 4.2.1 is the only new runtime dependency (exact version); it is loaded only by `/roulette` as a separate chunk; lint, typecheck, tests and build green. |
+| AC-W5-P01.2 | The wheel has exactly the 37 pockets 0–36 in the European order, zero green, 18 red (the contract's list) and 18 black, alternating after zero. |
+| AC-W5-P01.3 | One game per mounted wheel, also under StrictMode; the game and its canvas are destroyed on unmount and on leaving `/roulette`; no listener or tween survives the scene. |
+| AC-W5-P01.4 | The canvas is decorative (`aria-hidden`); a caption and an ordered list describe every pocket; without canvas support or chunk, a notice replaces the picture and the description stays. |
+| AC-W5-P01.5 | `prefers-reduced-motion` is honoured at creation and when it changes: the wheel then jumps to a server number instead of turning. |
+| AC-W5-P01.6 | No spin control and no client-side outcome: the wheel stands still; `spinTo` only accepts 0–36 from the caller (W5-07: the server's `winningNumber`); no random source in the roulette or game code. |
+| AC-W5-P01.7 | Balance, `PlayerOnly`, navigation and the "cannot place bets yet" message on `/roulette` unchanged. |
 
 ### W5-05 Wallet page and history
 
@@ -1098,7 +1282,8 @@ W5-02 and W5-03 are independent; W5-05 and W5-06 can be reviewed in either order
 
 ## 14. Architectural decisions (reviewed)
 
-All twelve decisions were **approved in the W5-01 review on 2026-11-24**, several with refinements.
+Q1–Q12 were **approved in the W5-01 review on 2026-11-24**, several with refinements; Q13 (Phaser in
+Week 5) was approved by the project owner after the W5-04 review.
 The "Approved decision" column is binding; where it differs from the original recommendation, the
 refinement wins and the sections named in it were updated in revision 2.
 
@@ -1116,6 +1301,8 @@ refinement wins and the sections named in it were updated in revision 2.
 | Q10 | Merge vs. staging | Week 5 development is **independent of the Week 4 staging rollout**. Before merging to `main`: verify against an older **V7 backend**, avoid misleading availability claims, provide an **explicit unavailable state**; the schema version may assist but is not proof that the endpoint exists; graceful `404` handling stays (§7.7, §16.2) | **Approved 2026-11-24** (refined: V7 verification before the merge) | W5-03, W5-07, W5-10 |
 | Q11 | Dependencies | **No new runtime dependency** without a demonstrated need and approval (no UI kit, state or data-fetching library) | **Approved 2026-11-24** | all |
 | Q12 | Contract drift check | Drift automation is a **Should**. Request serialization, DTO shapes, accepted enums, `Idempotency-Key` behaviour and error handling **must** be covered by automated tests | **Approved 2026-11-24** (refined: the listed behaviours are Must) | W5-02 onwards |
+
+| Q13 | Phaser timing | **Phaser integration starts in Week 5** with W5-P01 (visible wheel); W5-07 connects it to the server-confirmed spin result; Week 6 keeps animation refinement, round history, statistics, sound and the in-app reduced-motion setting. Phaser 4.2.1 is the **only** newly approved runtime dependency (exception to Q11, approved explicitly) | **Approved 2026-11-24** (project owner; change after the W5-04 review) | W5-P01, W5-07 |
 
 **Material blockers:** none. Every task can start in dependency order (§12). No decision concerns the
 backend, the contract, the database or a cloud resource.
