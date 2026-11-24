@@ -79,7 +79,7 @@ JavaScript never sees it. The SPA keeps nothing about the session in browser sto
 | `GET /api/v1/users/me` | `401` | required | not needed |
 | `PATCH /api/v1/users/me` | `401` | required | **required** |
 | `GET /api/v1/wallet`, `GET /api/v1/wallet/transactions` | `401` | `PLAYER` role, otherwise `403 ACCESS_DENIED` | not needed |
-| `POST /api/v1/games/roulette/spins` (Week 4 branch) | `401` | `PLAYER` role, otherwise `403 ACCESS_DENIED` | **required** (checked first), plus the `Idempotency-Key` header |
+| `POST /api/v1/games/roulette/spins` (since Week 4; not on staging yet) | `401` | `PLAYER` role, otherwise `403 ACCESS_DENIED` | **required** (checked first), plus the `Idempotency-Key` header |
 | `/api/v1/admin/**` (no endpoints yet) | `401` | `ADMIN` role, otherwise `403 ACCESS_DENIED` | for unsafe methods |
 | `/actuator/health/**`, `/actuator/info`, Swagger UI, `/openapi.yaml`, `/v3/api-docs` | ✅ | not needed | — |
 
@@ -158,8 +158,8 @@ Example `GET /api/v1/system/status` → `200`:
 
 - Public. `200` when the backend and the database are up; `503` with the same `SystemStatus` body
   when the database is unreachable (`database.status` = `DOWN`, `schemaVersion` = `null`).
-- `schemaVersion` is the latest applied Flyway migration: `9` for a build of the Week 4 branch
-  (local database, Testcontainers); `7` on `main` and on staging (since the Week 3 rollout of
+- `schemaVersion` is the latest applied Flyway migration: `9` for a build of `main` since Week 4
+  (local database, Testcontainers); `7` on staging (since the Week 3 rollout of
   2026-11-15, [runbook](../infrastructure/wallet-rollout.md)). Staging reaches `9` only through the
   separately approved [Week 4 rollout](../infrastructure/roulette-rollout.md).
 
@@ -339,9 +339,9 @@ Example `GET /api/v1/system/status` → `200`:
 
 ### Roulette spin (`POST /api/v1/games/roulette/spins`)
 
-Implemented in W4-07 (contract 0.5.0) on `feature/week-04-roulette`; **not deployed** (staging runs
-Weeks 1–3; rollout: [infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md), not
-executed). Design and implementation record: [`docs/plans/week-04.md`](plans/week-04.md) §4, §6, §7,
+Implemented in W4-07 (contract 0.5.0) and merged into `main` with Week 4 (PR #10); **not deployed**
+(the staging backend runs the Week 3 build; rollout:
+[infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md), not executed). Design and implementation record: [`docs/plans/week-04.md`](plans/week-04.md) §4, §6, §7,
 §8. The contract operation is `spinRoulette`, tag `Roulette`; security `sessionCookie` + `csrfHeader`.
 
 ```http
@@ -538,7 +538,8 @@ Example validation error (`400`):
   `WalletTransactionType`, `WalletTransactionPage`) and three wallet error codes. Implemented in
   W3-07 and W3-08; no operation is `planned` any more. Design rationale:
   [`docs/plans/week-03.md`](plans/week-03.md) §5.
-- **0.5.0 (W4-02, approved 2026-11-15; current on the Week 4 branch, `main` still serves 0.4.0):**
+- **0.5.0 (W4-02, approved 2026-11-15; current on `main` since the Week 4 merge, PR #10; the staging
+  backend still serves 0.4.0):**
   `POST /api/v1/games/roulette/spins` (designed as `planned`), its schemas
   (`RouletteSpinRequest`, `RouletteBet`, `RouletteBetCategory` and the option enums,
   `RouletteSpinResult`, `RouletteSettledBet`, `RouletteNumberColor`), the `Idempotency-Key` header,

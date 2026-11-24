@@ -7,7 +7,9 @@ backend (Flyway **V8** and **V9**, `POST /api/v1/games/roulette/spins`) to the s
 Vercel (frontend, auto-deploys main) ──/api──▶ Render staging backend ──▶ Neon branch staging (V7 before, V9 after)
 ```
 
-**Status: prepared in W4-09, not executed.** No step of this runbook has been run. Neon `staging` is
+**Status: prepared in W4-09, not executed.** Only precondition P1 / step A2 has happened: the Week 4
+pull request (#10) was merged into `main` (`94a7305`) with green CI, including the post-merge run on
+`main`. No Render, Neon or staging-data step of this runbook has been run. Neon `staging` is
 at **V7**; V8 and V9 have been applied only to local and Testcontainers databases, and
 `verify-roulette.sql` has never been run against Neon. Render Auto-Deploy is Off. The rollout is
 decision **Q15** of [`docs/plans/week-04.md`](../docs/plans/week-04.md#131-decisions) (§13.1), which stays

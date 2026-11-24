@@ -39,8 +39,8 @@ reports the latest version as `schemaVersion`.
 
 | Database | Schema version |
 |---|---|
-| Testcontainers, and a local Docker database started from `feature/week-04-roulette` | **V9** (Flyway applies V8 and V9 at the first start of a build that contains them) |
-| `main` | V7 (since the Week 3 merge, PR #9) |
+| Testcontainers, and a local Docker database started from `main` since Week 4 | **V9** (Flyway applies V8 and V9 at the first start of a build that contains them) |
+| `main` | V9 (since the Week 4 merge, PR #10; V7 since the Week 3 merge, PR #9) |
 | Neon `staging` (used by Render staging) | **V7** since 2026-11-15: Render applied V6 and V7 at the start of the first Week 3 deploy, following the approved [Week 3 rollout runbook](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15). The V5 state is preserved in the Neon branch `staging-before-week-03`. **V8 and V9 are not applied**: the first Render start of a build that contains them would apply them automatically, so that deploy needs its own approval (`docs/plans/week-04.md` §15; runbook [roulette-rollout.md](../infrastructure/roulette-rollout.md), prepared in W4-09, not executed) |
 | Neon `production` | Empty and untouched until the Week 12 release |
 

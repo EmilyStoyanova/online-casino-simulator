@@ -4,11 +4,11 @@ The Spring Boot backend runs as a Docker web service on Render. It uses the Neon
 (see [docs/database.md → Neon](../../docs/database.md#neon)). The frontend runs on Vercel
 ([vercel/README.md](../vercel/README.md)) and reaches this service through a same-origin rewrite.
 
-**Current state:** deployed and verified at `https://online-casino-simulator.onrender.com` from `main`
-(Weeks 1–3), registration closed, Auto-Deploy Off, Neon `staging` at schema V7. The Week 3 wallet
-(V6/V7) was deployed on 2026-11-15 with its own runbook:
+**Current state:** deployed and verified at `https://online-casino-simulator.onrender.com` from the
+Week 3 build of `main`, registration closed, Auto-Deploy Off, Neon `staging` at schema V7. The Week 3
+wallet (V6/V7) was deployed on 2026-11-15 with its own runbook:
 [wallet-rollout.md](../wallet-rollout.md#rollout-record-2026-11-15). The Week 4 roulette backend
-(V8/V9) is **not deployed**; its deploy follows [roulette-rollout.md](../roulette-rollout.md) after a
+(V8/V9) is merged into `main` (PR #10) but **not deployed**; its deploy follows [roulette-rollout.md](../roulette-rollout.md) after a
 separate approval.
 
 This page is the runbook: what is configured where, the browser steps, and how to verify the

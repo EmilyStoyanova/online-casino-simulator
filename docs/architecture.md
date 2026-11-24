@@ -38,7 +38,7 @@ Root package `com.casino`. Each direct sub-package is a module:
 | `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 | implemented |
 | `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 | implemented |
 | `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented, on `main`, deployed to staging |
-| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` ([below](#game-module-week-4)) | 4 | implemented on `feature/week-04-roulette` (W4-04 to W4-08): rules, secure wheel, round persistence, atomic spin service and `POST /api/v1/games/roulette/spins`; **not on `main`, not deployed** ([`docs/plans/week-04.md`](plans/week-04.md)) |
+| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` ([below](#game-module-week-4)) | 4 | implemented (W4-04 to W4-08): rules, secure wheel, round persistence, atomic spin service and `POST /api/v1/games/roulette/spins`; on `main` since PR #10, **not deployed** ([`docs/plans/week-04.md`](plans/week-04.md)) |
 | `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 | planned |
 | `responsibleplay` | Session limits, breaks, self-exclusion, play-time tracking | 9 | planned |
 | `admin` | Administrative use cases under `/api/v1/admin/**` | 10 | planned |
@@ -202,8 +202,8 @@ branches.
 
 ### Game module (Week 4)
 
-**Status:** implemented and tested on `feature/week-04-roulette` (W4-04 to W4-08); not merged into
-`main` and **not deployed** (staging runs Weeks 1–3 at schema V7; rollout runbook:
+**Status:** implemented and tested (W4-04 to W4-08); merged into `main` (PR #10) and **not deployed**
+(the Render backend runs the Week 3 build, Neon `staging` is at schema V7; rollout runbook:
 [infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md), not executed). Design and
 decisions: [`docs/plans/week-04.md`](plans/week-04.md); schema:
 [database.md](database.md#roulette-rounds-and-bets-v9); API:
@@ -399,8 +399,8 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
 
 | Component | Staging today | Code deployed |
 |---|---|---|
-| Frontend (static build) | Vercel, `https://online-casino-simulator.vercel.app`, same-origin `/api` rewrite to Render; deploys `main` automatically ([infrastructure/vercel](../infrastructure/vercel/README.md)). Cloudflare Pages was the original plan; the final choice is ADR-0007 | `main` (Weeks 1–3 and the deployment foundation) |
-| Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render Free, Frankfurt, `https://online-casino-simulator.onrender.com`, profiles `neon,render`, registration closed, Auto-Deploy Off, manual deploys ([infrastructure/render](../infrastructure/render/README.md)) | `main` |
+| Frontend (static build) | Vercel, `https://online-casino-simulator.vercel.app`, same-origin `/api` rewrite to Render; deploys `main` automatically ([infrastructure/vercel](../infrastructure/vercel/README.md)). Cloudflare Pages was the original plan; the final choice is ADR-0007 | `main`, deployed automatically (Week 4 changed no frontend file) |
+| Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render Free, Frankfurt, `https://online-casino-simulator.onrender.com`, profiles `neon,render`, registration closed, Auto-Deploy Off, manual deploys ([infrastructure/render](../infrastructure/render/README.md)) | the Week 3 build of `main` (manual deploy 2026-11-15) |
 | Database | Neon (managed PostgreSQL 18), branch `staging`; `production` untouched until Week 12. Local development and tests use 17 | schema **V7** |
 
 Week 3 (wallet, V6/V7) is **deployed to staging** (2026-11-15): merged into `main` (PR #9), deployed
@@ -409,8 +409,8 @@ the verification results are in
 [infrastructure/wallet-rollout.md](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15).
 Registration stays closed; Neon `production` is untouched.
 
-Week 4 (roulette, V8/V9) is **not deployed**: it exists only on `feature/week-04-roulette`, and Render
-Auto-Deploy is Off, so even a merge into `main` would not change the backend. Its staging rollout
+Week 4 (roulette, V8/V9) is **not deployed**: it is merged into `main` (PR #10), but Render
+Auto-Deploy is Off, so the merge did not change the backend. Its staging rollout
 (V7 → V9) needs a separate approval and follows
 [infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md) (prepared in W4-09, not
 executed).
