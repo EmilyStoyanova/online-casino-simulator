@@ -66,11 +66,42 @@ export class ApiError extends Error {
 
 export interface RequestOptions {
   signal?: AbortSignal
+  /**
+   * Additional request headers, e.g. `Idempotency-Key`. They are sent unchanged with the request and
+   * with its automatic retry after `403 CSRF_TOKEN_INVALID`. The client never creates such values
+   * itself. Headers it manages (`Accept`, `Content-Type`, `X-XSRF-TOKEN`) cannot be set here: the
+   * request is rejected with a `TypeError` before anything is sent.
+   */
+  headers?: Readonly<Record<string, string>>
 }
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 const UNSAFE_METHODS: ReadonlySet<Method> = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+/** Header names (lower case) that only this client sets. */
+const MANAGED_HEADERS: ReadonlySet<string> = new Set(['accept', 'content-type', CSRF_HEADER.toLowerCase()])
+
+/**
+ * The caller's headers, checked before anything is sent: a managed header or a name given twice in
+ * different case (which `fetch` would merge into one comma-separated value) is a programming error.
+ */
+function callerHeaders(headers: RequestOptions['headers']): Record<string, string> {
+  const checked: Record<string, string> = {}
+  const seen = new Set<string>()
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    const key = name.toLowerCase()
+    if (MANAGED_HEADERS.has(key)) {
+      throw new TypeError(`The ${name} header is managed by the API client and cannot be set by a caller.`)
+    }
+    if (seen.has(key)) {
+      throw new TypeError(`The ${name} header is given more than once.`)
+    }
+    seen.add(key)
+    checked[name] = value
+  }
+  return checked
+}
 
 export function resolveApiUrl(path: string): string {
   const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
@@ -143,7 +174,10 @@ async function request<T>(
   retryOnCsrfError = true,
 ): Promise<T> {
   const sentWithSession = sessionGeneration
-  const headers: Record<string, string> = { Accept: 'application/json, application/problem+json' }
+  const headers: Record<string, string> = {
+    ...callerHeaders(options.headers),
+    Accept: 'application/json, application/problem+json',
+  }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
   }
@@ -184,7 +218,9 @@ async function request<T>(
     parseRetryAfter(response.headers.get('Retry-After')),
   )
   if (error.code === 'CSRF_TOKEN_INVALID' && retryOnCsrfError && UNSAFE_METHODS.has(method)) {
-    // The token cookie may have been deleted or replaced meanwhile (e.g. sign-in in another tab).
+    // The token cookie may have been deleted or replaced meanwhile (e.g. sign-in in another tab). The
+    // retry repeats the same body and caller headers (e.g. the same Idempotency-Key): CSRF is checked
+    // before anything else, so the rejected request changed nothing on the server.
     await refreshCsrfToken()
     return request<T>(method, path, body, options, false)
   }

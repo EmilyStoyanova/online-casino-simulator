@@ -1,7 +1,7 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
 - **Status:** Revision 2. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
-  refinements (§14).** Implementation follows the task order of §12, starting with W5-02.
+  refinements (§14).** W5-02 API foundation implemented, **pending review** (§7.8).
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -21,7 +21,7 @@
 | Revision | Date | Change |
 |---|---|---|
 | 1 | 2026-11-24 | Initial plan (W5-01); Week 4 merge status recorded in the project documentation |
-| 2 | 2026-11-24 | W5-01 review applied: Q1–Q12 approved with refinements (§14) — total-stake limit 10,000 (§5.5), pending spins in `sessionStorage` bound to the user (§8.4), odds and rules required (§5.8), V7-backend verification before the merge (§7.7, §16.2) |
+| 2 | 2026-11-24 | W5-01 review applied: Q1–Q12 approved with refinements (§14) — total-stake limit 10,000 (§5.5), pending spins in `sessionStorage` bound to the user (§8.4), odds and rules required (§5.8), V7-backend verification before the merge (§7.7, §16.2); W5-02 implemented (§7.8) |
 
 ---
 
@@ -461,16 +461,18 @@ spinRoulette(request: RouletteSpinRequest, idempotencyKey: string): Promise<Roul
                                                                         // POST /api/v1/games/roulette/spins
 ```
 
-- `apiClient.RequestOptions` gains `headers?: Record<string, string>`. Headers managed by the client
-  (`Accept`, `Content-Type`, CSRF) cannot be overridden by a caller. The existing CSRF retry passes the
-  same options again, so the retried spin carries the **same** `Idempotency-Key` (tested).
+- `apiClient.RequestOptions` gains `headers` (as implemented in W5-02, §7.8: a managed header —
+  `Accept`, `Content-Type`, `X-XSRF-TOKEN`, any case — is rejected before anything is sent). The
+  existing CSRF retry passes the same options again, so the retried spin carries the **same**
+  `Idempotency-Key` (tested).
 - `spinRoulette` takes **no `AbortSignal`**: leaving the page must not hide the answer of a request
   the server may already be processing (§9.3).
 - Types mirror the contract exactly: coin values as `number` (all ≤ 2⁵³ − 1, exact in JavaScript),
-  enums as string-literal unions; a bet carries its category with exactly its one option property.
-- **Should:** a contract drift test reads `openapi.yaml` as raw text (like `vercelConfig.test.ts`
-  reads `vercel.json`) and checks that the enum lists, the limits and the response shapes used by the
-  frontend match it (Q12). No YAML dependency. The red-number list joins it in W5-06.
+  enums as string-literal unions; a bet is a discriminated union of the category with exactly its one
+  option property (§7.8).
+- **Should:** a contract drift test reads `openapi.yaml` as raw text and checks that the enum lists,
+  the limits and the response shapes used by the frontend match it (Q12). No YAML dependency. The
+  red-number list joins it in W5-06.
 
 ### 7.2 Spin error classification (`spinErrors.ts`)
 
@@ -541,6 +543,39 @@ before that rollout, the staging backend (Week 3 build, schema V7) answers the s
 4. **Verified before the merge.** W5-10 runs the UI against an older V7 backend locally (§16.2 step
    9). The wallet pages work there (Week 3 endpoints).
 
+### 7.8 Implemented in W5-02 (pending review)
+
+**Files**
+
+| File | Change |
+|---|---|
+| `services/apiClient.ts` | `RequestOptions.headers` (optional, read-only record). Caller headers are checked before anything is sent: `Accept`, `Content-Type` and `X-XSRF-TOKEN` (any case) and a name given twice in different case are rejected with a `TypeError` and no request. Caller headers come first, the managed headers are set after them. The CSRF retry already passed the same `options`, so it now repeats the same caller headers and body (comment added). No other behaviour changed: without `headers` the requests are byte-for-byte as before (tested), `AbortSignal`, error mapping and the session-expiry listener are untouched |
+| `types/wallet.ts` | `Wallet`, `WalletTransaction` (`type`: the published values or any future string, per contract), `WalletTransactionType`, `WalletTransactionPage`, `WalletTransactionQuery`; `WALLET_TRANSACTION_TYPES`, `WALLET_HISTORY_LIMITS` (1–100, default 20) |
+| `types/roulette.ts` | Enum value lists and literal-union types (`RouletteBetCategory`, `RouletteBetColor`, `RouletteParity`, `RouletteRange`, `RouletteDozen`, `RouletteNumberColor`); `RouletteSelection` as a discriminated union (each category with exactly its one option property), `RouletteBet`, `RouletteSpinRequest` (read-only, for the frozen body), `RouletteSettledBet`, `RouletteSpinResult`; `ROULETTE_LIMITS` (1–10 bets, 1–1,000 per bet, total ≤ 10,000, numbers 0–36) for user feedback only |
+| `services/walletApi.ts` | `getWallet(options)`, `listWalletTransactions({ limit, cursor }, options)`; query built with `URLSearchParams`, omitted values not sent |
+| `services/rouletteApi.ts` | `spinRoulette(request, idempotencyKey)`: `POST /api/v1/games/roulette/spins` with `Idempotency-Key`; the body is sent exactly as given; no `AbortSignal` (§7.1); a non-canonical key is rejected with a `TypeError` before anything is sent. It neither creates nor remembers keys |
+| `services/idempotency.ts` | `newIdempotencyKey()`: `crypto.randomUUID()`, fallback from `crypto.getRandomValues` (version 4, RFC 9562 variant), an error instead of `Math.random`. Not called by any API code; the spin orchestration (W5-07) will call it once per new spin |
+| `test/fixtures.ts` | Contract examples: `startingWallet`, `SPIN_KEY`, `spinRequest`, `spinResult`, `historyAfterSpin` |
+| `vite.config.ts` | Test mode only: `server.fs.allow` additionally contains `backend/src/main/resources/static` (only `openapi.yaml` is there), so the drift test can import the contract as raw text. Vite checks the id with its `?raw` query, so a single-file entry does not match. Dev server and build unchanged |
+
+**Tests** (19 files, 188 tests; baseline 15 files, 132 tests):
+
+| File | New tests | Covers |
+|---|---|---|
+| `services/apiClient.test.ts` | 10 | Caller header with unsafe and safe requests; **same key and body in the CSRF retry**; managed headers rejected (4 spellings) and duplicates rejected before `fetch`; `AbortSignal` with headers; unchanged headers without caller headers |
+| `services/rouletteApi.test.ts` | 23 | Exact headers and parsed contract result; exact JSON of all five categories (one option property each); frozen request sent unchanged; CSRF retry with the same key and body; keys passed through, never created or remembered; upper-case key; five non-canonical keys rejected without a request; Problem Details of `400` (2 codes), `403`, `404`, `409` (3 codes), `500`, `503`; network error and proxy `504` as unavailable; `401 SESSION_EXPIRED` reaches the session listener |
+| `services/walletApi.test.ts` | 8 | Balance without CSRF or extra headers; `403 ACCESS_DENIED`; network error; `AbortSignal`; first page without query; `limit` + `cursor` URL-encoded; unknown future entry type kept; `400 VALIDATION_FAILED` field error |
+| `services/idempotency.test.ts` | 4 | 50 distinct canonical v4 keys; `randomUUID` used when present; `getRandomValues` fallback with version and variant bits; error instead of `Math.random` |
+| `types/contract.test.ts` *(Should, Q12)* | 11 | Seven enums equal to the contract; bet, amount, number, total-stake and history-page limits; required properties of `Wallet`, `WalletTransaction`, `WalletTransactionPage`, `RouletteSpinRequest`, `RouletteBet`, `RouletteSettledBet`, `RouletteSpinResult` equal to the fixtures; `Idempotency-Key` is a required `uuid` header. Proven to fail on a deliberately wrong limit and an extra category (not committed) |
+
+**Contract findings.** No incompatibility between the 0.5.0 contract, the backend DTOs and the new
+types. The backend omits the unused option properties of a settled bet (`@JsonInclude(NON_NULL)` on
+`RouletteSettledBet`), so the discriminated union also describes responses exactly. The contract
+allows `null` for unused options in a request; the SPA's type does not produce them (always omitted).
+
+**Not in W5-02:** `useSpin`, `pendingSpinStore`, `WalletProvider` and every UI component (later tasks).
+The client draws no number and computes no payout.
+
 ---
 
 ## 8. Authentication, CSRF and idempotency behaviour
@@ -584,7 +619,7 @@ contexts (`randomUUID` exists only on HTTPS and `localhost`): a version-4 UUID f
 Rules (Q6 approved):
 1. **New key per new spin.** `K` is created when "Confirm and spin" is pressed from `confirming`, and
    the request body `R` is frozen with it (`toSpinRequest` at that moment). The orchestration
-   (`useSpin`, W5-07) owns `K` and `R`; the API layer never creates a key (§7.1).
+   (`useSpin`, W5-07) owns `K` and `R`; the API layer never creates a key (§7.8).
 2. **Persist before sending.** The pending record (§8.4) is written to `sessionStorage` before the
    request leaves. If the write fails, the spin is **not** sent and the player sees why.
 3. **Same key for retries.** "Retry spin" resends exactly `(K, R)` from the record. While a record is
@@ -629,7 +664,7 @@ header and body → wallet lock → round lookup by key → wallet rules):
 **Authentication interruptions.** A `401 SESSION_EXPIRED` on a retry of an ambiguous record keeps the
 record; the existing flow opens the login page with `returnTo=/roulette`. After the **same** user
 signs in again, the record is shown with "Retry spin". The CSRF retry inside `apiClient` sends the same
-`K` and `R` (§7.1), so a stale token never turns into a second spin.
+`K` and `R` (§7.8), so a stale token never turns into a second spin.
 
 **Other users.** Only the record under the signed-in user's id is read. A different user in the same
 tab never sees, sends or clears it; sign-out does not clear it either (its outcome is unknown).
@@ -774,7 +809,7 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | # | Task | Size | Depends on |
 |---|---|---|---|
 | W5-01 | **This plan** and the Week 4 merge status in the documentation (§0.3). **Review gate.** | M | — |
-| W5-02 | **API foundation:** `RequestOptions.headers`; `types/wallet.ts`, `types/roulette.ts`; `services/walletApi.ts`, `services/rouletteApi.ts`, `services/idempotency.ts`; tests (incl. CSRF retry keeps the key); **Should:** contract drift test (Q12) | M | W5-01 |
+| W5-02 | **API foundation (implemented, pending review, §7.8):** `RequestOptions.headers`; `types/wallet.ts`, `types/roulette.ts`; `services/walletApi.ts`, `services/rouletteApi.ts`, `services/idempotency.ts`; tests (incl. CSRF retry keeps the key); **Should:** contract drift test (Q12) | M | W5-01 |
 | W5-03 | **Navigation and layout:** `cardStyles.ts`, `PageHeader`, `Coins`, `MainNav`, `PlayerOnly`, routes `/roulette` and `/wallet` (placeholder content), `AppLayout` width, lobby home for players, skip link (Should); tests for role-dependent navigation; `vercelConfig.test.ts` cases | M | W5-01 (Q9) |
 | W5-04 | **Wallet state and balance:** `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`; stale-response guard; lobby and header show the balance; tests | M | W5-02, W5-03 (Q2, Q3) |
 | W5-05 | **Wallet page and history:** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |

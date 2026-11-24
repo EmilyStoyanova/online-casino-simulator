@@ -1,6 +1,6 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { loadEnv } from 'vite'
+import { loadEnv, searchForWorkspaceRoot } from 'vite'
 import { configDefaults, defineConfig } from 'vitest/config'
 
 export default defineConfig(({ mode }) => {
@@ -18,6 +18,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
         },
       },
+      // Tests only: the contract drift test imports the API contract as raw text (`openapi.yaml?raw`).
+      // Only its folder (which holds nothing else) is added; Vite compares the id with its `?raw`
+      // query, so a single-file entry would not match. The dev server's file access is unchanged.
+      ...(mode === 'test' && {
+        fs: { allow: [searchForWorkspaceRoot(process.cwd()), '../backend/src/main/resources/static'] },
+      }),
     },
     test: {
       environment: 'jsdom',
