@@ -1,7 +1,9 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
-- **Status:** Revision 2. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
-  refinements (§14).** W5-02 API foundation implemented, **pending review** (§7.8).
+- **Status:** Revision 3. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
+  refinements (§14). W5-02 API foundation approved 2026-11-24 (§7.8). W5-03 navigation, `PlayerOnly`
+  and player lobby approved 2026-11-24 (§4.4).** First Week 5 checkpoint: W5-01 to W5-03 committed on
+  the feature branch; Playwright W2-16 regression still pending (§4.4). Next: W5-04.
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -22,6 +24,7 @@
 |---|---|---|
 | 1 | 2026-11-24 | Initial plan (W5-01); Week 4 merge status recorded in the project documentation |
 | 2 | 2026-11-24 | W5-01 review applied: Q1–Q12 approved with refinements (§14) — total-stake limit 10,000 (§5.5), pending spins in `sessionStorage` bound to the user (§8.4), odds and rules required (§5.8), V7-backend verification before the merge (§7.7, §16.2); W5-02 implemented (§7.8) |
+| 3 | 2026-11-24 | W5-02 approved; W5-03 implemented: `nav "Main"`, `PlayerOnly`, routes `/roulette` and `/wallet` with progress placeholders, player lobby, skip link, `cardStyles`, `PageHeader` (§4.4); W5-03 approved; first checkpoint (W5-01 to W5-03 committed) |
 
 ---
 
@@ -278,6 +281,52 @@ A layout route inside `RequireAuth`. For `user.role === 'PLAYER'` it renders `<O
 `ADMIN` a card: "Roulette and the wallet are for player accounts. Administrator accounts have no
 wallet." with a link to the home page. Interface only: the backend answers `403 ACCESS_DENIED` to an
 administrator anyway.
+
+### 4.4 Implemented in W5-03 (approved 2026-11-24)
+
+**Files**
+
+| File | Change |
+|---|---|
+| `features/auth/PlayerOnly.tsx` (new) | Layout route nested in `RequireAuth`. `authenticated` + `PLAYER` → `<Outlet />`; `authenticated` + `ADMIN` → card "For player accounts only" (`section` labelled by its `h1`, explanation, link "Back to the home page"); any other state → nothing (defensive; inside `RequireAuth` it never happens). Reads `UserProfile.role` from `useAuth`; no request of its own |
+| `components/layout/MainNav.tsx` (new) | `nav aria-label="Main"` with `NavLink`s Lobby (`/`, `end`), Roulette, Wallet in a list; rendered only for `authenticated` + `PLAYER` (not for visitors, administrators, `checking` or `unknown`); current destination `aria-current="page"` (styled through `aria-[current=page]`, so state and look cannot diverge); three equal columns below `sm`, a row from `sm` up; native links, so Tab and Enter work without extra code |
+| `components/layout/AppLayout.tsx` | Skip link "Skip to main content" as the first tab stop (visible on focus; moves the focus to `main#main-content` with `tabIndex=-1`, without changing the URL); header row 1: brand + "Virtual currency only" + `nav "Account"` (unchanged `UserMenu`, now inside a wrapper where W5-04 places the balance); row 2: `MainNav`; content, header and footer width `max-w-5xl` → `max-w-6xl` |
+| `pages/HomePage.tsx` | `PLAYER` → lobby: `h1` "Welcome back, *name*", "virtual coins with no monetary value", two cards ("European roulette": single zero, house edge 1/37 ≈ 2.70 %, badge **In development**, "you cannot place bets yet", link "Open roulette"; "Wallet": badge **In development**, "the balance and history are not shown yet", link "Open wallet"). Visitors, `checking`/`unknown` and administrators keep the existing welcome page; administrators get one line "The roulette table and the wallet are for player accounts" and no player action. The account panel and the platform status keep their position in the tree in both versions (see "Regression found" below) |
+| `pages/RoulettePage.tsx`, `pages/WalletPage.tsx` (new) | Placeholders that state the progress: "The roulette table is being built — you cannot place bets yet, and nothing on this page uses your coins" with the planned features; "Your wallet page is being built — balance and transaction history are not shown here yet". No number, no sample data, no request |
+| `App.tsx` | `/roulette` and `/wallet` under `RequireAuth` → `PlayerOnly` (§4.1) |
+| `components/cardStyles.ts`, `components/layout/PageHeader.tsx` (new) | Shared card surface and page title (`h1` + description); `ProfilePage` uses `card` instead of its identical local constant (no visual change) |
+| `test/fixtures.ts` | `admin` profile (role `ADMIN`) |
+
+**Deviations from the plan text, all within the approved boundaries**
+- The header **balance badge** and the lobby **balance card** of §4.1/§4.2 are left to W5-04, which
+  loads the real balance; W5-03 shows no balance and no placeholder number (the header has only the
+  wrapper where the badge goes). `Coins.tsx` moves to W5-04 with its first use.
+- `nav "Main"` is the header's second row, **after** the account menu in the DOM, so the tab order
+  matches the visual order on every width (brand → account menu → main navigation).
+- Administrators keep the welcome page (rather than a lobby without actions), so the W2-16
+  administrator scenario sees the same home page as before.
+
+**Regression found and fixed during W5-03.** The first version rendered the lobby and the welcome
+page as separate trees. When `checking` turned into `authenticated`, the account panel and the
+platform status were unmounted and mounted again: three `AuthProvider` tests that hold the
+"Your account" region across that change failed, and the platform status was requested twice. The
+home page now keeps both panels at the same position in the tree and only swaps the introduction;
+the existing tests pass unchanged, and a new test proves one platform-status request.
+
+**Tests** (22 files, 218 tests; after W5-02: 19 files, 188 tests):
+
+| File | New tests | Covers |
+|---|---|---|
+| `components/layout/MainNav.test.tsx` | 11 | Player links and order with the unchanged account menu; `aria-current` on `/`, `/roulette`, `/wallet` (3); none on `/profile`; keyboard: Tab order and Enter; hidden for administrators, visitors, `checking` and `unknown`; disappears on sign-out; skip link first and focusing `main` |
+| `features/auth/PlayerOnly.test.tsx` | 14 | For `/roulette` and `/wallet` each: player sees the page with no wallet/roulette request; administrator sees the explanation with a link home and no further request; visitor → login with `returnTo`, back after a player signs in; administrator through the redirect → explanation; `checking` and `unknown` show neither page nor explanation. Placeholders: no betting control, no coin amount, no table |
+| `pages/HomePage.test.tsx` | 5 | Welcome page for visitors; lobby for players (progress badges, honest text, links, account panel, status, no coin amount, only the two expected requests); one platform-status request across the switch; lobby → roulette; administrator note without player actions |
+| `vercelConfig.test.ts` | — (1 extended) | `/roulette`, `/wallet`, `/wallet/` fall back to `index.html` |
+
+Existing tests were not changed. **Playwright** (W2-16) was not run: the local prerequisites are
+incomplete in this environment (no JDK on `PATH` and `JAVA_HOME` unset; Docker, Chrome and a backend
+jar from 2026-11-19 are present). The W2-16 selectors (`nav "Account"`, its links and button, the
+"Your account" region, the brand link) were kept unchanged and are covered by the unit tests above;
+the suite is run in W5-10 at the latest.
 
 ---
 
@@ -543,7 +592,7 @@ before that rollout, the staging backend (Week 3 build, schema V7) answers the s
 4. **Verified before the merge.** W5-10 runs the UI against an older V7 backend locally (§16.2 step
    9). The wallet pages work there (Week 3 endpoints).
 
-### 7.8 Implemented in W5-02 (pending review)
+### 7.8 Implemented in W5-02 (approved 2026-11-24)
 
 **Files**
 
@@ -809,8 +858,8 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | # | Task | Size | Depends on |
 |---|---|---|---|
 | W5-01 | **This plan** and the Week 4 merge status in the documentation (§0.3). **Review gate.** | M | — |
-| W5-02 | **API foundation (implemented, pending review, §7.8):** `RequestOptions.headers`; `types/wallet.ts`, `types/roulette.ts`; `services/walletApi.ts`, `services/rouletteApi.ts`, `services/idempotency.ts`; tests (incl. CSRF retry keeps the key); **Should:** contract drift test (Q12) | M | W5-01 |
-| W5-03 | **Navigation and layout:** `cardStyles.ts`, `PageHeader`, `Coins`, `MainNav`, `PlayerOnly`, routes `/roulette` and `/wallet` (placeholder content), `AppLayout` width, lobby home for players, skip link (Should); tests for role-dependent navigation; `vercelConfig.test.ts` cases | M | W5-01 (Q9) |
+| W5-02 | **API foundation (done, approved 2026-11-24, §7.8):** `RequestOptions.headers`; `types/wallet.ts`, `types/roulette.ts`; `services/walletApi.ts`, `services/rouletteApi.ts`, `services/idempotency.ts`; tests (incl. CSRF retry keeps the key); **Should:** contract drift test (Q12) | M | W5-01 |
+| W5-03 | **Navigation and layout (done, approved 2026-11-24, §4.4):** `cardStyles.ts`, `PageHeader`, `Coins`, `MainNav`, `PlayerOnly`, routes `/roulette` and `/wallet` (placeholder content), `AppLayout` width, lobby home for players, skip link (Should); tests for role-dependent navigation; `vercelConfig.test.ts` cases | M | W5-01 (Q9) |
 | W5-04 | **Wallet state and balance:** `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`; stale-response guard; lobby and header show the balance; tests | M | W5-02, W5-03 (Q2, Q3) |
 | W5-05 | **Wallet page and history:** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |
 | W5-06 | **Table, chips and bet slip (no API):** `rouletteTable.ts`, `betSlip.ts`, `RouletteBoard`, `ChipSelector`, `BetSlip`, responsive table layouts; unit and keyboard tests | L | W5-03 (Q5) |

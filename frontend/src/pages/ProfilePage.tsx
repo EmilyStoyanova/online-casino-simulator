@@ -1,11 +1,10 @@
+import { card } from '../components/cardStyles'
 import { DetailRow } from '../components/DetailRow'
 import { formatDate, roleLabel } from '../features/auth/profileFormat'
 import { useAuth } from '../features/auth/useAuth'
 import { ProfileForm } from '../features/profile/ProfileForm'
 import { useInterests, type InterestCatalog } from '../features/profile/useInterests'
 import type { UserProfile } from '../types/user'
-
-const card = 'w-full rounded-2xl border border-zinc-800 bg-zinc-900/70 p-6 shadow-xl shadow-black/30'
 
 function interestNames(codes: readonly string[], catalog: InterestCatalog): string[] {
   if (catalog.status !== 'loaded') return [...codes]

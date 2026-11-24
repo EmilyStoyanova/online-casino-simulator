@@ -15,6 +15,17 @@ export const alice: UserProfile = {
   createdAt: '2026-11-02T09:15:00Z',
 }
 
+/** The `UserProfile` of an administrator (created by the bootstrap; no wallet). */
+export const admin: UserProfile = {
+  id: '5d6e7f80-1a2b-4c3d-8e9f-a0b1c2d3e4f5',
+  email: 'admin@example.com',
+  displayName: 'Admin',
+  role: 'ADMIN',
+  interests: [],
+  adultConfirmedAt: '2026-11-01T08:00:00Z',
+  createdAt: '2026-11-01T08:00:00Z',
+}
+
 export const upStatus: SystemStatus = {
   application: 'online-casino-simulator',
   version: '0.1.0-SNAPSHOT',
