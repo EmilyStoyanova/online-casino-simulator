@@ -1,6 +1,7 @@
 import type { MouseEvent, ReactNode } from 'react'
 import { Link } from 'react-router'
 import { UserMenu } from '../../features/auth/UserMenu'
+import { BalanceBadge } from '../../features/wallet/BalanceBadge'
 import { MainNav } from './MainNav'
 
 const MAIN_ID = 'main-content'
@@ -38,8 +39,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 Virtual currency only
               </span>
             </div>
-            {/* W5-04 adds the player's server-confirmed balance next to the account menu. */}
+            {/* The player's server-confirmed balance (nothing for visitors and administrators), then the account menu. */}
             <div className="flex flex-wrap items-center justify-end gap-3">
+              <BalanceBadge />
               <nav aria-label="Account">
                 <UserMenu />
               </nav>

@@ -1,9 +1,10 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
-- **Status:** Revision 3. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
+- **Status:** Revision 4. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
   refinements (§14). W5-02 API foundation approved 2026-11-24 (§7.8). W5-03 navigation, `PlayerOnly`
-  and player lobby approved 2026-11-24 (§4.4).** First Week 5 checkpoint: W5-01 to W5-03 committed on
-  the feature branch; Playwright W2-16 regression still pending (§4.4). Next: W5-04.
+  and player lobby approved 2026-11-24 (§4.4). First checkpoint (W5-01 to W5-03, `bb9e532`) approved
+  and pushed. W5-04 wallet state and balance UI approved 2026-11-24 (§9.4).** Playwright W2-16
+  regression still pending (no JDK in this environment).
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -18,13 +19,15 @@
 - **Expected result (plan, Stage 3):** a working roulette with a user interface connected to the
   backend. Week 5 delivers the interface without animations; Week 6 adds Phaser, round history,
   statistics, sound and the reduced-motion setting.
-- **Branch:** `feature/week-05-roulette-ui` (from `main` at `94a7305`, local only, not pushed)
+- **Branch:** `feature/week-05-roulette-ui` (from `main` at `94a7305`; pushed to `origin` at the first
+  checkpoint `bb9e532`; no pull request, not merged)
 
 | Revision | Date | Change |
 |---|---|---|
 | 1 | 2026-11-24 | Initial plan (W5-01); Week 4 merge status recorded in the project documentation |
 | 2 | 2026-11-24 | W5-01 review applied: Q1–Q12 approved with refinements (§14) — total-stake limit 10,000 (§5.5), pending spins in `sessionStorage` bound to the user (§8.4), odds and rules required (§5.8), V7-backend verification before the merge (§7.7, §16.2); W5-02 implemented (§7.8) |
 | 3 | 2026-11-24 | W5-02 approved; W5-03 implemented: `nav "Main"`, `PlayerOnly`, routes `/roulette` and `/wallet` with progress placeholders, player lobby, skip link, `cardStyles`, `PageHeader` (§4.4); W5-03 approved; first checkpoint (W5-01 to W5-03 committed) |
+| 4 | 2026-11-24 | First checkpoint approved and pushed (`bb9e532`); W5-04 implemented: `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`, `Coins`; balance in the header, lobby, roulette and wallet pages (§9.4); W5-04 approved after one test correction (the session-expiry probe uses the implemented `GET /api/v1/wallet/transactions`) |
 
 ---
 
@@ -782,6 +785,92 @@ RoulettePage
  └─ SpinResult (server values only)
 ```
 
+### 9.4 Implemented in W5-04 (approved 2026-11-24)
+
+**Files**
+
+| File | Change |
+|---|---|
+| `features/wallet/walletContext.ts` (new) | `WalletState` (`inactive` · `loading` · `loaded { balance, updatedAt: string \| null, refresh: 'idle' \| 'refreshing' \| 'failed' }` · `failed { message }`), `WalletContextValue` (`state`, `refresh`, `applyConfirmedBalance`); the context default is `inactive` with no-op operations, so a layout or page rendered without the provider (e.g. the `RequireAuth` test harness) sends no request and shows no balance |
+| `features/wallet/WalletProvider.tsx` (new) | The provider (below); placed in `App.tsx` inside `AuthProvider`, around `AppLayout` and the routes |
+| `features/wallet/useWallet.ts` (new) | Reads the context |
+| `features/wallet/BalanceBadge.tsx` (new) | Header (§4.2): nothing while `inactive`; "Balance Loading…" (`aria-busy`) while loading; "Balance unavailable" + "Retry" (accessible name "Retry loading the balance") after a failed first read; otherwise a link to `/wallet` named "Balance 1,330 coins" (`aria-busy` during a refresh), plus "Not up to date" + "Retry" after a failed refresh |
+| `features/wallet/BalanceCard.tsx` (new) | Card (§6.1) "Your balance": skeleton + "Loading your balance…"; "Balance unavailable" + the reason + "Try again"; the amount, "Updated *date, time*" (local time, `en-GB`) or, for a confirmed spin balance not yet reconciled, "Confirmed by the server with your last round." (no invented timestamp); "Refresh"/"Refreshing…"; after a failed refresh an alert "could not be refreshed, so it may be out of date" with "Try again"; "Virtual coins have no monetary value."; `aria-busy` while loading or refreshing |
+| `components/Coins.tsx` (new) | "1,330 coins" / "1 coin", `en-GB` grouping, tabular digits, never a currency symbol |
+| `App.tsx`, `components/layout/AppLayout.tsx` | `WalletProvider`; `BalanceBadge` in the header next to `nav "Account"` (both navigations unchanged) |
+| `pages/HomePage.tsx` | Lobby: `BalanceCard` first in a three-column grid (`lg`); wallet card now "History in development" / "The transaction history is not shown yet." |
+| `pages/RoulettePage.tsx` | `BalanceCard` above the progress card (still no betting, no request of its own) |
+| `pages/WalletPage.tsx` | Minimal adjustment: `BalanceCard` added; the progress card now speaks only of the transaction history ("Your transaction history is being built"), which stays in W5-05 |
+
+**Provider behaviour**
+
+- **Activation:** `playerId` = the user id of an `authenticated` session with role `PLAYER`, else `null`.
+  Visitors, administrators, `checking` and `unknown` are `inactive` and send no request.
+- **Sessions:** the state carries `owner` and a `session` number. When `playerId` changes (sign-in,
+  sign-out, session expiry, another account, a role without wallet — also A → none → A), the state is
+  reset **during render** (React's "adjust state when a prop changes" pattern) and the new value is
+  derived in the same render, so no child ever renders a previous session's balance. The project's
+  lint rules forbid a synchronous `setState` in an effect (`react-hooks/set-state-in-effect`), which
+  also rules out the effect-based reset.
+- **Reads:** one `GET /api/v1/wallet` per session, started by an effect that depends only on
+  `playerId` and `session`; navigation, profile updates (same user id) and other re-renders do not
+  repeat it. Every read gets a number; only the latest read may change the state, a new read aborts the
+  previous one (`AbortController`), and every answer is also checked against its session.
+- **`refresh()`:** keeps a loaded value visible (`refresh: 'refreshing'`), otherwise shows `loading`;
+  a failed refresh keeps the value with `refresh: 'failed'` (shown as possibly out of date), a failed
+  first read is `failed` with the `apiClient` "unavailable" message or "Your balance could not be
+  loaded."
+- **`applyConfirmedBalance(balance)`:** validates a whole number 0 … 2^53 − 1 (`RangeError`
+  otherwise), sets `loaded` with `updatedAt: null` and `refresh: 'refreshing'`, then starts a new read,
+  which invalidates and aborts every earlier read; the reconciling answer replaces the value (the
+  server wins). The function is bound to the session it was taken from: called after a sign-out,
+  expiry or account change it does nothing — this replaces a separate user-id parameter and is what
+  W5-07 will capture when a spin starts.
+- **StrictMode:** the development double effect starts a read, aborts it in the cleanup and starts
+  another; only one answer can be applied (tested).
+
+**Deviations from the plan text**
+- The refresh sub-state has a third value, `failed`, so a failed refresh neither hides a confirmed
+  value nor presents it as current (AC-W5-04.5).
+- The **Should** "refresh on `visibilitychange`" (§9.2) is not implemented: W5-04 keeps to one read per
+  session plus explicit refreshes and spin reconciliation; it can be revisited in W5-08.
+- The wallet page shows the balance card already (the header shows the balance there anyway); its
+  history placeholder was narrowed accordingly.
+
+**Tests** (24 files, 246 tests; after the first checkpoint: 22 files, 218 tests):
+
+| File | New tests | Covers |
+|---|---|---|
+| `features/wallet/WalletProvider.test.tsx` | 24 | AC-W5-04.1: one read after a reload and after sign-in, no repeat on navigation (roulette, wallet, profile, lobby), read without CSRF header; none for visitors, administrators (also on `/wallet`), `checking`/`unknown`; StrictMode applies one read (trial read aborted). AC-W5-04.2: same balance with "coins" in header, lobby and roulette page, no currency symbol; one shared state updates everywhere. AC-W5-04.3: cleared on sign-out and on session expiry; the next account sees a placeholder, never the previous balance, also in StrictMode (render-time reset); late answers of an earlier account, of an earlier session of the same player and after sign-out are ignored. AC-W5-04.4: a read started before `applyConfirmedBalance` is dropped and aborted, the value is shown at once without a timestamp and reconciled; the reconciling server value wins; a failed reconciliation keeps the value marked; a confirmed balance taken in an earlier session is ignored; no effect without a player; invalid values rejected. AC-W5-04.5: labelled placeholder and `aria-busy`, no number while loading, a real `0` shown; "Balance unavailable" after network and server errors with working card and header retries; no flicker during a refresh, a failed refresh marked "Not up to date" until a successful retry |
+| `components/Coins.test.tsx` | 4 | 0, 1 (singular), 1,330 and 2^53 − 1 formatted with tabular digits, no currency symbol |
+
+**Changes to existing tests (behaviour changed by W5-04, no assertion weakened)**
+- `AuthProvider.test.tsx`: its backend answered `GET /api/v1/wallet` with `401 SESSION_EXPIRED` to
+  simulate "any later protected request"; the app now reads the wallet after every player sign-in, which
+  ended the session in four tests. The simulated request now uses another implemented protected
+  endpoint that these pages do not send, `GET /api/v1/wallet/transactions` (review correction: a
+  first draft used the not yet implemented Week 6 history path), and the wallet route answers normally.
+  The request still goes through `apiClient`'s shared `401 SESSION_EXPIRED` handling; all assertions
+  are unchanged. `WalletProvider.test.tsx` uses the same endpoint. (`RequireAuth.test.tsx` renders
+  without `WalletProvider` and is unchanged.)
+- W5-03 tests: player pages and the lobby now expect exactly one additional request,
+  `GET /api/v1/wallet` (administrators still send none); the roulette placeholder lists "Refresh" as the
+  only button besides "Sign out" and shows only the server balance; the wallet placeholder shows the
+  server balance and still no table; the keyboard test includes the balance link in the tab order.
+
+**Found while testing:** the badge link's accessible name was "Balance1,000 coins" (two spans with a CSS
+gap but no text space); fixed with a real space, and the tests query the exact name "Balance 1,000
+coins". **Guards proven:** removing the read-number check makes the AC-W5-04.4 test fail; removing the
+session reset and checks makes five AC-W5-04.3/04.4/04.5 tests fail (mutations not kept).
+**Render-time reset and StrictMode:** the reset is a plain (not functional) state update computed from
+the rendered snapshot, so React's double render in StrictMode enqueues the same value and the session
+number advances once per change of player.
+
+**Verification (2026-11-24, approval):** `npm run lint`, `npm run typecheck`, `npm test` (24 files,
+246 tests), `npm run build` and `git diff --check` green; AC-W5-04.1 to AC-W5-04.5 each demonstrated by
+the tests above.
+**Playwright** W2-16: still pending (no JDK in this environment); its selectors are unchanged.
+
 ---
 
 ## 10. Responsive and accessibility requirements
@@ -860,7 +949,7 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | W5-01 | **This plan** and the Week 4 merge status in the documentation (§0.3). **Review gate.** | M | — |
 | W5-02 | **API foundation (done, approved 2026-11-24, §7.8):** `RequestOptions.headers`; `types/wallet.ts`, `types/roulette.ts`; `services/walletApi.ts`, `services/rouletteApi.ts`, `services/idempotency.ts`; tests (incl. CSRF retry keeps the key); **Should:** contract drift test (Q12) | M | W5-01 |
 | W5-03 | **Navigation and layout (done, approved 2026-11-24, §4.4):** `cardStyles.ts`, `PageHeader`, `Coins`, `MainNav`, `PlayerOnly`, routes `/roulette` and `/wallet` (placeholder content), `AppLayout` width, lobby home for players, skip link (Should); tests for role-dependent navigation; `vercelConfig.test.ts` cases | M | W5-01 (Q9) |
-| W5-04 | **Wallet state and balance:** `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`; stale-response guard; lobby and header show the balance; tests | M | W5-02, W5-03 (Q2, Q3) |
+| W5-04 | **Wallet state and balance (done, approved 2026-11-24, §9.4):** `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`; stale-response guard; lobby and header show the balance; tests | M | W5-02, W5-03 (Q2, Q3) |
 | W5-05 | **Wallet page and history:** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |
 | W5-06 | **Table, chips and bet slip (no API):** `rouletteTable.ts`, `betSlip.ts`, `RouletteBoard`, `ChipSelector`, `BetSlip`, responsive table layouts; unit and keyboard tests | L | W5-03 (Q5) |
 | W5-07 | **Spin flow:** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-06 (Q4, Q6, Q7, Q10) |

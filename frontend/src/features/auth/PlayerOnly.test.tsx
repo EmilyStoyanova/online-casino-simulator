@@ -1,7 +1,7 @@
 import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { admin, alice, PASSWORD, upStatus } from '../../test/fixtures'
+import { admin, alice, PASSWORD, startingWallet, upStatus } from '../../test/fixtures'
 import { csrfEndpoint, jsonResponse, noSession, problemResponse, signedIn, stubApi } from '../../test/http'
 import { renderApp } from '../../test/renderApp'
 
@@ -10,13 +10,14 @@ const LOGIN = 'POST /api/v1/auth/login'
 
 type Handlers = Parameters<typeof stubApi>[0][string]
 
-/** No wallet or roulette route: a request to one of them would fail the test ("Unexpected request"). */
+/** No roulette route: a roulette request would fail the test ("Unexpected request"). */
 function backend({ currentUser = noSession(), login = signedIn(alice) }: { currentUser?: Handlers; login?: Handlers } = {}) {
   return stubApi({
     'GET /api/v1/auth/csrf': csrfEndpoint(),
     'GET /api/v1/system/status': () => jsonResponse(upStatus),
     [CURRENT_USER]: currentUser,
     [LOGIN]: login,
+    'GET /api/v1/wallet': () => jsonResponse(startingWallet),
   })
 }
 
@@ -43,14 +44,15 @@ const notice = () => screen.queryByRole('heading', { name: 'For player accounts 
 describe.each(pages)('PlayerOnly on %s', (path, title) => {
   const page = () => screen.queryByRole('heading', { level: 1, name: title })
 
-  it('shows the page to a player, without any wallet or roulette request', async () => {
+  it('shows the page to a player with the shared balance, without any roulette request', async () => {
     const api = backend({ currentUser: () => jsonResponse(alice) })
     renderApp(path)
 
     expect(await screen.findByRole('heading', { level: 1, name: title })).toBeInTheDocument()
     expect(screen.getByText(/being built/)).toBeInTheDocument()
     expect(notice()).not.toBeInTheDocument()
-    expect(api.requests.map((request) => `${request.method} ${request.path}`)).toEqual([CURRENT_USER])
+    expect(await screen.findByRole('link', { name: 'Balance 1,000 coins' })).toBeInTheDocument()
+    expect(api.requests.map((request) => `${request.method} ${request.path}`)).toEqual([CURRENT_USER, 'GET /api/v1/wallet'])
   })
 
   it('shows an administrator an explanation with a way back, never the page, and sends nothing more', async () => {
@@ -120,24 +122,27 @@ describe.each(pages)('PlayerOnly on %s', (path, title) => {
 })
 
 describe('Placeholder pages', () => {
-  it('state honestly that roulette cannot be played yet and show no game result or balance', async () => {
+  it('state honestly that roulette cannot be played yet: no betting control, only the server balance', async () => {
     backend({ currentUser: () => jsonResponse(alice) })
     renderApp('/roulette')
 
     const progress = await screen.findByRole('region', { name: 'The roulette table is being built' })
     expect(within(progress).getByText(/You cannot place bets yet/)).toBeInTheDocument()
-    // No betting control exists yet: the only button is the header's "Sign out".
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Sign out'])
-    expect(screen.queryByText(/\d[\d,]* coins/)).not.toBeInTheDocument()
+    // No betting control exists yet: the only buttons are the header's "Sign out" and the balance's "Refresh".
+    expect(await screen.findByRole('button', { name: 'Refresh' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Sign out', 'Refresh'])
+    // The only coin amounts are the server's balance (header badge and card); no game result.
+    expect(screen.getAllByText(/\d[\d,]* coins/).map((element) => element.textContent)).toEqual(['1,000 coins', '1,000 coins'])
   })
 
-  it('show no invented wallet balance or transactions', async () => {
+  it('show the server balance but no invented transactions', async () => {
     backend({ currentUser: () => jsonResponse(alice) })
     renderApp('/wallet')
 
-    const progress = await screen.findByRole('region', { name: 'Your wallet page is being built' })
+    const progress = await screen.findByRole('region', { name: 'Your transaction history is being built' })
     expect(within(progress).getByText(/not shown here yet/)).toBeInTheDocument()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
-    expect(screen.queryByText(/\d[\d,]* coins/)).not.toBeInTheDocument()
+    expect(await within(screen.getByRole('region', { name: 'Your balance' })).findByText('1,000 coins')).toBeInTheDocument()
+    expect(screen.getAllByText(/\d[\d,]* coins/).map((element) => element.textContent)).toEqual(['1,000 coins', '1,000 coins'])
   })
 })

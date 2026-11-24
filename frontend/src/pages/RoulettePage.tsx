@@ -2,10 +2,12 @@ import { Link } from 'react-router'
 import { secondaryButton } from '../components/buttonStyles'
 import { card } from '../components/cardStyles'
 import { PageHeader } from '../components/layout/PageHeader'
+import { BalanceCard } from '../features/wallet/BalanceCard'
 
 /**
- * `/roulette`, inside `RequireAuth` and `PlayerOnly`. Placeholder until the betting table (W5-06) and
- * the spin flow (W5-07) exist: it says plainly that no bets can be placed yet, and it sends no request.
+ * `/roulette`, inside `RequireAuth` and `PlayerOnly`. Shows the shared, server-confirmed balance; the
+ * betting table (W5-06) and the spin flow (W5-07) do not exist yet, which the page says plainly. It
+ * sends no request of its own.
  */
 export function RoulettePage() {
   return (
@@ -13,6 +15,9 @@ export function RoulettePage() {
       <PageHeader title="European roulette">
         Single-zero roulette with virtual coins only. Every number is drawn by the server, never in your browser.
       </PageHeader>
+      <div className="max-w-md">
+        <BalanceCard />
+      </div>
       <section aria-labelledby="roulette-progress-heading" className={card}>
         <h2 id="roulette-progress-heading" className="text-lg font-semibold text-zinc-100">
           The roulette table is being built

@@ -2,7 +2,7 @@ import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { apiGet } from '../../services/apiClient'
-import { alice, PASSWORD, upStatus } from '../../test/fixtures'
+import { alice, PASSWORD, startingWallet, upStatus } from '../../test/fixtures'
 import {
   csrfEndpoint,
   deleteCookie,
@@ -32,7 +32,9 @@ function backend({
     'GET /api/v1/system/status': () => jsonResponse(upStatus),
     [CURRENT_USER]: currentUser,
     'POST /api/v1/auth/login': signedIn(alice),
-    'GET /api/v1/wallet': () => problemResponse(401, 'SESSION_EXPIRED'),
+    'GET /api/v1/wallet': () => jsonResponse(startingWallet),
+    // An implemented protected request the start page does not send, answered as if the session had ended.
+    'GET /api/v1/wallet/transactions': () => problemResponse(401, 'SESSION_EXPIRED'),
     [LOGOUT]: logout,
   })
 }
@@ -236,9 +238,9 @@ describe('Authentication state', () => {
     renderApp('/')
     await signIn()
 
-    // Any request of a later feature, e.g. a protected one.
+    // Any later protected request, e.g. the wallet history.
     await act(async () => {
-      await apiGet('/api/v1/wallet').catch(() => undefined)
+      await apiGet('/api/v1/wallet/transactions').catch(() => undefined)
     })
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()

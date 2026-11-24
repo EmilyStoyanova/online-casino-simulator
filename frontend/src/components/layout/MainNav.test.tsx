@@ -1,7 +1,7 @@
 import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { admin, alice, interestCatalog, upStatus } from '../../test/fixtures'
+import { admin, alice, interestCatalog, startingWallet, upStatus } from '../../test/fixtures'
 import { csrfEndpoint, deleteCookie, jsonResponse, noContent, noSession, problemResponse, stubApi } from '../../test/http'
 import { renderApp } from '../../test/renderApp'
 
@@ -9,13 +9,14 @@ const CURRENT_USER = 'GET /api/v1/users/me'
 
 type Handlers = Parameters<typeof stubApi>[0][string]
 
-/** The backend of these tests: no wallet or roulette route, so any such request fails the test. */
+/** The backend of these tests: no roulette route, so any such request fails the test. */
 function backend(currentUser: Handlers = noSession()) {
   return stubApi({
     'GET /api/v1/auth/csrf': csrfEndpoint(),
     'GET /api/v1/system/status': () => jsonResponse(upStatus),
     [CURRENT_USER]: currentUser,
     'GET /api/v1/interests': () => jsonResponse(interestCatalog),
+    'GET /api/v1/wallet': () => jsonResponse(startingWallet),
     'POST /api/v1/auth/logout': () => {
       deleteCookie('XSRF-TOKEN')
       return noContent()
@@ -81,10 +82,12 @@ describe('Main navigation', () => {
     const user = userEvent.setup()
     const nav = await screen.findByRole('navigation', { name: 'Main' })
     const roulette = within(nav).getByRole('link', { name: 'Roulette' })
+    await screen.findByRole('link', { name: 'Balance 1,000 coins' })
 
-    // The account menu comes first in the header, then the main navigation (visual order = tab order).
+    // Balance and account menu come first in the header, then the main navigation (visual order = tab order).
     await user.tab() // skip link
     await user.tab() // brand
+    await user.tab() // balance
     await user.tab() // My profile
     await user.tab() // Sign out
     await user.tab()
