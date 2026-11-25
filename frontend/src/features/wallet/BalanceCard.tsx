@@ -85,7 +85,7 @@ export function BalanceCard() {
         </div>
       )}
 
-      <p className="mt-4 text-xs text-zinc-500">Virtual coins have no monetary value.</p>
+      <p className="mt-4 text-xs text-zinc-400">Virtual coins have no monetary value.</p>
     </section>
   )
 }

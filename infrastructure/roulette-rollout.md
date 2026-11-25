@@ -20,8 +20,9 @@ executed [Week 3 wallet rollout](wallet-rollout.md) (V5 → V7, 2026-11-15).
 `feature/week-05-roulette-ui`; this runbook was written before it and is unchanged by it. Because Vercel
 deploys `main` automatically, a Week 5 merge reaches the staging frontend at once. Against the Week 3
 backend the UI shows roulette as unavailable and keeps the wallet pages working
-([architecture §4.9](../docs/architecture.md#49-older-backends)); that behaviour is still to be checked
-against a real V7 backend (W5-10). Merging Week 5 does not replace or approve any step of this runbook.
+([architecture §4.9](../docs/architecture.md#49-older-backends)); that behaviour was verified locally
+against the real Week 3 backend on V7 (W5-10, 2026-11-25). Merging Week 5 does not replace or approve any
+step of this runbook.
 
 Neon `production` is never touched: every command here uses the `staging` branch only. The existing
 restore point `staging-before-week-03` is never used, changed or deleted by this runbook.

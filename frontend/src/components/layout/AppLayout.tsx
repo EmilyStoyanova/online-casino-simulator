@@ -61,7 +61,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </main>
 
       <footer className="border-t border-zinc-800">
-        <p className="mx-auto max-w-6xl px-4 py-4 text-xs leading-relaxed text-zinc-500">
+        <p className="mx-auto max-w-6xl px-4 py-4 text-xs leading-relaxed text-zinc-400">
           This is a simulator and educational platform. It uses virtual coins with no monetary value — no
           real-money deposits, withdrawals, purchases or prizes. It is not a treatment for gambling
           problems; if gambling is causing you harm, please contact a professional support service.

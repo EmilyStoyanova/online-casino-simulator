@@ -1,6 +1,6 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
-- **Status:** Revision 17. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
+- **Status:** Revision 19. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
   refinements (§14). W5-02 API foundation approved 2026-11-24 (§7.8). W5-03 navigation, `PlayerOnly`
   and player lobby approved 2026-11-24 (§4.4). First checkpoint (W5-01 to W5-03, `bb9e532`) approved
   and pushed. W5-04 wallet state and balance UI approved 2026-11-24 (§9.4) and pushed (`75d42da`).
@@ -15,7 +15,11 @@
   reviewed and accepted):** Spring Boot + a throwaway PostgreSQL at V9, real spins through the UI,
   replay and a lost answer verified; Playwright W2-16 regression 13/13 green. The remaining checks are
   listed in §16.6 and stay open for W5-10. **W5-09 documentation reviewed and approved
-  2026-11-25 (§12.1) and pushed to the feature branch.** Week 5 is not merged into `main` and not deployed.
+  2026-11-25 (§12.1) and pushed to the feature branch.** **W5-10 final verification reviewed and approved for the
+  checkpoint 2026-11-25 (§16.7, §16.8):** AC-W5-10.2–10.5 met, AC-W5-10.1 met locally (CI needs a pull
+  request); Lighthouse 100 on `/roulette` and `/wallet` after a contrast fix; the screen-reader smoke
+  test is blocked, so **AC-W5-08.3 stays outstanding** and Week 5 is **not complete**. Week 5 is not merged
+  into `main` and not deployed.
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -53,6 +57,8 @@
 | 15 | 2026-11-25 | W5-08 checkpoint recorded (`c5d5261`); first real local integration run with the installed JDK 21 and cached Maven dependencies (offline): throwaway PostgreSQL (Flyway V1–V9), backend jar, Vite dev server, two disposable players; spins, wallet reconciliation, history, replay with the original key and a lost answer verified against the real backend; W2-16 Playwright regression 13/13 green; everything created was removed (§16.5). Corrected §10.3: `casino-postgres` listens on 127.0.0.1:5434, port 5432 belongs to another project's container |
 | 16 | 2026-11-25 | Real local integration run (§16.5) reviewed and accepted; W5-09 documentation implemented (§12.1): `architecture.md` §4 rewritten for the Week 5 frontend (§4.1–§4.10) and a Week 5 paragraph in §6, README (status, "Week 5 (feature branch only)", staging note, local roulette and wallet walkthrough, database port warning, milestones), `user-scenarios.md` S3 status, a note in `infrastructure/roulette-rollout.md`; §16.5 refined (summary of outcomes, port note); W5-10 checklist (§16.6) |
 | 17 | 2026-11-25 | W5-09 reviewed and approved: AC-W5-09.1 and 09.2 re-checked (feature branch / `main` / staging distinguished, architecture against the code, idempotency and unresolved spin, S3 without future features, Week 4 rollout steps unchanged, staging limitation explicit, §16.6 still open, AC-W5-08.3 outstanding, no sensitive data, 192 links resolve); W5-09 committed and pushed to the feature branch |
+| 18 | 2026-11-25 | W5-09 checkpoint recorded (`ff83f8a`); W5-10 final verification (§16.7): real-backend scenarios (several bets, insufficient funds, offline, backend stopped, lost answer, reload, two players in one tab), Week 3 backend on V7 and on V9, real Lighthouse 13.5.0 from Chrome's DevTools (96 → contrast fix → 100), screen reader blocked with a manual procedure, `./mvnw -o verify`, 533 frontend tests, Playwright 15/15 with the new `w5-roulette.spec.ts`; §10.3 audit statement on contrast corrected; §16.6 updated |
+| 19 | 2026-11-25 | W5-10 reviewed and approved for the checkpoint: final checks repeated (§16.8: lint, typecheck, 533 tests, build; Playwright 15/15 twice more; Lighthouse reports and repository review re-checked); the intermittent Playwright web-server stop analysed and recorded as **unresolved, most likely environmental** (§16.8); AC-W5-08.3 stays outstanding; §16.7 heading no longer says "pending review" |
 
 ---
 
@@ -1479,7 +1485,7 @@ dependency is added (Q11).
 |---|---|---|
 | AC-W5-08.1 | Met | Responsive audit below: 42 views at 320, 375, 768, 1024, 1440 px and 200 % zoom (mocked API) |
 | AC-W5-08.2 | Met | Keyboard-only walkthrough below; focus tests in `RoulettePage.test.tsx` and `WalletPage.test.tsx` |
-| AC-W5-08.3 | **Outstanding — not passed** | No Lighthouse audit and no screen-reader smoke test have been performed (see "Not performed"). Must be recorded before the Week 5 merge (W5-10) |
+| AC-W5-08.3 | **Outstanding — not passed** | No Lighthouse audit and no screen-reader smoke test have been performed (see "Not performed"). Must be recorded before the Week 5 merge (W5-10). *Update W5-10 (§16.7):* Lighthouse part met (100 on both pages after a contrast fix); screen-reader part blocked, so the criterion stays outstanding |
 | AC-W5-08.4 | Met | Responsible-presentation review below; "no monetary value" on the roulette page (header, odds panel) and the wallet page (header, balance card) |
 | AC-W5-08.5 | Met | `oddsRules.ts`, `OddsInfo.tsx`; checked against `openapi.yaml` by `oddsRules.test.ts` and `OddsInfo.test.tsx` |
 
@@ -1511,6 +1517,10 @@ or history action below 44 px on narrow screens. Still below 44 px (all ≥ 24 p
 nav links (36), balance-card "Refresh" (34). Sticky bar: 89 px (with a message) of a 720/800 px
 viewport, 89 of 400 at 200 % zoom. Wheel: 254 px (320), 309 (375), 384 (768, 200 %), 270 (side column
 ≥ 1024), canvas drawn everywhere. Console: only the deliberately aborted spin request; no CSP violation.
+
+*Correction (W5-10, §16.7):* the statement "no text below 4.5:1" above is wrong. Lighthouse found
+`text-zinc-500` secondary text at about 3.8:1 on the cards; the script's background composition missed
+it. Fixed in W5-10 (`text-zinc-400`).
 
 **Keyboard-only walkthrough (Chrome, 1280 px, reduced motion).** Skip link → main nav → "Roulette"
 (Enter) → chip radio (ArrowRight 10 → 25) → cell 17 (Enter twice: 50 coins) → Red (Space) → "Remove
@@ -1624,7 +1634,7 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | W5-07 | **Spin flow (approved for the frontend checkpoint 2026-11-25, §8.5; first real local run 2026-11-25, §16.5):** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; the wheel (W5-P01) turns to the server-confirmed `winningNumber` before the result is revealed; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-P01, W5-06 (Q4, Q6, Q7, Q10, Q13) |
 | W5-08 | **Responsive, accessibility and responsible-play pass (approved for the checkpoint 2026-11-25, §10.3; AC-W5-08.3 Lighthouse and screen-reader checks outstanding):** layouts at all widths, focus management, live regions, contrast, `OddsInfo` (Q8), wording review; fixes and tests; manual check record | M | W5-05, W5-07 |
 | W5-09 | **Documentation (approved 2026-11-25, §12.1):** `architecture.md` §4 (frontend structure, wallet state, spin lifecycle), README (what works today, local walkthrough), `user-scenarios.md` S3 note (animation in Week 6), this plan's implementation records | S | W5-08 |
-| W5-10 | **Verification and pull request preparation:** full frontend checks, local real-stack walkthrough (§16.2) including the older V7 backend (Q10), Playwright W2-16 regression and the W5 scenario (Should), checklist "no client RNG/payout, no browser storage except the pending spin record, no cloud". PR prepared, **not opened without approval** | M | all |
+| W5-10 | **Verification and pull request preparation (approved for the checkpoint 2026-11-25, §16.7–16.8; screen-reader test blocked):** full frontend checks, local real-stack walkthrough (§16.2) including the older V7 backend (Q10), Playwright W2-16 regression and the W5 scenario (Should), checklist "no client RNG/payout, no browser storage except the pending spin record, no cloud". PR prepared, **not opened without approval** | M | all |
 
 ```mermaid
 graph LR
@@ -2005,25 +2015,219 @@ reader and Lighthouse (7, AC-W5-08.3), a second player in the same browser (8), 
 reload while unresolved (10). The optional `w5-roulette.spec.ts` does not exist yet. The real
 interruption used a dropped response, not a network outage, and Chrome ran headless with Playwright.
 
-### 16.6 Open verification for W5-10 (none of these is done)
+### 16.6 Open verification for W5-10 (status after W5-10, §16.7)
 
-Each item needs real evidence before it is ticked; nothing here is passed yet. AC-W5-08.3 stays
-**outstanding** until a Lighthouse audit and a real screen-reader smoke test have been recorded.
+Each item needs real evidence before it is ticked. Ticked items refer to the verification matrix of
+§16.7 (2026-11-25). AC-W5-08.3 stays **outstanding** until the real screen-reader smoke test has been
+recorded.
 
-- [ ] Several bets in one real round (§16.2 step 2), with the per-bet outcomes and totals checked
+- [x] Several bets in one real round (§16.2 step 2), with the per-bet outcomes and totals checked
       against the response and the ledger.
-- [ ] `409 INSUFFICIENT_FUNDS` from the real backend (§16.2 step 4): message shown, balance re-read,
+- [x] `409 INSUFFICIENT_FUNDS` from the real backend (§16.2 step 4): message shown, balance re-read,
       nothing in the history.
-- [ ] Browser offline **before** the request leaves (DevTools "Offline", §16.2 step 5): unresolved state,
+- [x] Browser offline **before** the request leaves (DevTools "Offline", §16.2 step 5): unresolved state,
       then "Retry spin" with the same key; one stake entry.
-- [ ] Backend stopped during a spin, then restarted (§16.2 step 6): unresolved, retry, one round.
-- [ ] Reload while a spin is unresolved (§16.2 step 10): the record is shown, nothing is sent until
+- [x] Backend stopped during a spin, then restarted (§16.2 step 6): unresolved, retry, one round.
+- [x] Reload while a spin is unresolved (§16.2 step 10): the record is shown, nothing is sent until
       "Retry spin", the retry uses the stored key.
-- [ ] Switching users in the same browser (§16.2 step 8): the balance disappears on sign-out; another
+- [x] Switching users in the same browser (§16.2 step 8): the balance disappears on sign-out; another
       player sees only their own balance; the first player's pending record is neither shown nor sent.
-- [ ] Older backend (Week 3 build of `main`, V7; §16.2 step 9, AC-W5-10.5): explicit unavailable state,
+- [x] Older backend (Week 3 build of `main`, V7; §16.2 step 9, AC-W5-10.5): explicit unavailable state,
       no availability claim, wallet pages working.
-- [ ] Lighthouse accessibility audit on `/roulette` and `/wallet` without violations (AC-W5-08.3).
-- [ ] Screen-reader smoke test of the spin and the history with NVDA or Narrator (AC-W5-08.3).
-- [ ] Full final regression (`npm run lint`, `typecheck`, `test`, `build`; W2-16 Playwright; backend
+- [x] Lighthouse accessibility audit on `/roulette` and `/wallet` without violations (AC-W5-08.3).
+- [ ] Screen-reader smoke test of the spin and the history with NVDA or Narrator (AC-W5-08.3). **Blocked** in
+      W5-10: manual procedure in §16.7.
+- [x] Full final regression (`npm run lint`, `typecheck`, `test`, `build`; W2-16 Playwright; backend
       untouched: `git diff --stat main -- backend` empty) and the repository review (AC-W5-10.1–10.4).
+      CI on the pull request remains (no pull request yet).
+
+### 16.7 W5-10 final verification (2026-11-25)
+
+Local only. JDK 21 (`%USERPROFILE%\.jdks`) and the Maven Wrapper in **offline** mode, set for the child
+processes only; nothing was downloaded or installed (Docker images, Maven dependencies, npm packages and
+Chrome were already present). Every database was a throwaway `postgres:17.11-alpine` container on a
+Docker-assigned `127.0.0.1` port (anonymous volume, `--rm`); backend and Vite ran on free localhost ports
+with freshly generated secrets that were never printed. `casino-postgres` (127.0.0.1:5434, V5) and the
+database on port 5432 (another project) were not used. No Neon, Render or Vercel access. Evidence
+(JSON reports, logs, screenshots) stays in the session's scratchpad, outside the repository.
+
+**Acceptance criteria**
+
+| ID | Result | Evidence |
+|---|---|---|
+| AC-W5-10.1 | **Met locally**; CI pending | `npm run lint`, `typecheck`, `test` (**45 files, 533 tests**), `build` green (after the fixes below). CI runs only once a pull request exists (not opened, needs approval) |
+| AC-W5-10.2 | **Met** | §16.2 steps 1–6, 8–10 with the real backend (matrix below): wins and losses, several bets, insufficient funds, offline retry with the same key, backend stopped during a spin, replay, reload while unresolved, two players in one tab, history consistent with the balance and the ledger. Step 7: responsive and keyboard in W5-08, Lighthouse here, screen reader **blocked** |
+| AC-W5-10.3 | **Met** | Playwright, one run of the whole suite: **15/15** (W2-16 13, new W5 scenario 2), 5.8 min |
+| AC-W5-10.4 | **Met** | `git diff --stat main -- backend` empty (no backend, contract or migration change); the only new dependency is the approved `phaser` 4.2.1 (Q13); browser storage: only `pendingSpinStore` (`sessionStorage`), the SPA only reads the `XSRF-TOKEN` cookie; no change to `vercel.json`, Dockerfile, CI or Compose; no cloud access |
+| AC-W5-10.5 | **Met** | The Week 3 build on V7 and on a V9 database (below) |
+| AC-W5-08.3 | **Still outstanding** | Lighthouse part **met** after a contrast fix (100 on both pages, mobile and desktop); screen-reader part **blocked** (no observable speech output here; manual procedure below) |
+
+**Verification matrix (real backend, nothing mocked; `page.route` only holds or drops a response after
+the real server answered)**
+
+| # | Scenario | Expected | Evidence | Result | Remaining risk |
+|---|---|---|---|---|---|
+| 1 | Several bets, one round | One request, a new UUID key, every bet settled by the server, one round | Player "alice": 17 (10), Red (10), 2nd dozen (10), Odd (25), High (5) = 60; body exactly these five bets, UUID key, CSRF header; server drew **16 (red)**: Red +20, 2nd dozen +30, others 0 (matches the published rules, checked independently); result 990 after the wheel stopped on **16** (screenshot); database: one round with the request key, five bet rows equal to the response, ledger −60 → 940, +50 → 990; header, `GET /wallet` and history 990; one POST, record cleared | **Pass** | — |
+| 2 | `409 INSUFFICIENT_FUNDS` | Rejected, no round, no debit, message, balance re-read | Player "carol" in two sessions. Session B staked 1,000 on 7 and lost (server drew 21) → 0; session A still showed 1,000, so its own check allowed 10 on Red; server: `409 INSUFFICIENT_FUNDS`; A showed "Your balance is too low for these bets.", the header changed to 0 coins (re-read), rounds and ledger unchanged, record cleared, one POST. The set-up needed B to lose (36/37); it did on the first try | **Pass** | — |
+| 3 | A — offline before the request leaves | Record kept, unresolved, explicit retry with the same key and body | Player "dave": `context.setOffline(true)`, confirm → `net::ERR_INTERNET_DISCONNECTED`; record `unresolved`, `ambiguous`, key K, frozen body; no round, no ledger entry; back online | **Pass** | — |
+| 4 | D — reload while unresolved (after 3) | Shown again, nothing sent until "Retry spin" | After reload: "An earlier spin could not be confirmed…", **0 POSTs in 3 s**; "Retry spin" sent K and the same body → 200 (32 red, Red won, 1,010); exactly one round with K; record cleared | **Pass** | — |
+| 5 | B — backend stops during a spin | Unresolved, no automatic retry, retry commits once | Player "erin": the database container was paused, the spin sent (request hanging in the backend), the backend **process killed** while in flight → the browser got `502` from the Vite proxy → "Spin not confirmed", record kept; no round; database unpaused, backend restarted; **0 POSTs** without a click; "Retry spin" with K and the same body → 200 (7 red, Black lost, 990); one round | **Pass** | — |
+| 6 | C — committed, response lost, then reload | Same round on retry, no second debit | Player "frank": the server settled (21, Even lost, 975), the answer was dropped; reload → shown, **0 POSTs** in 3 s; retry with K and the same body → body **identical** to the lost answer; one round, one stake; record cleared; history −25 → 975 (also covered by the new Playwright scenario and §16.5) | **Pass** | — |
+| 7 | Late response of another player | A later session's wallet is never changed | Players "grace" and "henry" in **one tab**: Grace's spin reached the server (25, Black lost, 990) and its answer was held; Grace signed out, Henry signed in (no reload), then the answer was released: Henry's header and `GET /wallet` stayed 1,025, his ledger unchanged; Grace's round and ledger correct; Henry's roulette page showed no result and no unresolved spin | **Pass** | — |
+| 8 | Ambiguous spin survives sign-out; other player never sees it | Record kept; not shown, sent or cleared for Henry; Grace retries it | Grace's second spin committed (7, Red won) with the answer dropped → unresolved; after sign-out the record of Grace's id was still in `sessionStorage`; Henry signed in: no unresolved spin, no "Retry spin", betting open, **0 POSTs**, his wallet page and API showed only his three entries; Grace signed in again: "An earlier spin could not be confirmed…", **0 POSTs** until the click; retry with K and the same body → identical body; one round; her history shows only her four entries | **Pass** | — |
+| 9 | Week 3 backend on V7 | No availability claim, no spin request, wallet works | `b07e656` built **offline** in a temporary worktree; schema V1–V7 (`schemaVersion` "7"); lobby card "Not available on this server yet"; roulette page: "Roulette is not available on this server yet", table `aria-disabled`; **no request to `/api/v1/games` at all**; wallet balance 1,000 and history; Lobby, Roulette, Wallet, My profile navigable | **Pass** | — |
+| 10 | Week 3 backend on a V9 database | Betting open (9 proves nothing); the first spin's `404` → unavailable | A throwaway database migrated to V9 by the current backend, then the Week 3 build started on it (Flyway accepts the newer versions); lobby claims nothing ("Virtual coins"); one explicit spin → `404` → unavailable state, table disabled, record cleared, no round, balance 1,000, no further request; lobby then "Not available on this server yet" | **Pass** | — |
+| 11 | Lighthouse accessibility | No violations on `/roulette` and `/wallet` | See "Accessibility" below: 96 with `color-contrast` failing → fixed → **100** | **Pass after fix** | Lighthouse checks only what it can measure (10 manual items) |
+| 12 | Screen-reader smoke test | Spin and history understandable with NVDA or Narrator | Not possible here | **Blocked** | AC-W5-08.3 open |
+
+**Accessibility (AC-W5-08.3).** The real Lighthouse built into the installed Chrome 157 (**Lighthouse
+13.5.0, axe-core 4.13.0**), run from its DevTools panel (opened with `--auto-open-devtools-for-tabs` and
+driven over a local debugging port; nothing downloaded), category Accessibility only, storage kept (signed
+in as a disposable player with one played round), real local stack:
+- **Before:** `/roulette` and `/wallet` **96** (mobile), one failing audit each: `color-contrast`. On
+  `/roulette` the element was the note under the wheel (`text-xs text-zinc-500`). Cause: Tailwind's
+  `zinc-500` on the card background is about **3.8:1** (about 4.1:1 on the page background), below 4.5:1.
+  The custom script of W5-08 (§10.3) had reported "no text below 4.5:1"; that statement was **wrong**.
+- **Fix (focused):** every text use of `text-zinc-500` → `text-zinc-400` (about 6.8:1) in 10 files
+  (`RoulettePage`, `BetSlip`, `SpinResult`, `BalanceCard`, `TransactionHistory`, `AppLayout` footer,
+  `AccountPanel`, `TextField` hints, `InterestPicker`, `ProfilePage`); input placeholders unchanged. New
+  regression test `src/test/textContrast.test.ts` (no mid-grey text class in the sources; proven to fail
+  when one is put back).
+- **After:** `/roulette` and `/wallet` **100**, both **mobile and desktop** navigation audits, 0 failing,
+  73 passed, 10 manual, 37 not applicable; a **snapshot** audit of `/roulette` with a result on screen:
+  0 failing, 73 passed.
+
+**Screen reader: blocked.** NVDA is not installed (not downloaded). Windows Narrator exists, but its speech
+cannot be observed or recorded from this environment, and starting it would take over the owner's
+desktop and keyboard; an accessibility tree is not a screen-reader test. **Manual procedure for the
+project owner** (about 15 minutes; record the result in this section):
+1. Start the local stack (README), sign in as a player in Chrome; start Narrator with **Win+Ctrl+Enter**.
+2. `/roulette`: Tab to the chips: the group "Chip value" and "10 coins, selected" are announced; arrows
+   change the chip.
+3. Tab to a number: "17, black. Straight bet, pays 35 to 1." Press Enter: the slip announces the bet.
+4. "Review bets": focus and announcement on "Review your bets"; "Confirm and spin": "Waiting for the
+   server…", then the "Result" heading with the number, the outcome of each bet and the balance.
+5. Lost answer: DevTools → Network → Offline, confirm a spin: "Spin not confirmed" is announced; back
+   online, "Retry spin" announces the result.
+6. `/wallet`: the table "Wallet entries, newest first" with its column headers; "Load older entries"
+   moves focus to the first new entry, which is read.
+7. Stop Narrator (Win+Ctrl+Enter). Record Windows, Narrator and Chrome versions and pass/fail per step.
+
+**Regression totals**
+- Frontend: lint, typecheck, **533 tests in 45 files** (531 before W5-10, plus the 2 contrast tests),
+  build (main chunk 365.97 kB, CSS 40.89 kB, Phaser chunk 1,371.67 kB). Vitest must be started from a
+  shell whose working directory has the drive letter in upper case: from this session's Git Bash
+  (`c:\…`) the setup file was loaded twice and every suite failed with "failed to find the current
+  suite"; from PowerShell (`C:\…`) the same code passed. Not a code defect.
+- Backend: `./mvnw -o verify` **BUILD SUCCESS**, offline, 8 min 51 s: **468 unit tests** (2 skipped by
+  design: the opt-in statistics test and one Neon profile test) and **296 integration tests**
+  (Testcontainers with local images), 0 failures, all JaCoCo coverage checks met.
+- Playwright: new `frontend/e2e/w5-roulette.spec.ts` (2 tests: a round with four bets checked against the
+  rules, the database and the history; a lost answer, reload, no automatic replay, retry with the same key
+  and body, the stored round, one stake). The final run of the whole suite: **15/15**. Earlier runs of the
+  whole suite, recorded honestly: (1) the W5 tests got `429` at registration, because the W2-16 suite uses
+  all 10 registrations per hour of the IPv6 fixture address, so the W5 scenario now registers through the
+  form (IPv4); (2) and (4) the suite's Vite dev server stopped after about 3 minutes and every later test
+  got `ERR_CONNECTION_REFUSED` (cause not found; the machine was suspended at least once during the
+  session); (3) two assertions of the new scenario expected a space between "Balance after this round" and
+  its value, which are separate elements, fixed with a whitespace-tolerant pattern. No existing assertion
+  was changed.
+
+**Bugs found and fixed:** the contrast defect above (product). Test-side only: the W5 scenario's
+registration and the whitespace in two of its assertions.
+
+**Remaining risks and blockers**
+- **AC-W5-08.3 screen-reader part** — blocked; manual test by the owner (procedure above). The plan
+  requires it before the Week 5 merge.
+- **CI** runs only on a pull request (AC-W5-10.1 second half).
+- **Playwright stability:** two of five whole-suite runs lost the Vite dev server midway; the final run
+  and the W5 file alone passed. Analysed in §16.8 (unresolved, most likely environmental). Worth watching
+  when Playwright moves to CI (Week 11).
+- **Registration limit in the e2e stack:** the IPv6 fixture address is at its hourly limit after W2-16;
+  further e2e files should register through the form or the suite needs a separate address.
+- **Staging** is unchanged (Week 3 backend, V7): the Week 5 UI shows roulette as unavailable there until
+  the approved Week 4 rollout (§0.2, §7.7).
+
+**Cleanup.** Every container created here (`casino-w510-pg-*`, the e2e stack's `casino-e2e-pg`) and its
+anonymous volume is gone: the lists of containers and volumes are **identical** before and after W5-10.
+The Week 3 worktree was removed (`git worktree list` shows only the main one). No backend, Vite, Chrome
+or Playwright process is left; ports free. `casino-postgres` is still running at V5 with its volume. The
+rebuilt jars are in the git-ignored `backend/target/`.
+
+**Recommendation.** Week 5 is **ready for pull request review**, with one known open item: the
+screen-reader smoke test of AC-W5-08.3, which the owner can do with the procedure above. Week 5 is
+**not complete** until that item is recorded; the merge, the pull request and any deployment need
+separate approval.
+
+### 16.8 W5-10 checkpoint review (2026-11-25)
+
+W5-10 was reviewed and approved for a Git checkpoint. Before the commit, the final checks were repeated
+on the uncommitted W5-10 tree (published HEAD `ff83f8a`).
+
+**Re-run, all green:**
+- **Frontend:** `npm run lint`, `typecheck` and `build` are green. `vitest run` passed **533 tests in
+  45 files**. It was started from PowerShell; see §16.7 for the drive-letter note.
+- **Playwright (whole suite):** two more consecutive runs, each **15/15** (5.6 and 5.7 min). Both ran
+  with `DEBUG=pw:webserver`; see below.
+- **Backend:** not re-run. Since the `./mvnw -o verify` run of §16.7 (BUILD SUCCESS, 468 unit and 296
+  integration tests) no backend file has changed, and `git diff --stat main -- backend` is empty.
+- **Repository review:**
+  - no migration changed (`git diff --name-status main -- backend/src/main/resources/db/migration` is
+    empty);
+  - the only dependency change against `main` is `phaser` 4.2.1, approved under Q13;
+  - a pattern scan of the diff and the two new files found no secret, credential, connection string
+    or personal data;
+  - `git diff --check` is clean.
+- **Lighthouse reports re-read:**
+  - `/roulette` and `/wallet` score **100** in both mobile and desktop navigation audits (0 failed,
+    73 passed);
+  - the snapshot of `/roulette` has 0 failed audits.
+  - The pre-fix score of 96 for `/roulette` is in the saved before-fix report. The pre-fix 96 for
+    `/wallet` (failing `color-contrast`, 72 passed) comes from an earlier run of the same script whose
+    output was recorded in the session log. Its JSON file was overwritten by the run that was later
+    interrupted when the machine slept (`ERR_NETWORK_IO_SUSPENDED`).
+
+**Intermittent Vite shutdowns: analysis (unresolved).** Seven whole-suite runs were made on
+2026-11-25, all with the same configuration (`retries: 0`, one worker):
+
+| Run | Result | Vite dev server |
+|---|---|---|
+| 1 | 13/15: the W5 tests got `429` at registration | alive |
+| 2 | 2/15: tests 3–15 failed | stopped during test 3 |
+| 3 | 13/15: the W5 whitespace assertion | alive |
+| 4 | 5/15: tests 6–15 failed | stopped during test 6 |
+| 5 (`DEBUG=pw:webserver`) | 15/15 | alive |
+| 6 (`DEBUG=pw:webserver`) | 15/15 | alive |
+| 7 (`DEBUG=pw:webserver`) | 15/15 | alive |
+
+**What the failures have in common:**
+- Both happened within the same 16 minutes (about 17:29–17:45 UTC). Both started early in the W2-16
+  suite (test 3, test 6), in tests that do not touch the backend or the dev server.
+- The dev server logged nothing: no error, no stack trace, no exit message. From then on every test
+  got `ERR_CONNECTION_REFUSED` on `127.0.0.1:5174`. The backend and the database kept running, as the
+  later admin-bootstrap test showed by restarting the backend.
+- The session's tool log shows no command that stopped processes during either run. Run 2 was
+  started in the background, run 4 in the foreground.
+
+**What it is not:**
+- **Not the application:** the failing tests are unrelated to Week 5 code.
+- **Not the new W5 spec:** it ran last and never started before the stop.
+- **Not the earlier W2-16 issue:** the old `ERR_CONNECTION_REFUSED` issue of week-02.md (Vite on
+  `::1` only) was fixed by `127.0.0.1:5174`, and Vite was not running at all here.
+
+**Assessment.** No reproducible defect. Three consecutive later runs passed, and the stop never
+appeared while the web-server debug log was on. Two explanations remain. The more likely one is
+environmental: the machine was suspended at least once that afternoon, one Lighthouse run hit
+`ERR_NETWORK_IO_SUSPENDED`, and other projects' Docker containers ran in parallel, one of them in a
+restart loop. The other is an unidentified test-infrastructure issue: Playwright's `webServer` starting
+`npx vite` on Windows, where a child process can exit without output. Both remain possible, because
+the failing runs did not have the debug log. **Uncertainty kept open:**
+- if it happens again, the `DEBUG=pw:webserver` output shows the exit code and the time;
+- CI (Linux) is the next independent data point;
+- the suite is not yet part of CI, which is planned for Week 11.
+
+**Status after the review:**
+- **Still pending:** AC-W5-08.3, because the real screen-reader smoke test has not been performed;
+  CI on the pull request.
+- **Not complete:** Week 5 as a release.
+- **Approved:** nothing beyond the W5-10 checkpoint.

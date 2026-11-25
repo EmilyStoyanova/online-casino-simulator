@@ -9,7 +9,7 @@ import { formatEntryTime, formatSignedCoins, transactionTypeLabel } from './wall
 
 const compact = `px-3 py-1.5 ${touchTarget}`
 /** The visible label of a value in the narrow (card) layout; screen readers use the column header. */
-const cardLabel = 'text-xs font-medium text-zinc-500 md:hidden'
+const cardLabel = 'text-xs font-medium text-zinc-400 md:hidden'
 const cell = 'py-3 pr-4 align-top max-md:flex max-md:flex-col max-md:gap-0.5 max-md:p-0'
 const numericCell = `${cell} tabular-nums md:text-right last:pr-0`
 

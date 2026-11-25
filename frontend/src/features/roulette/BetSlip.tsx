@@ -220,7 +220,7 @@ export function BetSlip({
         )}
       </p>
 
-      <p className="text-xs leading-relaxed text-zinc-500">
+      <p className="text-xs leading-relaxed text-zinc-400">
         Up to {ROULETTE_LIMITS.maxBets} different bets per spin, {formatCoins(ROULETTE_LIMITS.minAmount)} to{' '}
         {formatCoins(ROULETTE_LIMITS.maxAmount)} per bet, {formatCoins(ROULETTE_LIMITS.maxTotalStake)} in total.
       </p>

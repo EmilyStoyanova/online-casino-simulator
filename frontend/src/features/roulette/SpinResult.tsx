@@ -87,7 +87,7 @@ export function SpinResult({ result }: { result: RouletteSpinResult }) {
         </dd>
       </dl>
 
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-zinc-400">
         Played <time dateTime={result.createdAt}>{formatEntryTime(result.createdAt)}</time> · round{' '}
         <span className="font-mono">{result.roundId.slice(0, 8)}</span>. Drawn and settled by the server.
       </p>

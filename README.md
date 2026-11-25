@@ -28,7 +28,7 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 | Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | ✅ Done: Render backend and Vercel frontend deployed and verified (registration closed); Neon `staging` now at V7 |
 | 2 — Virtual currency & game logic | 3 | Virtual wallet and immutable ledger | ✅ Done: merged into `main` (PR #9) and deployed to staging; Neon `staging` migrated V5 → V7 and verified ([rollout record](infrastructure/wallet-rollout.md#rollout-record-2026-11-15)) |
 | | 4 | Roulette engine | ✅ Merged into `main` (PR #10, [Week 4 plan](docs/plans/week-04.md)). **Not deployed**: the Render backend still runs the Week 3 build and Neon `staging` stays at V7 until a separately approved [rollout](infrastructure/roulette-rollout.md) |
-| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | 🚧 Week 5 in progress on `feature/week-05-roulette-ui`: player lobby, wallet page, roulette page with the Phaser wheel implemented and verified locally against the real backend; final verification (W5-10) open. **Not merged into `main`, not deployed** ([plan](docs/plans/week-05.md)) |
+| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | 🚧 Week 5 in progress on `feature/week-05-roulette-ui`: player lobby, wallet page, roulette page with the Phaser wheel implemented and verified locally against the real backend; final verification (W5-10) done locally and approved, screen-reader test outstanding. **Not merged into `main`, not deployed** ([plan](docs/plans/week-05.md)) |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
 | 5 — Statistics & responsible play | 9–10 | Dashboard, limits, admin panel | Planned |
 | 6 — QA & release | 11–12 | Testing, deployment, beta release | Planned |
@@ -101,12 +101,15 @@ Week 4 roulette backend. None of it is on `main` or on staging yet
   backend), the roulette page says so and the wallet keeps working.
 - **Accessibility and responsible presentation:** keyboard operation with managed focus, layouts from
   320 px, 44 px touch targets for the betting and history controls, wins and losses shown alike, no urgency or "play again" prompts.
-  A Lighthouse audit and a screen-reader test are still outstanding (W5-10).
+  Lighthouse scores 100 for accessibility on both pages; a screen-reader test is still outstanding.
 
-Verified so far: lint, typecheck, 531 frontend tests and the build; Chrome checks with a mocked API;
-and one isolated local run against the **real** Spring Boot backend and PostgreSQL (2026-11-25, two
-real rounds, a replay and a lost answer, the Playwright W2-16 suite 13/13;
-[record](docs/plans/week-05.md#165-first-real-local-integration-run-2026-11-25-accepted)).
+Verified so far (final verification W5-10, 2026-11-25, local only; reviewed and approved): lint, typecheck,
+533 frontend tests and the build; `./mvnw -o verify`; the Playwright suite 15/15 (W2-16 and a roulette
+scenario); and the **real** Spring Boot backend and PostgreSQL with several bets, insufficient funds, an
+offline browser, a backend stopped during a spin, lost answers, reloads, two players in one tab, and the
+older Week 3 backend
+([W5-10 record](docs/plans/week-05.md#167-w5-10-final-verification-2026-11-25),
+[first run](docs/plans/week-05.md#165-first-real-local-integration-run-2026-11-25-accepted)).
 
 ### Deployed to staging
 
@@ -118,13 +121,14 @@ no roulette:** V8/V9 and the spin endpoint reach it only through the separately 
 [Week 4 rollout](infrastructure/roulette-rollout.md), which is prepared but not executed.
 
 **Week 5 is not on staging.** Vercel deploys `main` automatically, so merging Week 5 would put the new
-UI in front of the Week 3 staging backend at once; roulette would show as unavailable there. The Week 5
-frontend is not staging-ready until it has been checked against an older V7 backend (W5-10) and the
-approved roulette rollout has been followed.
+UI in front of the Week 3 staging backend at once; roulette would show as unavailable there (checked
+locally against the Week 3 backend on V7 in W5-10). The Week 5 frontend is not staging-ready until the
+approved roulette rollout has been followed and the screen-reader and CI release gates have passed.
 
 ### Planned (later weeks)
 
-Finishing Week 5: the final verification (W5-10) and, after approval, the merge into `main`. Week 6:
+Finishing Week 5: the screen-reader smoke test, CI on the pull request and, after approval, the
+merge into `main`. Week 6:
 refinement of the wheel animation, sound, an in-app reduced-motion setting, round history and
 statistics. Later: learning modules,
 quizzes and rewards (Weeks 7–8), statistics and play limits (Week 9), the admin panel (Week 10), and
@@ -463,9 +467,11 @@ What the tests use:
 - **Reports:** failures leave a screenshot and a trace in `frontend/test-results/`; the HTML report
   is in `frontend/playwright-report/` (`npx playwright show-report`). Both are git-ignored. Traces
   contain the disposable test passwords.
-- **Week 5 branch:** the W2-16 suite passed 13/13 on `feature/week-05-roulette-ui` (2026-11-25). There
-  is no Playwright scenario for roulette or the wallet yet; the real roulette round was checked once in
-  an isolated manual run ([record](docs/plans/week-05.md#165-first-real-local-integration-run-2026-11-25-accepted)).
+- **Week 5 branch:** `e2e/w5-roulette.spec.ts` adds two roulette scenarios (a round with several bets
+  checked against the database; a lost answer that is retried with the same key after a reload). The
+  whole suite passed 15/15 on `feature/week-05-roulette-ui` (2026-11-25). The W5 scenario registers its
+  players through the form: after W2-16 the fixture address has used its 10 registrations per hour
+  ([record](docs/plans/week-05.md#167-w5-10-final-verification-2026-11-25)).
 
 ## Configuration reference
 
@@ -563,8 +569,8 @@ Next milestones:
   is a separate, approval-gated step ([runbook](infrastructure/roulette-rollout.md)). Plan:
   [`docs/plans/week-04.md`](docs/plans/week-04.md).
 - **Week 5:** the roulette and wallet user interface and the Phaser wheel — implemented on the feature
-  branch and verified locally against the real backend; final verification (W5-10) open; not merged,
-  not deployed ([`docs/plans/week-05.md`](docs/plans/week-05.md)).
+  branch and verified locally against the real backend; final verification (W5-10) done and approved,
+  screen-reader test outstanding; not merged, not deployed ([`docs/plans/week-05.md`](docs/plans/week-05.md)).
 - **Week 6:** animation refinement, sound, round history and statistics.
 
 ## Documentation

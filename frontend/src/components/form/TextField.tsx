@@ -36,7 +36,7 @@ export function TextField({ id, label, hint, error, trailing, ref, ...inputProps
         {trailing && <div className="absolute inset-y-0 right-0 flex items-center pr-1.5">{trailing}</div>}
       </div>
       {hint && (
-        <p id={hintId} className="text-xs text-zinc-500">
+        <p id={hintId} className="text-xs text-zinc-400">
           {hint}
         </p>
       )}

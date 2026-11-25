@@ -129,7 +129,7 @@ function RouletteTable({ userId }: { userId: string }) {
               The wheel
             </h2>
             <RouletteWheel ref={wheel} />
-            <p className="mt-4 text-center text-xs text-zinc-500">
+            <p className="mt-4 text-center text-xs text-zinc-400">
               The wheel turns only to show the number the server drew. It never decides a result.
             </p>
           </section>

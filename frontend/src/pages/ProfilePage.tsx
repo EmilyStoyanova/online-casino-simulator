@@ -30,7 +30,7 @@ function AccountDetails({ user, catalog }: { user: UserProfile; catalog: Interes
       </dl>
       <h3 className="mt-5 text-sm font-medium text-zinc-300">Interests</h3>
       {names.length === 0 ? (
-        <p className="mt-2 text-sm text-zinc-500">None selected yet.</p>
+        <p className="mt-2 text-sm text-zinc-400">None selected yet.</p>
       ) : (
         <ul aria-label="Saved interests" className="mt-2 flex flex-wrap gap-2">
           {names.map((name) => (
@@ -43,7 +43,7 @@ function AccountDetails({ user, catalog }: { user: UserProfile; catalog: Interes
           ))}
         </ul>
       )}
-      <p className="mt-5 text-xs leading-relaxed text-zinc-500">
+      <p className="mt-5 text-xs leading-relaxed text-zinc-400">
         Your email, role and 18+ confirmation cannot be changed here.
       </p>
     </section>

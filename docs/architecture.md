@@ -501,8 +501,8 @@ keeps an in-memory state for the page visit: a `404` from the spin endpoint, or 
 server yet" and links to the wallet; the lobby card says "Not available on this server yet". A schema
 version of 9 or more is not proof that the endpoint exists; only the spin response decides, and no
 request is sent just to find out. The wallet pages use Week 3 endpoints and keep working. This
-behaviour is covered by unit tests; the run against a real V7 backend is part of W5-10 and has not
-been done yet.
+behaviour is covered by unit tests and was verified locally against the real Week 3 backend, on a V7
+database and on a V9 database (W5-10, [Week 5 plan §16.7](plans/week-05.md#167-w5-10-final-verification-2026-11-25)).
 
 ### 4.10 Development, production and staging setup
 
@@ -606,9 +606,10 @@ Week 5 (the player lobby, wallet and roulette UI, §4) is **neither merged nor d
 on `feature/week-05-roulette-ui`. Because Vercel deploys `main` automatically, a future merge would put
 the new UI in front of the staging backend at once, while that backend is still the Week 3 build at V7.
 For that case the UI shows roulette as unavailable (§4.9) and the wallet pages use the Week 3
-endpoints. The Week 5 frontend counts as staging-ready only after the run against an older V7 backend
-(W5-10) has been done and the separately approved
-[roulette rollout](../infrastructure/roulette-rollout.md) has been followed; until then nothing about
+endpoints (checked locally against the Week 3 backend on V7 in W5-10). The Week 5 frontend counts as
+staging-ready only after the separately approved
+[roulette rollout](../infrastructure/roulette-rollout.md) has been followed and its release gates
+(screen-reader test, CI) have passed; until then nothing about
 staging changes.
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a
