@@ -39,7 +39,7 @@ async function signIn(email: string) {
 
 /** Path, title, the page's own content, and the requests the page itself sends (besides the shared ones). */
 const pages = [
-  ['/roulette', 'European roulette', /being built/, []],
+  ['/roulette', 'European roulette', /Place your bets/, []],
   ['/wallet', 'Wallet', /No entries yet/, [HISTORY]],
 ] as const
 
@@ -128,17 +128,21 @@ describe.each(pages)('PlayerOnly on %s', (path, title, content, ownRequests) => 
 })
 
 describe('Placeholder pages', () => {
-  it('state honestly that roulette cannot be played yet: no betting control, only the server balance', async () => {
+  it('roulette states honestly that it cannot be played yet: bets can be placed, but no spin control and no result', async () => {
     backend({ currentUser: () => jsonResponse(alice) })
     renderApp('/roulette')
 
-    const progress = await screen.findByRole('region', { name: 'The roulette table is being built' })
-    expect(within(progress).getByText(/You cannot place bets yet/)).toBeInTheDocument()
-    // No betting control exists yet: the only buttons are the header's "Sign out" and the balance's "Refresh".
+    const table = await screen.findByRole('region', { name: 'Place your bets' })
+    expect(within(table).getByText(/Spinning is not switched on yet/)).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Refresh' })).toBeInTheDocument()
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Sign out', 'Refresh'])
-    // The only coin amounts are the server's balance (header badge and card); no game result.
-    expect(screen.getAllByText(/\d[\d,]* coins/).map((element) => element.textContent)).toEqual(['1,000 coins', '1,000 coins'])
+    // W5-06 adds the table, the chips and the slip, but no spin or confirmation control (W5-07).
+    expect(screen.queryByRole('button', { name: /spin|confirm/i })).not.toBeInTheDocument()
+    // No bets and no game result: the slip is empty, and the balances are the server's.
+    const slip = screen.getByRole('region', { name: 'Bet slip' })
+    expect(within(slip).getByText(/No bets yet/)).toBeInTheDocument()
+    expect(within(slip).getByText(/^Your balance:/)).toHaveTextContent('Your balance: 1,000 coins')
+    expect(within(screen.getByRole('region', { name: 'Your balance' })).getByText('1,000 coins')).toBeInTheDocument()
+    expect(screen.queryByText(/win|payout/i)).not.toBeInTheDocument()
   })
 
   it('the wallet shows the server balance and only the server’s entries: none yet, so no invented transactions', async () => {

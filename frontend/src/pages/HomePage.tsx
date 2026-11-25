@@ -88,7 +88,7 @@ function PlayerLobby({ user }: { user: UserProfile }) {
         <BalanceCard />
         <LobbyCard id="lobby-roulette" title="European roulette" progress="In development" to="/roulette" action="Open roulette">
           <p>Single zero, 37 numbers. Every bet has the same house edge of 1/37 (about 2.70 %).</p>
-          <p className="text-zinc-400">The table is being built: you cannot place bets yet.</p>
+          <p className="text-zinc-400">You can place and review bets; spinning is not switched on yet.</p>
         </LobbyCard>
         <LobbyCard id="lobby-wallet" title="Wallet" progress="History available" to="/wallet" action="Open wallet">
           <p>Your virtual balance and every change to it, recorded by the server.</p>

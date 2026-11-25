@@ -88,6 +88,16 @@ const mainNav = () => screen.getByRole('navigation', { name: 'Main' })
 const balanceCard = () => screen.getByRole('region', { name: 'Your balance' })
 /** Every coin amount on the page. */
 const amounts = () => screen.queryAllByText(/\d[\d,]* coins?$/).map((element) => element.textContent)
+/**
+ * The balances on the roulette page: header badge, balance card and the bet slip's balance line. The
+ * page also shows chip values and stakes (W5-06), which are not balances.
+ */
+const rouletteBalances = () =>
+  [
+    screen.getByRole('banner'),
+    balanceCard(),
+    within(screen.getByRole('region', { name: 'Bet slip' })).getByText(/^Your balance:/),
+  ].flatMap((element) => within(element).queryAllByText(/\d[\d,]* coins?$/).map((amount) => amount.textContent))
 
 async function signIn(email: string) {
   const user = userEvent.setup()
@@ -239,7 +249,7 @@ describe('AC-W5-04.2: one balance in the header, the lobby and the roulette page
     await userEvent.setup().click(within(mainNav()).getByRole('link', { name: 'Roulette' }))
     await screen.findByRole('heading', { level: 1, name: 'European roulette' })
 
-    expect(amounts()).toEqual(['1,330 coins', '1,330 coins'])
+    expect(rouletteBalances()).toEqual(['1,330 coins', '1,330 coins', '1,330 coins'])
     expect(document.body.textContent).not.toMatch(/[€$£¥]/)
     expect(api.requestsTo(WALLET)).toHaveLength(1)
   })
@@ -252,7 +262,7 @@ describe('AC-W5-04.2: one balance in the header, the lobby and the roulette page
     act(() => context().applyConfirmedBalance(1330))
 
     expect(screen.getByRole('link', { name: 'Balance 1,330 coins' })).toBeInTheDocument()
-    expect(amounts()).toEqual(['1,330 coins', '1,330 coins'])
+    expect(rouletteBalances()).toEqual(['1,330 coins', '1,330 coins', '1,330 coins'])
   })
 })
 

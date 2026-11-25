@@ -1,12 +1,13 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
-- **Status:** Revision 8. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
+- **Status:** Revision 10. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
   refinements (§14). W5-02 API foundation approved 2026-11-24 (§7.8). W5-03 navigation, `PlayerOnly`
   and player lobby approved 2026-11-24 (§4.4). First checkpoint (W5-01 to W5-03, `bb9e532`) approved
   and pushed. W5-04 wallet state and balance UI approved 2026-11-24 (§9.4) and pushed (`75d42da`).
   Q13 approved: Phaser starts in Week 5. W5-P01 Phaser integration foundation approved 2026-11-24
   (§3.4) and pushed (`acabd75`). W5-05 wallet transaction history approved 2026-11-25 (§6.3) and
-  committed to the feature branch.** Playwright W2-16 regression still pending (no JDK in this environment).
+  pushed (`929a6c0`). W5-06 table, chips and bet slip approved 2026-11-25 (§5.9) and committed to the
+  feature branch.** Playwright W2-16 regression still pending (no JDK in this environment).
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -35,6 +36,8 @@
 | 6 | 2026-11-24 | W5-P01 approved; checkpoint review before the commit: `WheelPhaserGame` gives `window.onblur`/`onfocus` back their previous values instead of clearing them and leaves no own `addEventListener` property on `document` (§3.4); W5-P01 committed and pushed to the feature branch |
 | 7 | 2026-11-24 | W5-P01 checkpoint recorded (`acabd75`); W5-05 implemented: `walletFormat`, `useWalletTransactions`, `TransactionHistory`, wallet page with history, lobby wallet card updated (§6.3) |
 | 8 | 2026-11-25 | W5-05 approved; checkpoint review before the commit: a test for a cursor the server rejects (`400`) and the recovery through "Refresh history"; the `MainNav` and `WalletProvider` test backends answer the wallet page's first history page (§6.3); W5-05 committed and pushed to the feature branch |
+| 9 | 2026-11-25 | W5-05 checkpoint recorded (`929a6c0`); W5-06 implemented: `rouletteTable`, `betSlipReducer` (renamed from `betSlip.ts`, see §5.9), `ChipSelector`, `RouletteBoard`, `BetSlip`, `BetSummaryBar`, roulette page with table, wheel, balance and slip; lobby roulette card updated (§5.9) |
+| 10 | 2026-11-25 | W5-06 approved; checkpoint review before the commit: AC-W5-06.1 to 06.7 re-checked; the disabled cells and "Review bets" (slip and summary bar) refuse activation in their event handlers, not only through `aria-disabled` (proven by the mutations of §5.9); W5-06 committed and pushed to the feature branch |
 
 ---
 
@@ -199,13 +202,14 @@ frontend/src
 │   │   └── walletFormat.ts         NEW   entry type labels, coin and timestamp formatting
 │   └── roulette/
 │       ├── rouletteTable.ts        NEW   static table model: cells, labels, display colours, odds text
-│       ├── betSlip.ts              NEW   pure reducer + selectors + toSpinRequest (client limits)
+│       ├── betSlipReducer.ts       NEW   pure reducer + selectors + toSpinRequest (client limits; §5.9)
 │       ├── useSpin.ts              NEW   spin attempt state machine (idempotency key lifecycle)
 │       ├── spinErrors.ts           NEW   error classification (definitive / uncertain) + messages
 │       ├── pendingSpinStore.ts     NEW   (W5-07, Q6) sessionStorage record of an unresolved spin, per user
 │       ├── RouletteBoard.tsx       NEW   the table (buttons)
 │       ├── ChipSelector.tsx        NEW   chip values (radio group)
 │       ├── BetSlip.tsx             NEW   selected bets, remove, clear, total stake, review
+│       ├── BetSummaryBar.tsx       NEW   (W5-06) sticky "n bets · total · Review bets" below md
 │       ├── SpinConfirmation.tsx    NEW   inline confirm step
 │       ├── SpinResult.tsx          NEW   server result: number, colour, per-bet outcome, totals
 │       └── OddsInfo.tsx            NEW   (Q8) categories, zero, probability, payout, house edge
@@ -636,6 +640,153 @@ win, odds and payout, "zero loses every bet except a straight bet on 0", and "ev
 edge of 1/37 ≈ 2.70 % (return to player 36/37 ≈ 97.30 %)". Static text taken from the contract
 description. It supports plan risk 5 (transparent probabilities). The per-player statistics stay in
 Week 9.
+
+### 5.9 Implemented in W5-06 (2026-11-25; approved 2026-11-25)
+
+**Files**
+
+| File | Change |
+|---|---|
+| `features/roulette/rouletteTable.ts` (new) | Pure, frozen model of the **46 cells**: 37 numbers (0–36 ascending), 3 dozens, 6 even-money cells (low, even, red, black, odd, high: the order of a real table). Each cell: contract selection, `key` (`STRAIGHT:17`), visible `label`/`detail` ("1st dozen" / "1–12"), slip `name` ("Number 17", "Low (1–18)"), `spoken` part, display `color` (from `rouletteNumbers.RED_NUMBERS`, the contract list), `betType`, `odds` (35 to 1, 2 to 1, 1 to 1 from the contract table). `cellFor` throws for a selection the table does not offer; `cellAccessibleName` ("17, black. Straight bet, pays 35 to 1." + " 50 coins placed."); `formatCoins` |
+| `features/roulette/betSlipReducer.ts` (new) | Pure reducer, selectors and `toSpinRequest` (below) |
+| `features/roulette/ChipSelector.tsx` (new) | Native radio group (below) |
+| `features/roulette/RouletteBoard.tsx` (new) | The table (below) |
+| `features/roulette/BetSlip.tsx` (new) | The slip and the read-only review (below) |
+| `features/roulette/BetSummaryBar.tsx` (new) | Sticky bar below `md` (below) |
+| `pages/RoulettePage.tsx` | Owns chip value, slip (`useReducer`) and the review flag (§9.1) in an inner `RouletteTable` keyed by the player id; composes table card (note, chips, board), wheel card (W5-P01 unchanged), `BalanceCard` and `BetSlip`; the "being built" progress card removed |
+| `pages/HomePage.tsx` | Lobby roulette card: "You can place and review bets; spinning is not switched on yet." (it said bets could not be placed) |
+
+**`betSlipReducer`** (`EMPTY_BET_SLIP`; actions `add { selection, amount }`, `remove { key }`, `clear`):
+
+- One entry per selection (`key`), in the order of first placement; a chip on an existing selection adds
+  to it. A new selection beyond 10 is refused; an addition is capped at 1,000 ("…, the maximum per bet");
+  a chip on a bet already at 1,000 is refused; an addition that would take the total above 10,000 is
+  refused (reachable only with smaller limits today, so `createBetSlipReducer(limits)` lets tests show
+  it). A refusal leaves `bets` unchanged (same array).
+- Every action sets `feedback { id, tone: change | refused, message }`, e.g. "Number 17: 50 coins. 1 bet,
+  total 50 coins.", "Not added: up to 10 different bets per spin. Remove a bet to choose Red.", "Red
+  removed. No bets left.", "All bets cleared."; the `id` grows with every action, so a repeated refusal is
+  announced again. A chip amount outside 1–1,000 or a selection the table does not offer throws (a
+  programming error, not user input).
+- Selectors: `totalStake` (the only sum the client computes), `knownBalance(wallet)` (the last
+  server-confirmed balance, also while refreshing or after a failed refresh; `null` for loading,
+  failed, inactive), `reviewBlock(bets, balance)` (`empty`, `insufficient-balance` only for a **known**
+  balance below the total, else `null`: an unknown balance is not zero), `blockReason`.
+- `toSpinRequest(bets)`: `{ bets: [{ category, <one option property>, amount }] }` in slip order, each bet
+  rebuilt property by property from its selection (extra properties of an entry never leak), frozen
+  (W5-07 sends one body unchanged on every retry). Throws for 0 or more than 10 bets, a repeated
+  selection, an amount outside 1–1,000 or not an integer, a total above 10,000, or a selection outside
+  the table. No number, payout, balance, user or key is part of it. **Not called by any page in W5-06.**
+
+**`ChipSelector`:** `fieldset` + `legend` "Chip value", six native radios (`sr-only` inputs, one tab
+stop, arrow keys move the choice), names "1 coin" … "500 coins" (the visible numeral is `aria-hidden`,
+the hidden text carries the whole name, so no engine joins "10coins"); each chip its own colour **and**
+numeral; the chosen chip has a ring and grows (shape, not colour only); the hint "Each choice on the
+table adds 10 coins." is the group's description. Default 10. 44 × 44 px.
+
+**`RouletteBoard`:** native `<button type="button">` cells in three `role="group"`s "Numbers", "Dozens",
+"Outside bets", each with its visible odds ("straight bet, pays 35 to 1", "pay 2 to 1", "pay 1 to 1"). DOM
+order 0, 1–36, dozens, outside bets in **both** layouts: below `md` zero on top and twelve rows of three
+(`grid-cols-3`); from `md` zero on the left at full height and twelve columns, each a row of three turned
+with `flex-col-reverse` (1 at the bottom, 3 on top). Red `rose-700`, black `zinc-900`, zero
+`emerald-700`, other cells felt green, white text (≥ 4.5:1); the colour is also in the accessible name, and
+red and black differ clearly in lightness. A placed amount is an amber marker with the number on the
+cell. Accessible name = `cellAccessibleName` (starts with the visible label, WCAG 2.5.3). While the
+review is open every cell is `aria-disabled` (still focusable) and described by "Your bets are being
+reviewed. Choose “Back to bets” in the bet slip to change them."; a click changes nothing. Focus ring
+amber-300 with offset, above neighbours.
+
+**`BetSlip`:** "Bet slip" region: rows (name, bet type and odds, amount, ✕ "Remove Red, 10 coins", 44 ×
+44 px), "Bets n of 10", "Total stake", "Your balance: 1,000 coins" ("(may be out of date)" after a failed
+refresh; "Checking your balance…" while loading; "Your balance is not known right now. The server checks
+it when a spin is sent." when failed). "Review bets" is `aria-disabled` with a visible reason that is
+also its description: "Place at least one bet to review it." or "Your balance is too low for these
+bets: 1,100 coins in bets, 1,000 coins available.". "Clear all bets" while bets exist. One polite
+`role="status"` region for every change and refusal. The contract limits in a small note. **No potential
+win or payout** anywhere (Q8).
+
+**Read-only review (the W5-06 part of §5.6):** "Review bets" replaces the slip actions with "Review your
+bets" (focus moves to it): the bets without remove buttons, the totals, the balance, the note
+"Spinning is not switched on yet: it arrives with the next development step (W5-07). Nothing has been
+sent to the server and none of your coins have been used." and **only** "Back to bets" (focus returns to
+"Review bets"). No "Confirm and spin" control exists; W5-07 adds `SpinConfirmation` there.
+
+**`BetSummaryBar`:** below `md`, while bets exist, sticky at the bottom of the page content: "2 bets · 60
+coins" and a second "Review bets" with the same state and description; it repeats the last slip message
+as `aria-hidden` text (the slip's live region announces it once). While reviewing it says "Reviewing your
+bets". Focusable controls of the table and slip carry `max-md:scroll-mb-24`.
+
+**Layout:** ≥ 1024 px `lg:grid-cols-[minmax(0,1fr)_20rem]`: table card left; wheel, balance and slip in
+the right column. Below 1024 px one column: table, wheel, balance, slip (the slip follows the wheel, so
+during a W5-07 spin the confirmation and the turning wheel are close together). Cards use `p-4` below
+`sm`.
+
+**React and Phaser:** the wheel component and its lifecycle are unchanged; the betting state never reaches
+the wheel (no props, no ref call). The wheel stays idle: no `spinTo` call in W5-06.
+
+**Tests** (38 files, 428 tests; after W5-05: 33 files, 364 tests):
+
+| File | New tests | Covers |
+|---|---|---|
+| `features/roulette/rouletteTable.test.ts` | 10 | AC-W5-06.1: 46 cells, 37 numbers ascending as straight bets, the 3 dozens and 6 even-money selections, only the five categories (no column/split/street/corner), `cellFor` for every cell and refusal of 37/−1. AC-W5-06.2: 18 red, 18 black, zero green against the red/black lists copied from `openapi.yaml`; red/black outside cells; odds per category; accessible names with colour, type, odds and placed amount; every name starts with the visible label |
+| `features/roulette/betSlipReducer.test.ts` | 23 | Chips and default; new bet with announcement; accumulation into one entry; cap at 1,000 then refusal; eleventh selection refused (existing bets still grow); total-stake refusal for a new and an existing bet (smaller limit); 10 × 1,000 = 10,000 accepted and nothing more; new feedback id per action; invalid chip or selection throws; purity; remove keeps order; clear; total = sum; review blocked when empty, blocked only by a **known** lower balance, not by an unknown one; last confirmed balance used while refreshing/after a failed refresh. AC-W5-06.6: all five categories with exactly one option property, zero and every option value, slip order and amounts, no other property, extra properties ignored, frozen body, refusal of invalid bodies |
+| `features/roulette/ChipSelector.test.tsx` | 4 | AC-W5-06.3: `fieldset` group "Chip value", six radios with names, 10 checked, one `name`, description; arrow keys (right, down, left, up) move the choice and focus; one tab stop; click; no currency |
+| `features/roulette/RouletteBoard.test.tsx` | 10 | Groups and counts, no other button; DOM order 0–36, dozens, outside; native buttons; colours of all 37 numbers vs. the contract; names of dozens and outside cells; visible group odds; amount marker and name; click, Enter and Space; Tab order over all 46 cells; lock: `aria-disabled`, focusable, described, nothing placed |
+| `pages/RoulettePage.test.tsx` | 17 | Whole app: wheel, table, chips, slip, balance and the W5-07 note; only `GET /users/me` and `GET /wallet` sent; no spin/confirm control. Mouse placement and accumulation (cell and slip); keyboard-only placement; dozens and all even-money cells with odds in order; cap and refusal announced; eleventh selection refused; remove and clear with announcements; review unavailable when empty and for a known balance of 600 below 1,000 (reason visible and as description), available again after a removal; unknown balance (failed read) does not block; no win/payout text. Review: focus on heading, no remove/clear, balance, note, no spin control, cells locked, "Back to bets" restores focus and changes nothing. After every action: no request but the two reads, balance unchanged, one wheel, `spinTo` never called. Summary bar: appears with the first bet, count and total, second "Review bets" with the same reason, message `aria-hidden`. Isolation: Alice's bets are gone for Bob after sign-out/sign-in, and also when the player changes while the page stays mounted (key by player) |
+
+**Changes to existing tests (behaviour changed by W5-06, no assertion weakened)**
+- `PlayerOnly.test.tsx`: the roulette page's own content is now "Place your bets" (still no request of its
+  own); the placeholder test now asserts the honest "Spinning is not switched on yet" note, no spin or
+  confirm control, an empty slip, the server balance in the slip and the card, and no win/payout text
+  (it asserted that no button but "Sign out" and "Refresh" existed, which W5-06 changes by design).
+- `WalletProvider.test.tsx` (AC-W5-04.2, 2 tests): on the roulette page the same balance is now checked in
+  the header, the balance card **and** the slip (three places, all equal); the page also shows chip values
+  and stakes, which are not balances.
+- `HomePage.test.tsx`: the lobby roulette card's new wording.
+
+**Guards proven** (mutations, not kept): an unknown balance treated as zero (2 failing tests), no cap at
+1,000 (1), no 10-bet limit (3), no total-stake check (1), a duplicate entry instead of accumulation (8),
+the request built by spreading the selection (1), the lock ignored on click (2), review opened despite a
+block (2), focus not moved to the review heading (1), the bar's message not `aria-hidden` (1), the table
+not keyed by the player (1).
+
+**Browser check (2026-11-25, local only).** Production build (`vite preview`) with the Vercel CSP header in
+Chrome through Playwright, API mocked in the browser (player with 1,000 coins), after placing 25 + 25 on
+17 and 10 on red and opening/closing the review, at 320 / 375 / 768 / 1024 / 1280 px: **0 px horizontal
+overflow** before, after betting and during the review; vertical table (zero on top, rows 1 2 3 …) at 320
+and 375, horizontal (zero on the left at full height, 1 below 3) from 768; slip below the table up to
+1023 px, side column from 1024; table cells at least 77 × 44 (320), 95 × 44 (375), 47 × 44 (768), 40 × 44
+(1024), 48 × 44 (1280) px; chips and remove buttons 44 × 44 px; the sticky bar at 320/375 sits at the
+viewport bottom, and over 50 Tab steps no focused control was fully hidden behind it; Chrome's
+accessibility tree has the three groups and 46 buttons at every width; the review focuses "Review your
+bets", locks 46 cells and has no spin control, "Back to bets" returns focus to "Review bets"; the Phaser
+canvas is drawn at every width; requests: only `GET /api/v1/users/me` and `GET /api/v1/wallet`, no other
+method; no console errors, warnings or CSP violations.
+
+**Checkpoint review (2026-11-25, before the commit).** AC-W5-06.1 to AC-W5-06.7 re-checked against the
+tests above. Disabled controls are inert in code: a cell's click handler returns while the table is
+locked, and both "Review bets" buttons call one handler that opens the review only when `reviewBlock` is
+`null`; the mutations "lock ignored on click" and "review opens despite block" each fail tests. No code
+changed at the checkpoint.
+
+**Verification:** `npm run lint`, `npm run typecheck`, `npm test` (38 files, 428 tests), `npm run build`
+(main chunk 341.70 kB, +15.6 kB; Phaser chunk unchanged at 1,372.20 kB) and `git diff --check` green.
+Playwright W2-16: still pending (no JDK).
+
+**Deviations from the plan**
+- `betSlip.ts` is named **`betSlipReducer.ts`**: next to `BetSlip.tsx`, the planned name differs only in
+  case, and on case-insensitive file systems (Windows, macOS) TypeScript resolved `./BetSlip` to the
+  `.ts` file (TS1149/TS1261). The content is as planned.
+- **"Undo the last chip" (Should)** is not implemented: the W5-06 task names add, remove and clear only.
+- `BetSummaryBar.tsx` is a new file (§3.2 had the bar only in §5.2's layout).
+- `OddsInfo` (Q8) stays in W5-08 as planned; W5-06 shows the odds on the groups, the cell names and the
+  slip rows.
+
+**Remaining limitations:** no spin (W5-07); the review is read-only. Dozen and outside cells are 40 px wide
+at 1024 px (44 px high; above the 24 px minimum, below the 44 × 44 target that §10.1 sets for narrow
+screens only). Red/black number cells rely on colour plus lightness and the accessible name; a visible
+text marker was not added (W5-08 wording and contrast review). Screen-reader behaviour checked through
+Chrome's accessibility tree, not yet with NVDA/Narrator (W5-08). 200 % zoom not yet recorded (W5-08).
 
 ---
 
@@ -1224,7 +1375,7 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | W5-04 | **Wallet state and balance (done, approved 2026-11-24, §9.4):** `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`; stale-response guard; lobby and header show the balance; tests | M | W5-02, W5-03 (Q2, Q3) |
 | W5-P01 | **Phaser integration foundation (Q13; approved 2026-11-24, §3.4):** Phaser 4.2.1 as the only new runtime dependency; `games/roulette/` (wheel geometry, canvas check, `RouletteScene`, `createWheelGame`), `features/roulette/RouletteWheel` (lazy-loaded, StrictMode-safe, accessible HTML description, reduced motion, `spinTo` handle for W5-07), wheel on `/roulette`; no spin control, no client outcome | M | W5-03, W5-04 (Q11, Q13) |
 | W5-05 | **Wallet page and history (approved 2026-11-25, §6.3):** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |
-| W5-06 | **Table, chips and bet slip (no API):** `rouletteTable.ts`, `betSlip.ts`, `RouletteBoard`, `ChipSelector`, `BetSlip`, responsive table layouts; unit and keyboard tests | L | W5-03 (Q5) |
+| W5-06 | **Table, chips and bet slip (no API; approved 2026-11-25, §5.9):** `rouletteTable.ts`, `betSlipReducer.ts`, `RouletteBoard`, `ChipSelector`, `BetSlip`, responsive table layouts; unit and keyboard tests | L | W5-03 (Q5) |
 | W5-07 | **Spin flow:** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; the wheel (W5-P01) turns to the server-confirmed `winningNumber` before the result is revealed; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-P01, W5-06 (Q4, Q6, Q7, Q10, Q13) |
 | W5-08 | **Responsive, accessibility and responsible-play pass:** layouts at all widths, focus management, live regions, contrast, `OddsInfo` (Q8), wording review; fixes and tests; manual check record | M | W5-05, W5-07 |
 | W5-09 | **Documentation:** `architecture.md` §4 (frontend structure, wallet state, spin lifecycle), README (what works today, local walkthrough), `user-scenarios.md` S3 note (animation in Week 6), this plan's implementation records | S | W5-08 |

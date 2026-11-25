@@ -43,7 +43,7 @@ describe('Home page', () => {
 
     const roulette = screen.getByRole('region', { name: 'European roulette' })
     expect(within(roulette).getByText('In development')).toBeInTheDocument()
-    expect(within(roulette).getByText(/you cannot place bets yet/)).toBeInTheDocument()
+    expect(within(roulette).getByText(/You can place and review bets; spinning is not switched on yet/)).toBeInTheDocument()
     expect(within(roulette).getByText(/house edge of 1\/37/)).toBeInTheDocument()
     expect(within(roulette).getByRole('link', { name: 'Open roulette' })).toHaveAttribute('href', '/roulette')
 
