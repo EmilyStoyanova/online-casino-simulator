@@ -47,6 +47,8 @@ export type BetSlipAction =
   | { type: 'add'; selection: RouletteSelection; amount: number }
   | { type: 'remove'; key: string }
   | { type: 'clear' }
+  /** After a round the server confirmed: the bets were played, so the slip starts empty (Q7). */
+  | { type: 'reset' }
 
 export interface SlipLimits {
   readonly maxBets: number
@@ -124,6 +126,8 @@ export function createBetSlipReducer(limits: SlipLimits = ROULETTE_LIMITS) {
       }
       case 'clear':
         return state.bets.length === 0 ? state : change([], 'All bets cleared.')
+      case 'reset':
+        return EMPTY_BET_SLIP
     }
   }
 }
@@ -131,7 +135,7 @@ export function createBetSlipReducer(limits: SlipLimits = ROULETTE_LIMITS) {
 export const betSlipReducer = createBetSlipReducer()
 
 /** Why "Review bets" is not available, or `null` when it is. */
-export type ReviewBlock = 'empty' | 'insufficient-balance' | null
+export type ReviewBlock = 'empty' | 'insufficient-balance' | 'unavailable' | null
 
 /**
  * `balance` is the last server-confirmed balance, or `null` when none is known (loading, failed,
@@ -151,11 +155,20 @@ export function knownBalance(wallet: WalletState): number | null {
 
 /** The visible reason why "Review bets" is not available (also its accessible description). */
 export function blockReason(block: ReviewBlock, bets: readonly SlipBet[], balance: number | null): string | null {
+  if (block === 'unavailable') return 'Roulette is not available on this server yet.'
   if (block === 'empty') return 'Place at least one bet to review it.'
   if (block === 'insufficient-balance' && balance !== null) {
     return `Your balance is too low for these bets: ${formatCoins(totalStake(bets))} in bets, ${formatCoins(balance)} available.`
   }
   return null
+}
+
+/** The bets of a frozen request as slip entries, in request order (to show an attempt after a reload). */
+export function slipFromRequest(request: RouletteSpinRequest): SlipBet[] {
+  return request.bets.map((bet) => {
+    const entry = cellFor(bet)
+    return { key: entry.key, selection: entry.selection, amount: bet.amount }
+  })
 }
 
 function toBet(selection: RouletteSelection, amount: number): RouletteBet {

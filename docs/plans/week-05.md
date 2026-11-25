@@ -1,13 +1,16 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
-- **Status:** Revision 10. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
+- **Status:** Revision 12. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
   refinements (§14). W5-02 API foundation approved 2026-11-24 (§7.8). W5-03 navigation, `PlayerOnly`
   and player lobby approved 2026-11-24 (§4.4). First checkpoint (W5-01 to W5-03, `bb9e532`) approved
   and pushed. W5-04 wallet state and balance UI approved 2026-11-24 (§9.4) and pushed (`75d42da`).
   Q13 approved: Phaser starts in Week 5. W5-P01 Phaser integration foundation approved 2026-11-24
   (§3.4) and pushed (`acabd75`). W5-05 wallet transaction history approved 2026-11-25 (§6.3) and
-  pushed (`929a6c0`). W5-06 table, chips and bet slip approved 2026-11-25 (§5.9) and committed to the
-  feature branch.** Playwright W2-16 regression still pending (no JDK in this environment).
+  pushed (`929a6c0`). W5-06 table, chips and bet slip approved 2026-11-25 (§5.9) and pushed
+  (`b40492a`). W5-07 spin flow reviewed and approved for the frontend checkpoint 2026-11-25 (§8.5)
+  and committed to the feature branch.** Chrome checks used a mocked API; the real Spring Boot +
+  PostgreSQL integration is **unverified** (no JDK) and is a mandatory gate before the merge to `main`.
+  Playwright W2-16 regression still pending (no JDK in this environment).
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -38,6 +41,8 @@
 | 8 | 2026-11-25 | W5-05 approved; checkpoint review before the commit: a test for a cursor the server rejects (`400`) and the recovery through "Refresh history"; the `MainNav` and `WalletProvider` test backends answer the wallet page's first history page (§6.3); W5-05 committed and pushed to the feature branch |
 | 9 | 2026-11-25 | W5-05 checkpoint recorded (`929a6c0`); W5-06 implemented: `rouletteTable`, `betSlipReducer` (renamed from `betSlip.ts`, see §5.9), `ChipSelector`, `RouletteBoard`, `BetSlip`, `BetSummaryBar`, roulette page with table, wheel, balance and slip; lobby roulette card updated (§5.9) |
 | 10 | 2026-11-25 | W5-06 approved; checkpoint review before the commit: AC-W5-06.1 to 06.7 re-checked; the disabled cells and "Review bets" (slip and summary bar) refuse activation in their event handlers, not only through `aria-disabled` (proven by the mutations of §5.9); W5-06 committed and pushed to the feature branch |
+| 11 | 2026-11-25 | W5-06 checkpoint recorded (`b40492a`); W5-07 implemented: `spinErrors`, `pendingSpinStore`, `rouletteAvailability`, `useSpin`, `SpinConfirmation`, `UnresolvedSpin`, `SpinResult`, `BetRows`; roulette page with the spin flow, the wheel turning to the server's number, the unavailable state; lobby card without availability claim (§8.5) |
+| 12 | 2026-11-25 | W5-07 reviewed and approved for the frontend checkpoint; final safety review: a `200` body is validated before the record is cleared, the balance applied, the wheel turned or the result shown (9 malformed shapes tested, each retried with the same key and body); leaving during the animation tested; `409 IDEMPOTENCY_KEY_REUSED` logged as a defect (§8.4); W5-07 committed and pushed to the feature branch |
 
 ---
 
@@ -1156,6 +1161,128 @@ of a record lost that way is still visible in the balance and the wallet history
 Week 6's round history). A duplicated tab copies the record: both tabs retry the same `K`, which the
 server answers idempotently. The record contains no session id, token, email or balance.
 
+### 8.5 Implemented in W5-07 (2026-11-25; approved for the frontend checkpoint 2026-11-25)
+
+**Files**
+
+| File | Change |
+|---|---|
+| `features/roulette/spinErrors.ts` (new) | Pure `classifySpinError` (§7.2): `definitive` / `uncertain`, the record effect of §8.4 (`resolves`: `400 VALIDATION_FAILED`/`MALFORMED_REQUEST`, `409 INSUFFICIENT_FUNDS`/`BALANCE_LIMIT_EXCEEDED`/`IDEMPOTENCY_KEY_REUSED`; `before-lookup`: `401`, `403` (`ACCESS_DENIED`, `CSRF_TOKEN_INVALID` after the automatic retry), `404`, `405`, `413`, `415`; `unknown`: network, gateway, non-JSON `2xx`, `500`, other `5xx`, `503 SERVICE_UNAVAILABLE` (busy wallet), unknown codes and statuses), the message, field errors by bet index (`bets[i].…`), "refresh balance" (the `409`s) and "unavailable" (`404`). Decides on status **and** code only; a known code with an unexpected status is `uncertain` |
+| `features/roulette/pendingSpinStore.ts` (new) | The §8.4 record under `casino.roulette.pendingSpin.v1.<userId>`: `loadPendingSpin` (pure: `none` / `found` / `invalid`; a `sending` record reads as `unresolved` + `ambiguous`; validation rebuilds the body through `toSpinRequest` and requires the exact same JSON, a canonical key, version 1 and the same user id inside), `savePendingSpin` (`false` on any failure, also a silently dropped write, read back), `clearPendingSpin(userId, key)` (only the record of that key), `removeInvalidPendingSpin`. Every access in `try`/`catch` |
+| `features/roulette/rouletteAvailability.ts` (new) | In-memory availability for the page visit (§7.7): `unknown`, or `unavailable` after a spin `404` (final) or a platform-status `schemaVersion` below 9; 9 or more proves nothing. `useSyncExternalStore` hook for the roulette page and the lobby. Nothing is ever sent to find out |
+| `features/roulette/useSpin.ts` (new) | The attempt state machine (below) |
+| `features/roulette/SpinConfirmation.tsx` (new) | Inline confirmation (§5.6, Q4): exact bets, total stake, balance, "The server draws the number. Your stake is debited when you confirm.", "Confirm and spin" / "Waiting for the server…", "Back to bets" |
+| `features/roulette/UnresolvedSpin.tsx` (new) | "Spin not confirmed" with the reason, the frozen bets of the record, "Retry spin" (same key and body) and "Check balance"; heading "Waiting for the server" while a retry is in flight |
+| `features/roulette/SpinResult.tsx` (new) | The server's result (§5.7) |
+| `features/roulette/BetRows.tsx` (new) | Bet rows and totals shared by slip, confirmation and unresolved attempt; server field messages under their row |
+| `features/roulette/BetSlip.tsx` | Modes editing / confirming (incl. in flight) / unresolved (incl. retry in flight); definitive errors as an alert with focus; the W5-06 read-only note and "Nothing is sent yet" removed |
+| `features/roulette/BetSummaryBar.tsx` | Shows the spin phase instead of "Review bets" while confirming, waiting, turning or unresolved |
+| `features/roulette/betSlipReducer.ts` | `reset` action (slip emptied after a confirmed round, no announcement), `ReviewBlock` `unavailable`, `slipFromRequest` |
+| `pages/RoulettePage.tsx` | `useSpin` per player (table keyed by the player id), `RouletteWheel` with a ref, result area ("The wheel is turning…" while revealing, then `SpinResult`), lock reasons per phase, unavailable notice with a wallet link, slip changes dismiss a definitive error |
+| `pages/HomePage.tsx` | Lobby roulette card: no availability claim ("Virtual coins" / "Every number is drawn by the server; your browser never decides a result."), "Not available on this server yet" once known (§7.7 item 2) |
+| `features/system-status/useSystemStatus.ts` | Passes `database.schemaVersion` of the status the app already loads to `noteSchemaVersion` (one line); no new request |
+| `test/fixtures.ts`, `test/setup.ts` | `upStatus.schemaVersion` `'5'` → `'9'` (the Week 4 backend; `'5'` would now mark roulette unavailable in every whole-app test); availability and in-flight spins reset after each test |
+
+**`useSpin` lifecycle** (phases `editing` → `confirming` → `submitting` → `revealing` → `editing` with the result, or → `unresolved`):
+
+1. "Review bets" (only without a block) → `confirming`; the board is `aria-disabled` with the reason.
+2. "Confirm and spin" → `toSpinRequest(slip)` (frozen) and `newIdempotencyKey()` (one new key per
+   new spin; never for a retry) → record `{ version 1, userId, key, request, createdAt, ambiguous: false,
+   state: 'sending' }` written and read back → **only then** `spinRoulette(request, key)`. A failed write
+   sends nothing and says so.
+3. One request per user at a time: a module-level map of requests in flight, checked by confirm,
+   retry and send; buttons are `aria-disabled` with guarded handlers. The map also lets a page that is
+   opened again during the request show "Waiting for the server" and the answer, without a new request.
+4. The answer is handled **once, independent of the page**: `200` with a valid body → record cleared and
+   `applyConfirmedBalance(result.balance)` of the session that sent it (a later session ignores it, Q3)
+   → if the page is still there: slip reset, `revealing`, `wheel.spinTo(winningNumber)`, then the result
+   (at most `SPIN_DURATION_MS + 3 s`; a missing or failing wheel shows it at once). A `200` whose body is
+   not a spin result is an unknown outcome. Failures follow §8.4: `resolves` → cleared; `before-lookup` →
+   cleared only if not ambiguous; `unknown` → kept as `unresolved`, `ambiguous: true`. `409`s refresh the
+   wallet; `404` marks roulette unavailable.
+5. On load, a record of **this** user → `unresolved` with "An earlier spin could not be confirmed…" and
+   "Retry spin"; nothing is sent automatically. An invalid record is removed with an explanation (and a
+   wallet re-read when the balance was already loaded). Records of other users are never read.
+6. `401 SESSION_EXPIRED` → the existing flow (login with `returnTo=/roulette`); after an earlier unknown
+   outcome the record stays and the same user is offered the retry after signing in again.
+
+**React and Phaser.** `RoulettePage` passes a ref to `RouletteWheel`; `useSpin` calls `spinTo` exactly
+once per confirmed round, from the answer handler (not from an effect, so re-renders cannot repeat it),
+with the server's `winningNumber` only. The Phaser lifecycle of W5-P01 is unchanged; reduced motion is
+the wheel's own (the game gets the preference; the number is the same). The header balance changes
+when the server answers, before the wheel stops (the user's W5-07 instruction "update WalletProvider
+immediately"; §3.3 rule 5 said "then reveals the result", which still holds for the result panel).
+
+**Result (§5.7).** Number badge with the server's colour and "17 · Black"; "Staked 30 coins, returned 360
+coins, net +330 coins." (`role="status"`); every bet in request order with Won/Lost (`payout > 0`) and
+payout; total stake, total payout, net result (`totalPayout − totalStake`), balance after this round;
+"Played *time* · round *8 chars*". One neutral layout for wins and losses; focus on the result heading.
+The slip is empty afterwards (Q7); there is no repeat-bet control.
+
+**Messages** (decided on status and code): see `spinErrors.ts`; `400 VALIDATION_FAILED` puts the server's
+field message under its row (`bets[1].amount` → second row) and the slip stays editable; any slip change
+dismisses the error.
+
+**Tests** (42 files, 518 tests after the checkpoint review; after W5-06: 38 files, 428 tests):
+
+| File | New tests | Covers |
+|---|---|---|
+| `features/roulette/spinErrors.test.ts` | 18 | Every §7.2 row: field-error mapping, the five `resolves` codes with messages and balance refresh, seven `before-lookup` cases, `404` unavailable, network/gateway/non-JSON `2xx`, `500`/other `5xx`/unknown codes, busy `503`, non-`ApiError`; code with unexpected status is uncertain; `title`/`detail` never shown |
+| `features/roulette/pendingSpinStore.test.ts` | 19 | Key format and exact fields (no token, session, email, balance; nothing in `localStorage`); round trip; `sending` → unresolved + ambiguous; other users; ten invalid shapes (read is pure, removal explicit); valid record kept; clear by key only; failed, silently dropped and throwing storage |
+| `features/roulette/rouletteAvailability.test.ts` | 4 | Unknown at start; below 9 → unavailable; 9, 10, null, empty, "V7", "8.1" prove nothing; `404` is final |
+| `pages/RoulettePage.spin.test.tsx` | 49 | Whole app. AC-W5-07.1 (nothing sent before confirm, back unchanged); 07.2/07.3 (one request, canonical key, CSRF header, exact body, record written **before** the request with that key; wheel `spinTo(17)` once; result values, focus, empty slip, no repeat control, record cleared; balance unchanged while waiting, then 1,330, then the reconciling read; unusual server values rendered as sent); 07.5 (new key per spin); Phaser (failing animation, no canvas, wheel that never finishes → result after `REVEAL_LIMIT_MS`, reduced motion); 07.4 (network, `500`, gateway `502`, busy `503`: record kept, table locked, retry with the same key and body; invalid `200` body; CSRF retry with the same key; 07.4a storage failure → nothing sent); 07.7 (double activation → one request); 07.4b (reload → unresolved, nothing sent until "Retry spin"; another user never sees it; invalid record set aside, also on a fresh load); 07.6 (`400` field error on its row, `409` ×3, `400 MALFORMED`, `403`, `403 CSRF` twice); 07.4c/07.8 (`401` first send → login `returnTo=/roulette`, record cleared; `401` and `403` after an unknown outcome keep it; same user signs in and retries); 07.10 (`404` → persistent unavailable state, lobby card, wallet link; schema 7 up front without a request; schema 9 claims nothing); leaving during the request (balance and record applied once, no second request), coming back during it ("Waiting for the server", then the result), a late answer for Alice never reaches Bob |
+
+**Changes to existing tests (behaviour changed by W5-07, no assertion weakened):**
+`RoulettePage.test.tsx` (W5-06 page tests: the intro text; the review now contains "Confirm and spin" and still sends nothing without it; the "nothing is sent" test renamed), `PlayerOnly.test.tsx` (roulette sends no game request on load and offers no spin control before the review), `HomePage.test.tsx` (lobby card wording without availability claim), `WalletProvider`/navigation tests unchanged.
+
+**Guards proven** (mutations, not kept): sending without writing the record (2 failing tests), a new key on
+retry (7), no one-request guard (killed after the retry double-activation test was added: 1 failing),
+every failure clearing the record (7), `before-lookup` clearing an ambiguous record (2), balance not applied
+(3), wheel not told the number (5), `404` not marking unavailable (1), no reattach after a remount (1),
+any `200` body accepted (1), no reveal time limit (2), a reload sending the record automatically (2), the
+slip not cleared after a round (1), "Confirm and spin" not inert while waiting (killed after the balance-drop test was added: 1).
+
+**Browser check (2026-11-25, local only).** Production build (`vite preview`) with the Vercel CSP header in Chrome through Playwright, the real Phaser wheel, API mocked in the browser (contract example: 10 on 17 and 20 on red; `200` with 17 black, balance 1,330). **Happy path at 1280 and 375 px:** one `POST`, canonical v4 `Idempotency-Key`, `X-XSRF-TOKEN` sent, body exactly `{"bets":[{"category":"STRAIGHT","number":17,"amount":10},{"category":"RED_BLACK","color":"RED","amount":20}]}`; the wheel stopped with 17 under the pointer (screenshots), the result appeared after the turn (about 5.3–5.5 s from the click, `SPIN_DURATION_MS` 4.5 s), focus on "Result", net +330, balance after 1,330, header 1,330, slip empty, `sessionStorage` empty; 0 px horizontal overflow while turning and with the result. **Lost answer:** the first `POST` aborted (`ERR_CONNECTION_RESET`) → "Spin not confirmed", record `unresolved` + `ambiguous` with the sent key, 46 cells locked; "Retry spin" sent the same key and the identical body, result shown, record removed. **Leaving during the request** (answer after 2.5 s): went to the wallet page, the header became 1,330 there, record removed, back on roulette no unresolved spin, one `POST` in total. **Reduced motion** (`prefers-reduced-motion: reduce`): the wheel was set to the number at once, result about 0.6 s after the click. Console: only the deliberately aborted request of the retry scenario; no errors from the app, no warnings, no CSP violations.
+
+**Checkpoint review (2026-11-25, before the commit).** AC-W5-07.1 to 07.10 re-checked against the tests.
+- *Invalid `200`:* `isSpinResult` runs first in the answer handler; only a valid body clears the record,
+  applies the balance, resets the slip, turns the wheel and shows the result. Nine malformed bodies
+  (unrelated object, `null`, no balance, number 37, unknown colour, no bets, negative payout, fractional
+  balance, a bet outside the table) each leave the record `unresolved`/`ambiguous`, the balance and the
+  wheel untouched, and "Retry spin" sends the same key and body (mutation "validate after clearing":
+  9 failing tests). `applyConfirmedBalance` is wrapped (a throw falls back to a wallet read).
+- *Late answers and sessions:* the answer is handled once per request (module map), applied with the
+  wallet of the sending session, and shown only by a mounted page of the same user; navigation sends
+  nothing; a reload or a return never sends a record (mutation tested); sign-out and expiry keep an
+  unresolved record; `401`/`403`/`404` after an ambiguous send keep it (tested for `401` and `403`; `404`
+  uses the same branch).
+- *Phaser:* `spinTo` only with the server's `winningNumber`, once per round, from the answer handler; a
+  failing, missing or never-ending animation only shows the result (no request); leaving during the
+  animation keeps the round confirmed and a late end changes nothing (new test); reduced motion
+  unchanged.
+- *Defect log:* `409 IDEMPOTENCY_KEY_REUSED` writes one `console.error` with the key (tested).
+- **Chrome checks used a mocked API** (`page.route`), not the real backend.
+
+**Real backend: not verified.** There is no JDK on this machine, and the only local backend image
+(`casino-backend:render-test`, built 2026-11-07) predates the roulette endpoint (Week 4, 2026-11-19).
+Building a current image would download base images and Maven dependencies and create new images and
+containers, which needs approval. The real Spring Boot + PostgreSQL V9 walkthrough (§16.2) and the older
+V7 backend check (§7.7 item 4) remain open for W5-10.
+
+**Verification:** `npm run lint`, `npm run typecheck`, `npm test` (42 files, 518 tests),
+`npm run build` (main chunk 361.35 kB, +19.7 kB; the Phaser chunk 1,371.67 kB, 0.5 kB smaller because `wheelConfig` is now shared with the main chunk (`SPIN_DURATION_MS`)) and `git diff --check` green. Playwright W2-16: still pending (no JDK).
+
+**Remaining limitations and risks**
+- The header balance changes when the server answers, before the wheel stops (instruction "update
+  WalletProvider immediately"); the result panel waits for the wheel.
+- A result that arrives after the page was left is applied (balance, record) but not shown when the
+  player comes back; the wallet history shows the round (Week 6 adds round history).
+- The record lives in `sessionStorage` of one tab; closing the tab with an unresolved spin leaves only
+  the balance and the wallet history as evidence (§8.4 "Scope and limits").
+- A failed CSRF token fetch before the `POST` is classified as unknown (safe: the retry uses the same key).
+- `409 IDEMPOTENCY_KEY_REUSED` is treated as a defect: cleared, message points to the wallet history.
+- NVDA/Narrator, 200 % zoom and Lighthouse remain W5-08 manual checks.
+
 ---
 
 ## 9. Client-side state and data flow
@@ -1376,7 +1503,7 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | W5-P01 | **Phaser integration foundation (Q13; approved 2026-11-24, §3.4):** Phaser 4.2.1 as the only new runtime dependency; `games/roulette/` (wheel geometry, canvas check, `RouletteScene`, `createWheelGame`), `features/roulette/RouletteWheel` (lazy-loaded, StrictMode-safe, accessible HTML description, reduced motion, `spinTo` handle for W5-07), wheel on `/roulette`; no spin control, no client outcome | M | W5-03, W5-04 (Q11, Q13) |
 | W5-05 | **Wallet page and history (approved 2026-11-25, §6.3):** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |
 | W5-06 | **Table, chips and bet slip (no API; approved 2026-11-25, §5.9):** `rouletteTable.ts`, `betSlipReducer.ts`, `RouletteBoard`, `ChipSelector`, `BetSlip`, responsive table layouts; unit and keyboard tests | L | W5-03 (Q5) |
-| W5-07 | **Spin flow:** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; the wheel (W5-P01) turns to the server-confirmed `winningNumber` before the result is revealed; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-P01, W5-06 (Q4, Q6, Q7, Q10, Q13) |
+| W5-07 | **Spin flow (approved for the frontend checkpoint 2026-11-25; real backend unverified, §8.5):** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; the wheel (W5-P01) turns to the server-confirmed `winningNumber` before the result is revealed; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-P01, W5-06 (Q4, Q6, Q7, Q10, Q13) |
 | W5-08 | **Responsive, accessibility and responsible-play pass:** layouts at all widths, focus management, live regions, contrast, `OddsInfo` (Q8), wording review; fixes and tests; manual check record | M | W5-05, W5-07 |
 | W5-09 | **Documentation:** `architecture.md` §4 (frontend structure, wallet state, spin lifecycle), README (what works today, local walkthrough), `user-scenarios.md` S3 note (animation in Week 6), this plan's implementation records | S | W5-08 |
 | W5-10 | **Verification and pull request preparation:** full frontend checks, local real-stack walkthrough (§16.2) including the older V7 backend (Q10), Playwright W2-16 regression and the W5 scenario (Should), checklist "no client RNG/payout, no browser storage except the pending spin record, no cloud". PR prepared, **not opened without approval** | M | all |

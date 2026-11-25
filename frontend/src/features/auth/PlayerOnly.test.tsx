@@ -128,15 +128,16 @@ describe.each(pages)('PlayerOnly on %s', (path, title, content, ownRequests) => 
 })
 
 describe('Placeholder pages', () => {
-  it('roulette states honestly that it cannot be played yet: bets can be placed, but no spin control and no result', async () => {
+  it('roulette sends no game request on load: no spin control before the review, no result, only the server balance', async () => {
     backend({ currentUser: () => jsonResponse(alice) })
     renderApp('/roulette')
 
     const table = await screen.findByRole('region', { name: 'Place your bets' })
-    expect(within(table).getByText(/Spinning is not switched on yet/)).toBeInTheDocument()
+    expect(within(table).getByText(/The server draws the number/)).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Refresh' })).toBeInTheDocument()
-    // W5-06 adds the table, the chips and the slip, but no spin or confirmation control (W5-07).
+    // "Confirm and spin" exists only inside the review (W5-07); opening the page offers none.
     expect(screen.queryByRole('button', { name: /spin|confirm/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Result' })).not.toBeInTheDocument()
     // No bets and no game result: the slip is empty, and the balances are the server's.
     const slip = screen.getByRole('region', { name: 'Bet slip' })
     expect(within(slip).getByText(/No bets yet/)).toBeInTheDocument()

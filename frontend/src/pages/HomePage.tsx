@@ -6,6 +6,7 @@ import { PageHeader } from '../components/layout/PageHeader'
 import { AccountPanel } from '../features/auth/AccountPanel'
 import { useAuth } from '../features/auth/useAuth'
 import { SystemStatusCard } from '../features/system-status/SystemStatusCard'
+import { useRouletteAvailability } from '../features/roulette/rouletteAvailability'
 import { BalanceCard } from '../features/wallet/BalanceCard'
 import type { UserProfile } from '../types/user'
 
@@ -79,6 +80,9 @@ function LobbyCard({
 
 /** The lobby of a signed-in player: the server-confirmed balance and where to go next. */
 function PlayerLobby({ user }: { user: UserProfile }) {
+  // No availability claim before the backend has shown it; a known absence is said plainly (§7.7).
+  const roulette = useRouletteAvailability()
+  const unavailable = roulette.status === 'unavailable'
   return (
     <div className="w-full space-y-8">
       <PageHeader title={`Welcome back, ${user.displayName}`}>
@@ -86,9 +90,19 @@ function PlayerLobby({ user }: { user: UserProfile }) {
       </PageHeader>
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
         <BalanceCard />
-        <LobbyCard id="lobby-roulette" title="European roulette" progress="In development" to="/roulette" action="Open roulette">
+        <LobbyCard
+          id="lobby-roulette"
+          title="European roulette"
+          progress={unavailable ? 'Not available on this server yet' : 'Virtual coins'}
+          to="/roulette"
+          action="Open roulette"
+        >
           <p>Single zero, 37 numbers. Every bet has the same house edge of 1/37 (about 2.70 %).</p>
-          <p className="text-zinc-400">You can place and review bets; spinning is not switched on yet.</p>
+          <p className="text-zinc-400">
+            {unavailable
+              ? 'This server does not offer roulette yet. Your wallet still works.'
+              : 'Every number is drawn by the server; your browser never decides a result.'}
+          </p>
         </LobbyCard>
         <LobbyCard id="lobby-wallet" title="Wallet" progress="History available" to="/wallet" action="Open wallet">
           <p>Your virtual balance and every change to it, recorded by the server.</p>

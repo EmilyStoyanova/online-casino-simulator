@@ -30,7 +30,8 @@ export const upStatus: SystemStatus = {
   application: 'online-casino-simulator',
   version: '0.1.0-SNAPSHOT',
   status: 'UP',
-  database: { status: 'UP', schemaVersion: '5' },
+  // V9: the Week 4 backend with the roulette and wallet tables (a lower version hides roulette, §7.7).
+  database: { status: 'UP', schemaVersion: '9' },
   timestamp: '2026-11-03T10:00:00Z',
 }
 

@@ -54,11 +54,11 @@ async function openTable() {
 }
 
 describe('/roulette: the wheel, the table, the chips, the slip and the balance', () => {
-  it('shows all parts, says honestly that spinning comes in W5-07, and sends only the shared reads', async () => {
+  it('shows all parts, explains that the server draws the number, and sends only the shared reads', async () => {
     const { api } = await openTable()
 
     expect(screen.getByRole('heading', { level: 1, name: 'European roulette' })).toBeInTheDocument()
-    expect(within(table()).getByText(/Spinning is not switched on yet: it arrives with the next development step \(W5-07\)/)).toBeInTheDocument()
+    expect(within(table()).getByText(/review and confirm them\. The server draws the number and settles your virtual coins\./)).toBeInTheDocument()
     expect(within(table()).getByRole('group', { name: 'Chip value' })).toBeInTheDocument()
     expect(within(table()).getByRole('group', { name: 'Numbers' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'The wheel' })).toBeInTheDocument()
@@ -67,7 +67,7 @@ describe('/roulette: the wheel, the table, the chips, the slip and the balance',
     expect(api.requests.map((request) => `${request.method} ${request.path}`).sort()).toEqual([CURRENT_USER, WALLET].sort())
   })
 
-  it('offers no spin and no confirmation control at all', async () => {
+  it('offers no spin or confirmation control before "Review bets" (W5-07: confirmation is the second step)', async () => {
     await openTable()
     expect(screen.queryByRole('button', { name: /spin|confirm/i })).not.toBeInTheDocument()
   })
@@ -231,8 +231,8 @@ describe('the slip (AC-W5-06.5)', () => {
   })
 })
 
-describe('the read-only review', () => {
-  it('opens with the focus on its heading, locks the table with a reason, offers no spin, and goes back unchanged', async () => {
+describe('the review (the confirmation step of W5-07)', () => {
+  it('opens with the focus on its heading, locks the table with a reason, sends nothing until confirmed, and goes back unchanged', async () => {
     const { api, user } = await openTable()
     await user.click(cell(/^17, black/))
     await user.click(cell(/^Red\./))
@@ -245,8 +245,9 @@ describe('the read-only review', () => {
     expect(within(slip()).queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument()
     expect(within(slip()).queryByRole('button', { name: 'Clear all bets' })).not.toBeInTheDocument()
     expect(within(slip()).getByText(/Your balance:/)).toHaveTextContent('Your balance: 1,000 coins')
-    expect(within(slip()).getByText(/Nothing has been sent to the server and none of your coins have been used/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /spin|confirm/i })).not.toBeInTheDocument()
+    expect(within(slip()).getByText('The server draws the number. Your stake is debited when you confirm.')).toBeInTheDocument()
+    expect(within(slip()).getByRole('button', { name: 'Confirm and spin' })).toBeInTheDocument()
+    expect(api.requests.filter((request) => request.method !== 'GET')).toEqual([])
 
     const locked = cell(/^Black\./)
     expect(locked).toHaveAttribute('aria-disabled', 'true')
@@ -263,7 +264,7 @@ describe('the read-only review', () => {
   })
 })
 
-describe('nothing is sent and nothing changes the wallet (W5-07 is not started)', () => {
+describe('nothing is sent and nothing changes the wallet without "Confirm and spin"', () => {
   it('after placing, removing, reviewing and clearing: no spin request, one wallet read, the balance unchanged, the wheel idle', async () => {
     const { api, user } = await openTable()
 

@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, configure } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { resetRouletteAvailability } from '../features/roulette/rouletteAvailability'
+import { resetSpinFlights } from '../features/roulette/useSpin'
 import { fakeWheel } from './fakeWheelGame'
 import { clearCookies } from './http'
 
@@ -19,4 +21,6 @@ afterEach(() => {
   clearCookies()
   localStorage.clear()
   sessionStorage.clear()
+  resetRouletteAvailability()
+  resetSpinFlights()
 })

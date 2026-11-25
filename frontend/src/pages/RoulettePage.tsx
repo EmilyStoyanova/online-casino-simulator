@@ -1,4 +1,5 @@
-import { useId, useMemo, useReducer, useState } from 'react'
+import { useCallback, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import { Link } from 'react-router'
 import { card } from '../components/cardStyles'
 import { PageHeader } from '../components/layout/PageHeader'
 import { useAuth } from '../features/auth/useAuth'
@@ -6,38 +7,93 @@ import { BetSlip } from '../features/roulette/BetSlip'
 import { BetSummaryBar } from '../features/roulette/BetSummaryBar'
 import { ChipSelector } from '../features/roulette/ChipSelector'
 import { RouletteBoard } from '../features/roulette/RouletteBoard'
-import { RouletteWheel } from '../features/roulette/RouletteWheel'
+import { RouletteWheel, type RouletteWheelHandle } from '../features/roulette/RouletteWheel'
+import { SpinResult } from '../features/roulette/SpinResult'
 import {
   betSlipReducer,
   DEFAULT_CHIP,
   EMPTY_BET_SLIP,
   knownBalance,
   reviewBlock,
+  type BetSlipAction,
   type ChipValue,
+  type ReviewBlock,
 } from '../features/roulette/betSlipReducer'
+import { useRouletteAvailability } from '../features/roulette/rouletteAvailability'
 import type { BetCell } from '../features/roulette/rouletteTable'
+import { useSpin, type SpinPhase } from '../features/roulette/useSpin'
 import { BalanceCard } from '../features/wallet/BalanceCard'
 import { useWallet } from '../features/wallet/useWallet'
 
-const LOCKED_WHILE_REVIEWING = 'Your bets are being reviewed. Choose “Back to bets” in the bet slip to change them.'
+const LOCK_REASON: Partial<Record<SpinPhase['kind'], string>> = {
+  confirming: 'Your bets are being reviewed. Choose “Back to bets” in the bet slip to change them.',
+  submitting: 'Your spin is with the server. The table opens again when the result is confirmed.',
+  revealing: 'The wheel is turning to the number the server drew.',
+  unresolved: 'An earlier spin is not confirmed yet. Use “Retry spin” in the bet slip first.',
+}
+const UNAVAILABLE_LOCK = 'Roulette is not available on this server yet, so no bets can be placed.'
+
+function Unavailable() {
+  return (
+    <div role="status" className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3.5 py-3 text-sm leading-relaxed text-amber-100">
+      <p className="font-semibold">Roulette is not available on this server yet.</p>
+      <p className="mt-1">
+        This server does not offer the roulette game, so nothing can be played here. Your balance is unchanged, and your{' '}
+        <Link to="/wallet" className="font-semibold underline underline-offset-2">
+          wallet and its history
+        </Link>{' '}
+        still work.
+      </p>
+    </div>
+  )
+}
+
+function ResultArea({ phase, children }: { phase: SpinPhase; children: ReactNode }) {
+  if (phase.kind === 'revealing') {
+    return (
+      <section aria-labelledby="roulette-result-heading" aria-busy="true" className={`${card} max-sm:p-4`}>
+        <h2 id="roulette-result-heading" className="text-lg font-semibold text-zinc-100">
+          Result
+        </h2>
+        <p role="status" className="mt-2 text-sm text-zinc-300">
+          The server has confirmed the round. The wheel is turning to the number it drew…
+        </p>
+      </section>
+    )
+  }
+  return children
+}
 
 /**
- * The table of one player: chip value and bet slip in local state (§9.1), the board, the wheel, the
- * shared balance and the slip. Nothing here is sent to the server in W5-06: there is no spin request
- * and no wallet change; the wheel stands still.
+ * The table of one player (§9.1): chip value and bet slip in local state, the spin attempt (`useSpin`),
+ * the board, the wheel, the result, the shared balance and the slip.
+ *
+ * A spin needs "Review bets" and then "Confirm and spin". The server draws the number, computes every
+ * payout and the balance; the page shows its result after the wheel turned to the server's number.
+ * React owns all state and the request; Phaser only draws the wheel and is told the server's number.
  */
-function RouletteTable() {
+function RouletteTable({ userId }: { userId: string }) {
   const [slip, dispatch] = useReducer(betSlipReducer, EMPTY_BET_SLIP)
   const [chip, setChip] = useState<ChipValue>(DEFAULT_CHIP)
-  const [reviewing, setReviewing] = useState(false)
   const { state: wallet } = useWallet()
+  const availability = useRouletteAvailability()
+  const wheel = useRef<RouletteWheelHandle>(null)
   const reasonId = useId()
+  const onSettled = useCallback(() => dispatch({ type: 'reset' }), [])
+  const spin = useSpin({ userId, wheel, onSettled })
 
-  const block = reviewBlock(slip.bets, knownBalance(wallet))
+  const unavailable = availability.status === 'unavailable'
+  const phase = spin.state.phase
+  const block: ReviewBlock = unavailable ? 'unavailable' : reviewBlock(slip.bets, knownBalance(wallet))
+  const lockedReason = unavailable ? UNAVAILABLE_LOCK : (LOCK_REASON[phase.kind] ?? null)
   const amounts = useMemo(() => new Map(slip.bets.map((bet) => [bet.key, bet.amount])), [slip.bets])
-  const place = (cell: BetCell) => dispatch({ type: 'add', selection: cell.selection, amount: chip })
+
+  const change = (action: BetSlipAction) => {
+    dispatch(action)
+    spin.dismissError()
+  }
   const review = () => {
-    if (block === null) setReviewing(true)
+    if (block === null && phase.kind === 'editing') spin.review()
   }
 
   return (
@@ -48,13 +104,21 @@ function RouletteTable() {
             <h2 id="roulette-table-heading" className="text-lg font-semibold text-zinc-100">
               Place your bets
             </h2>
-            <p className="text-sm leading-relaxed text-zinc-300">
-              Spinning is not switched on yet: it arrives with the next development step (W5-07). You can place
-              and review bets now; nothing is sent to the server and none of your coins are used.
-            </p>
+            {unavailable ? (
+              <Unavailable />
+            ) : (
+              <p className="text-sm leading-relaxed text-zinc-300">
+                Choose a chip, place your bets, then review and confirm them. The server draws the number and settles
+                your virtual coins.
+              </p>
+            )}
           </div>
           <ChipSelector value={chip} onChange={setChip} />
-          <RouletteBoard amounts={amounts} onPlace={place} lockedReason={reviewing ? LOCKED_WHILE_REVIEWING : null} />
+          <RouletteBoard
+            amounts={amounts}
+            onPlace={(cell: BetCell) => change({ type: 'add', selection: cell.selection, amount: chip })}
+            lockedReason={lockedReason}
+          />
         </section>
 
         <div className="space-y-6">
@@ -62,11 +126,12 @@ function RouletteTable() {
             <h2 id="roulette-wheel-heading" className="mb-4 text-lg font-semibold text-zinc-100">
               The wheel
             </h2>
-            <RouletteWheel />
+            <RouletteWheel ref={wheel} />
             <p className="mt-4 text-center text-xs text-zinc-500">
-              The wheel stands still. It will turn only to show a number drawn by the server.
+              The wheel turns only to show the number the server drew. It never decides a result.
             </p>
           </section>
+          <ResultArea phase={phase}>{spin.state.result && <SpinResult result={spin.state.result} />}</ResultArea>
           <BalanceCard />
           <BetSlip
             bets={slip.bets}
@@ -74,11 +139,14 @@ function RouletteTable() {
             wallet={wallet}
             block={block}
             reasonId={reasonId}
-            reviewing={reviewing}
-            onRemove={(key) => dispatch({ type: 'remove', key })}
-            onClear={() => dispatch({ type: 'clear' })}
+            spin={spin.state}
+            onRemove={(key) => change({ type: 'remove', key })}
+            onClear={() => change({ type: 'clear' })}
             onReview={review}
-            onBack={() => setReviewing(false)}
+            onBack={spin.back}
+            onConfirm={() => spin.confirm(slip.bets)}
+            onRetry={spin.retry}
+            onCheckBalance={spin.checkBalance}
           />
         </div>
       </div>
@@ -87,7 +155,7 @@ function RouletteTable() {
         feedback={slip.feedback}
         block={block}
         reasonId={reasonId}
-        reviewing={reviewing}
+        phase={phase.kind}
         onReview={review}
       />
     </div>
@@ -95,23 +163,24 @@ function RouletteTable() {
 }
 
 /**
- * `/roulette`, inside `RequireAuth` and `PlayerOnly`: the betting table, chips and bet slip (W5-06),
- * the Phaser wheel (W5-P01, standing still) and the shared server-confirmed balance. React owns the
- * bets; Phaser only draws the wheel; the server will draw every number and compute every payout.
+ * `/roulette`, inside `RequireAuth` and `PlayerOnly`: betting table, chips, bet slip, the spin flow
+ * (W5-07), the Phaser wheel and the shared server-confirmed balance. Opening the page sends no game
+ * request; a spin is sent only after "Review bets" and "Confirm and spin", and an unresolved one only
+ * after "Retry spin".
  *
- * The table is keyed by the player, so local bets never carry over to another account (the page also
- * unmounts on sign-out and on an expired session).
+ * The table is keyed by the player, so local bets and the spin state never carry over to another
+ * account (the page also unmounts on sign-out and on an expired session).
  */
 export function RoulettePage() {
   const { state } = useAuth()
-  const player = state.status === 'authenticated' ? state.user.id : 'none'
+  const player = state.status === 'authenticated' ? state.user.id : null
 
   return (
     <div className="space-y-6">
       <PageHeader title="European roulette">
         Single-zero roulette with virtual coins only. Every number is drawn by the server, never in your browser.
       </PageHeader>
-      <RouletteTable key={player} />
+      {player && <RouletteTable key={player} userId={player} />}
     </div>
   )
 }

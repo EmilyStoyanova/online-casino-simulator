@@ -1,76 +1,14 @@
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useMemo, useRef } from 'react'
 import { primaryButton, secondaryButton } from '../../components/buttonStyles'
 import { card } from '../../components/cardStyles'
-import { Coins } from '../../components/Coins'
 import { ROULETTE_LIMITS } from '../../types/roulette'
 import type { WalletState } from '../wallet/walletContext'
-import { blockReason, knownBalance, totalStake, type ReviewBlock, type SlipBet, type SlipFeedback } from './betSlipReducer'
-import { cellFor, formatCoins } from './rouletteTable'
-
-function BalanceLine({ wallet }: { wallet: WalletState }) {
-  if (wallet.status === 'loaded') {
-    return (
-      <p className="text-sm text-zinc-300">
-        Your balance: <Coins amount={wallet.balance} className="font-semibold text-zinc-100" />
-        {wallet.refresh === 'failed' && <span className="text-zinc-400"> (may be out of date)</span>}
-      </p>
-    )
-  }
-  if (wallet.status === 'loading') return <p className="text-sm text-zinc-400">Checking your balance…</p>
-  return (
-    <p className="text-sm text-zinc-400">
-      Your balance is not known right now. The server checks it when a spin is sent.
-    </p>
-  )
-}
-
-function BetRows({ bets, onRemove }: { bets: readonly SlipBet[]; onRemove?: (key: string) => void }) {
-  return (
-    <ul aria-label="Your bets" className="divide-y divide-zinc-800 rounded-lg border border-zinc-800">
-      {bets.map((bet) => {
-        const entry = cellFor(bet.selection)
-        return (
-          <li key={bet.key} className="flex items-center gap-3 px-3 py-2">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-zinc-100">{entry.name}</p>
-              <p className="text-xs text-zinc-400">
-                {entry.betType} · <span className="whitespace-nowrap">pays {entry.odds}</span>
-              </p>
-            </div>
-            <Coins amount={bet.amount} className="shrink-0 text-sm font-semibold text-zinc-100" />
-            {onRemove && (
-              <button
-                type="button"
-                onClick={() => onRemove(bet.key)}
-                aria-label={`Remove ${entry.name}, ${formatCoins(bet.amount)}`}
-                className="-mr-1 flex size-11 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100 max-md:scroll-mb-24 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
-              >
-                <span aria-hidden="true" className="text-lg leading-none">
-                  ✕
-                </span>
-              </button>
-            )}
-          </li>
-        )
-      })}
-    </ul>
-  )
-}
-
-function Totals({ bets }: { bets: readonly SlipBet[] }) {
-  return (
-    <dl className="grid grid-cols-2 gap-y-1 text-sm">
-      <dt className="text-zinc-400">Bets</dt>
-      <dd className="text-right tabular-nums text-zinc-200">
-        {bets.length} of {ROULETTE_LIMITS.maxBets}
-      </dd>
-      <dt className="text-zinc-400">Total stake</dt>
-      <dd className="text-right font-semibold text-zinc-50">
-        <Coins amount={totalStake(bets)} />
-      </dd>
-    </dl>
-  )
-}
+import { BetRows, Totals } from './BetRows'
+import { blockReason, knownBalance, type ReviewBlock, type SlipBet, type SlipFeedback } from './betSlipReducer'
+import { formatCoins } from './rouletteTable'
+import { BalanceLine, SpinConfirmation } from './SpinConfirmation'
+import { UnresolvedSpin } from './UnresolvedSpin'
+import type { SpinState } from './useSpin'
 
 interface BetSlipProps {
   bets: readonly SlipBet[]
@@ -79,100 +17,176 @@ interface BetSlipProps {
   block: ReviewBlock
   /** Id of the visible reason; the summary bar's "Review bets" refers to it as well. */
   reasonId: string
-  reviewing: boolean
+  spin: SpinState
   onRemove: (key: string) => void
   onClear: () => void
   onReview: () => void
   onBack: () => void
+  onConfirm: () => void
+  onRetry: () => void
+  onCheckBalance: () => void
+}
+
+type Mode = 'editing' | 'confirming' | 'unresolved'
+
+function modeOf(spin: SpinState): Mode {
+  switch (spin.phase.kind) {
+    case 'confirming':
+      return 'confirming'
+    case 'submitting':
+      return spin.phase.retry ? 'unresolved' : 'confirming'
+    case 'unresolved':
+      return 'unresolved'
+    default:
+      return 'editing'
+  }
 }
 
 /**
- * The bet slip (§5.5): each bet with its amount and odds, the number of bets and the total stake, the
- * shared server-confirmed balance, "Review bets" and "Clear all bets". "Review bets" is `aria-disabled`
- * with a visible reason (its description) when the slip is empty or the known balance is lower than
- * the total; an unknown balance does not block (the server decides).
+ * The bet slip (§5.5) and the spin steps that happen in it:
  *
- * The review is read-only (W5-06): the bets, the total and the balance, and an honest note that spins
- * are not switched on yet. There is no "Confirm and spin" button; W5-07 adds it. Focus moves to the
- * review heading and, with "Back to bets", back to "Review bets". No potential win is shown anywhere:
- * the odds are enough, and a payout preview would be a client-side payout calculation (Q8).
+ * - **editing:** each bet with amount and odds, the number of bets, the total stake, the shared
+ *   balance, "Review bets" (`aria-disabled` with a visible reason when the slip is empty, the known
+ *   balance is lower than the total or roulette is unavailable; an unknown balance does not block) and
+ *   "Clear all bets". A definitive spin failure is shown here, with the server's messages on their rows;
+ * - **confirming** (also while the request is in flight): `SpinConfirmation`;
+ * - **unresolved** (also while a retry is in flight): `UnresolvedSpin`.
+ *
+ * Focus: the step heading when the confirmation or an unresolved spin appears, "Review bets" again on
+ * "Back to bets", the error on a definitive failure. No potential win is shown anywhere (Q8).
  */
-export function BetSlip({ bets, feedback, wallet, block, reasonId, reviewing, onRemove, onClear, onReview, onBack }: BetSlipProps) {
+export function BetSlip({
+  bets,
+  feedback,
+  wallet,
+  block,
+  reasonId,
+  spin,
+  onRemove,
+  onClear,
+  onReview,
+  onBack,
+  onConfirm,
+  onRetry,
+  onCheckBalance,
+}: BetSlipProps) {
   const headingId = useId()
-  const reviewHeading = useRef<HTMLHeadingElement>(null)
+  const stepHeading = useRef<HTMLHeadingElement>(null)
   const reviewButton = useRef<HTMLButtonElement>(null)
-  const wasReviewing = useRef(false)
+  const errorRef = useRef<HTMLDivElement>(null)
+  const previousPhase = useRef(spin.phase.kind)
+  const mode = modeOf(spin)
   const reason = blockReason(block, bets, knownBalance(wallet))
+  const error = spin.error
+
+  const phase = spin.phase.kind
+  useEffect(() => {
+    const previous = previousPhase.current
+    previousPhase.current = phase
+    if (phase === previous) return
+    // The confirmation, or an unresolved spin, appeared; not on page load (the initial phase).
+    if (phase === 'confirming' || phase === 'unresolved') stepHeading.current?.focus()
+    // Only "Back to bets" returns to "Review bets"; a settled round focuses its result instead.
+    else if (previous === 'confirming' && phase === 'editing') reviewButton.current?.focus()
+  }, [phase])
 
   useEffect(() => {
-    if (reviewing) reviewHeading.current?.focus()
-    else if (wasReviewing.current) reviewButton.current?.focus()
-    wasReviewing.current = reviewing
-  }, [reviewing])
+    if (error) errorRef.current?.focus()
+  }, [error])
 
-  return (
-    <section aria-labelledby={headingId} className={`${card} space-y-4 max-sm:p-4`}>
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 id={headingId} className="text-lg font-semibold text-zinc-100">
-          Bet slip
-        </h2>
-        <span className="text-xs text-zinc-400">Nothing is sent yet</span>
-      </div>
+  const rowErrors = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const { betKey, message } of error?.fieldErrors ?? []) {
+      if (betKey !== null) map.set(betKey, [...(map.get(betKey) ?? []), message])
+    }
+    return map
+  }, [error])
+  const generalErrors = (error?.fieldErrors ?? []).filter((entry) => entry.betKey === null)
 
-      {reviewing ? (
-        <div className="space-y-4">
-          <h3 ref={reviewHeading} tabIndex={-1} className="text-base font-semibold text-zinc-100 focus:outline-none">
-            Review your bets
-          </h3>
-          <BetRows bets={bets} />
-          <Totals bets={bets} />
-          <BalanceLine wallet={wallet} />
+  let content
+  if (mode === 'confirming') {
+    const submitting = spin.phase.kind === 'submitting'
+    content = (
+      <SpinConfirmation
+        bets={bets}
+        wallet={wallet}
+        reason={submitting ? null : reason}
+        reasonId={reasonId}
+        submitting={submitting}
+        headingRef={stepHeading}
+        onConfirm={onConfirm}
+        onBack={onBack}
+      />
+    )
+  } else if (spin.phase.kind === 'unresolved' || spin.phase.kind === 'submitting') {
+    content = (
+      <UnresolvedSpin
+        attempt={spin.phase.attempt}
+        message={spin.phase.kind === 'unresolved' ? spin.phase.message : ''}
+        retrying={spin.phase.kind === 'submitting'}
+        headingRef={stepHeading}
+        onRetry={onRetry}
+        onCheckBalance={onCheckBalance}
+      />
+    )
+  } else {
+    content = (
+      <div className="space-y-4">
+        {error && (
+          <div ref={errorRef} tabIndex={-1} className="focus:outline-none">
+            <div
+              role="alert"
+              className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3.5 py-3 text-sm leading-relaxed text-rose-200"
+            >
+              <p>{error.message}</p>
+              {generalErrors.map(({ message }) => (
+                <p key={message} className="mt-1">
+                  {message}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+        {bets.length === 0 ? (
+          <p className="text-sm text-zinc-400">No bets yet. Choose a chip value, then a number or an outside bet.</p>
+        ) : (
+          <BetRows bets={bets} onRemove={onRemove} errors={rowErrors} />
+        )}
+        <Totals bets={bets} />
+        <BalanceLine wallet={wallet} />
+        <div className="flex flex-col gap-2">
+          <button
+            ref={reviewButton}
+            type="button"
+            onClick={onReview}
+            aria-disabled={block !== null ? true : undefined}
+            aria-describedby={reason ? reasonId : undefined}
+            className={`${primaryButton} w-full max-md:scroll-mb-24 aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
+          >
+            Review bets
+          </button>
           {reason && (
-            <p id={reasonId} className="text-sm text-amber-200">
+            <p id={reasonId} className="text-sm text-zinc-400">
               {reason}
             </p>
           )}
-          <p className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3.5 py-3 text-sm leading-relaxed text-sky-100">
-            Spinning is not switched on yet: it arrives with the next development step (W5-07). Nothing has been
-            sent to the server and none of your coins have been used.
-          </p>
-          <button type="button" onClick={onBack} className={`${secondaryButton} w-full max-md:scroll-mb-24`}>
-            Back to bets
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {bets.length === 0 ? (
-            <p className="text-sm text-zinc-400">No bets yet. Choose a chip value, then a number or an outside bet.</p>
-          ) : (
-            <BetRows bets={bets} onRemove={onRemove} />
-          )}
-          <Totals bets={bets} />
-          <BalanceLine wallet={wallet} />
-          <div className="flex flex-col gap-2">
-            <button
-              ref={reviewButton}
-              type="button"
-              onClick={onReview}
-              aria-disabled={block !== null ? true : undefined}
-              aria-describedby={reason ? reasonId : undefined}
-              className={`${primaryButton} w-full max-md:scroll-mb-24 aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
-            >
-              Review bets
+          {bets.length > 0 && (
+            <button type="button" onClick={onClear} className={`${secondaryButton} w-full max-md:scroll-mb-24`}>
+              Clear all bets
             </button>
-            {reason && (
-              <p id={reasonId} className="text-sm text-zinc-400">
-                {reason}
-              </p>
-            )}
-            {bets.length > 0 && (
-              <button type="button" onClick={onClear} className={`${secondaryButton} w-full max-md:scroll-mb-24`}>
-                Clear all bets
-              </button>
-            )}
-          </div>
+          )}
         </div>
-      )}
+      </div>
+    )
+  }
+
+  return (
+    <section aria-labelledby={headingId} className={`${card} space-y-4 max-sm:p-4`}>
+      <h2 id={headingId} className="text-lg font-semibold text-zinc-100">
+        Bet slip
+      </h2>
+
+      {content}
 
       {/* One polite live region for every change and refusal; the key re-announces a repeated message. */}
       <p role="status" className="text-sm">

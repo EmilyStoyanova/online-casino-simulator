@@ -42,8 +42,10 @@ describe('Home page', () => {
     expect(screen.getByText(/Your casino lobby\./)).toHaveTextContent('virtual coins with no monetary value')
 
     const roulette = screen.getByRole('region', { name: 'European roulette' })
-    expect(within(roulette).getByText('In development')).toBeInTheDocument()
-    expect(within(roulette).getByText(/You can place and review bets; spinning is not switched on yet/)).toBeInTheDocument()
+    // No availability claim (§7.7): the rules and who draws the number, not "play now".
+    expect(within(roulette).getByText('Virtual coins')).toBeInTheDocument()
+    expect(within(roulette).getByText(/Every number is drawn by the server; your browser never decides a result/)).toBeInTheDocument()
+    expect(within(roulette).queryByText(/Not available/)).not.toBeInTheDocument()
     expect(within(roulette).getByText(/house edge of 1\/37/)).toBeInTheDocument()
     expect(within(roulette).getByRole('link', { name: 'Open roulette' })).toHaveAttribute('href', '/roulette')
 
