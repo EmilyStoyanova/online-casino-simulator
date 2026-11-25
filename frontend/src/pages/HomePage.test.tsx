@@ -48,8 +48,8 @@ describe('Home page', () => {
     expect(within(roulette).getByRole('link', { name: 'Open roulette' })).toHaveAttribute('href', '/roulette')
 
     const wallet = screen.getByRole('region', { name: 'Wallet' })
-    expect(within(wallet).getByText('History in development')).toBeInTheDocument()
-    expect(within(wallet).getByText(/transaction history is not shown yet/)).toBeInTheDocument()
+    expect(within(wallet).getByText('History available')).toBeInTheDocument()
+    expect(within(wallet).getByText(/See your transaction history, newest first/)).toBeInTheDocument()
     expect(within(wallet).getByRole('link', { name: 'Open wallet' })).toHaveAttribute('href', '/wallet')
 
     expect(within(screen.getByRole('region', { name: 'Your account' })).getByText('alice@example.com')).toBeInTheDocument()

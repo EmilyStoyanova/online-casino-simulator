@@ -23,7 +23,10 @@ import { WalletProvider } from './WalletProvider'
 
 const WALLET = 'GET /api/v1/wallet'
 const CURRENT_USER = 'GET /api/v1/users/me'
-/** An implemented protected request the tested pages do not send, answered as if the session had ended. */
+/**
+ * An implemented protected request the tested pages do not send in this form (the wallet page asks for
+ * `?limit=20`), answered as if the session had ended.
+ */
 const EXPIRING = '/api/v1/wallet/transactions'
 
 const bob: UserProfile = {
@@ -64,6 +67,8 @@ function backend({
     'GET /api/v1/interests': () => jsonResponse(interestCatalog),
     [CURRENT_USER]: currentUser,
     [WALLET]: walletHandler,
+    // The wallet page's first history page: an empty history, as for a new player.
+    'GET /api/v1/wallet/transactions?limit=20': () => jsonResponse({ items: [], nextCursor: null }),
     // Signs in whoever the form names (Alice or Bob); Spring deletes the CSRF cookie at sign-in.
     'POST /api/v1/auth/login': (init) => {
       deleteCookie('XSRF-TOKEN')

@@ -7,6 +7,8 @@ import { renderApp } from '../../test/renderApp'
 
 const CURRENT_USER = 'GET /api/v1/users/me'
 const LOGIN = 'POST /api/v1/auth/login'
+/** The first page of the wallet history, which only the wallet page requests (W5-05). */
+const HISTORY = 'GET /api/v1/wallet/transactions?limit=20'
 
 type Handlers = Parameters<typeof stubApi>[0][string]
 
@@ -18,6 +20,7 @@ function backend({ currentUser = noSession(), login = signedIn(alice) }: { curre
     [CURRENT_USER]: currentUser,
     [LOGIN]: login,
     'GET /api/v1/wallet': () => jsonResponse(startingWallet),
+    [HISTORY]: () => jsonResponse({ items: [], nextCursor: null }),
   })
 }
 
@@ -34,14 +37,15 @@ async function signIn(email: string) {
   await user.click(screen.getByRole('button', { name: 'Sign in' }))
 }
 
+/** Path, title, the page's own content, and the requests the page itself sends (besides the shared ones). */
 const pages = [
-  ['/roulette', 'European roulette'],
-  ['/wallet', 'Wallet'],
+  ['/roulette', 'European roulette', /being built/, []],
+  ['/wallet', 'Wallet', /No entries yet/, [HISTORY]],
 ] as const
 
 const notice = () => screen.queryByRole('heading', { name: 'For player accounts only' })
 
-describe.each(pages)('PlayerOnly on %s', (path, title) => {
+describe.each(pages)('PlayerOnly on %s', (path, title, content, ownRequests) => {
   const page = () => screen.queryByRole('heading', { level: 1, name: title })
 
   it('shows the page to a player with the shared balance, without any roulette request', async () => {
@@ -49,10 +53,12 @@ describe.each(pages)('PlayerOnly on %s', (path, title) => {
     renderApp(path)
 
     expect(await screen.findByRole('heading', { level: 1, name: title })).toBeInTheDocument()
-    expect(screen.getByText(/being built/)).toBeInTheDocument()
+    expect(await screen.findByText(content)).toBeInTheDocument()
     expect(notice()).not.toBeInTheDocument()
     expect(await screen.findByRole('link', { name: 'Balance 1,000 coins' })).toBeInTheDocument()
-    expect(api.requests.map((request) => `${request.method} ${request.path}`)).toEqual([CURRENT_USER, 'GET /api/v1/wallet'])
+    expect(api.requests.map((request) => `${request.method} ${request.path}`).sort()).toEqual(
+      [CURRENT_USER, 'GET /api/v1/wallet', ...ownRequests].sort(),
+    )
   })
 
   it('shows an administrator an explanation with a way back, never the page, and sends nothing more', async () => {
@@ -135,12 +141,12 @@ describe('Placeholder pages', () => {
     expect(screen.getAllByText(/\d[\d,]* coins/).map((element) => element.textContent)).toEqual(['1,000 coins', '1,000 coins'])
   })
 
-  it('show the server balance but no invented transactions', async () => {
+  it('the wallet shows the server balance and only the server’s entries: none yet, so no invented transactions', async () => {
     backend({ currentUser: () => jsonResponse(alice) })
     renderApp('/wallet')
 
-    const progress = await screen.findByRole('region', { name: 'Your transaction history is being built' })
-    expect(within(progress).getByText(/not shown here yet/)).toBeInTheDocument()
+    const history = await screen.findByRole('region', { name: 'Transaction history' })
+    expect(await within(history).findByText('No entries yet.')).toBeInTheDocument()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
     expect(await within(screen.getByRole('region', { name: 'Your balance' })).findByText('1,000 coins')).toBeInTheDocument()
     expect(screen.getAllByText(/\d[\d,]* coins/).map((element) => element.textContent)).toEqual(['1,000 coins', '1,000 coins'])

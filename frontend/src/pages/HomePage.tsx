@@ -90,9 +90,9 @@ function PlayerLobby({ user }: { user: UserProfile }) {
           <p>Single zero, 37 numbers. Every bet has the same house edge of 1/37 (about 2.70 %).</p>
           <p className="text-zinc-400">The table is being built: you cannot place bets yet.</p>
         </LobbyCard>
-        <LobbyCard id="lobby-wallet" title="Wallet" progress="History in development" to="/wallet" action="Open wallet">
+        <LobbyCard id="lobby-wallet" title="Wallet" progress="History available" to="/wallet" action="Open wallet">
           <p>Your virtual balance and every change to it, recorded by the server.</p>
-          <p className="text-zinc-400">The transaction history is not shown yet.</p>
+          <p className="text-zinc-400">See your transaction history, newest first.</p>
         </LobbyCard>
       </div>
     </div>

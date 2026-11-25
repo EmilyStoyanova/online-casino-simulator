@@ -1,12 +1,12 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
-- **Status:** Revision 6. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
+- **Status:** Revision 8. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
   refinements (§14). W5-02 API foundation approved 2026-11-24 (§7.8). W5-03 navigation, `PlayerOnly`
   and player lobby approved 2026-11-24 (§4.4). First checkpoint (W5-01 to W5-03, `bb9e532`) approved
   and pushed. W5-04 wallet state and balance UI approved 2026-11-24 (§9.4) and pushed (`75d42da`).
   Q13 approved: Phaser starts in Week 5. W5-P01 Phaser integration foundation approved 2026-11-24
-  (§3.4) and committed to the feature branch.** Playwright W2-16 regression still pending (no JDK in
-  this environment).
+  (§3.4) and pushed (`acabd75`). W5-05 wallet transaction history approved 2026-11-25 (§6.3) and
+  committed to the feature branch.** Playwright W2-16 regression still pending (no JDK in this environment).
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -33,6 +33,8 @@
 | 4 | 2026-11-24 | First checkpoint approved and pushed (`bb9e532`); W5-04 implemented: `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`, `Coins`; balance in the header, lobby, roulette and wallet pages (§9.4); W5-04 approved after one test correction (the session-expiry probe uses the implemented `GET /api/v1/wallet/transactions`) |
 | 5 | 2026-11-24 | W5-04 committed and pushed (`75d42da`); Q13 approved (Phaser in Week 5); new task W5-P01 between W5-04 and W5-05 (§3.4, §12, §13); Phaser statements reconciled (§2, §3, §5.1, §10.2); the obsolete "start over" of §9.3 removed (Q6); W5-P01 implemented; pre-approval lifecycle review with five fixes and browser verification (§3.4) |
 | 6 | 2026-11-24 | W5-P01 approved; checkpoint review before the commit: `WheelPhaserGame` gives `window.onblur`/`onfocus` back their previous values instead of clearing them and leaves no own `addEventListener` property on `document` (§3.4); W5-P01 committed and pushed to the feature branch |
+| 7 | 2026-11-24 | W5-P01 checkpoint recorded (`acabd75`); W5-05 implemented: `walletFormat`, `useWalletTransactions`, `TransactionHistory`, wallet page with history, lobby wallet card updated (§6.3) |
+| 8 | 2026-11-25 | W5-05 approved; checkpoint review before the commit: a test for a cursor the server rejects (`400`) and the recovery through "Refresh history"; the `MainNav` and `WalletProvider` test backends answer the wallet page's first history page (§6.3); W5-05 committed and pushed to the feature branch |
 
 ---
 
@@ -665,6 +667,108 @@ Week 9.
   card through CSS only (one markup, no duplicate content for screen readers).
 - Ledger ids and round ids are not shown (the API returns no round id in entries).
 
+### 6.3 Implemented in W5-05 (2026-11-24; approved 2026-11-25)
+
+**Files**
+
+| File | Change |
+|---|---|
+| `features/wallet/walletFormat.ts` (new) | Pure: `transactionTypeLabel` (the three contract types; any other value, also object property names such as `toString`, is "Other entry"), `formatSignedCoins` ("+360 coins", "−30 coins" with U+2212, "+1 coin"; `en-GB` grouping, never a currency), `formatEntryTime` (`en-GB` medium date + short time in the browser's local zone; a `timeZone` parameter for tests only; "—" for an unreadable value) |
+| `features/wallet/useWalletTransactions.ts` (new) | The history state and actions (below) |
+| `features/wallet/TransactionHistory.tsx` (new) | Presentational section "Transaction history" (below) |
+| `pages/WalletPage.tsx` | Page header with the unchanged disclaimer, `BalanceCard`, `TransactionHistory`; the W5-04 progress card ("being built") and its lobby link removed |
+| `pages/HomePage.tsx` | Lobby wallet card: "History available" / "See your transaction history, newest first." (it said the history was not shown yet) |
+
+**`useWalletTransactions`**
+
+- **State:** `inactive` (no player; no request) · `loading` (first page in flight) · `failed { message }` (first
+  page failed; nothing shown as history) · `loaded { items, nextCursor, older: idle|loading|failed,
+  refresh: idle|refreshing|failed, error }`.
+- **First page:** `GET /api/v1/wallet/transactions?limit=20` once per player session (cookies only, no CSRF
+  header). **Load older:** the same with `cursor=nextCursor`; the cursor is taken from the last page
+  unchanged (`URLSearchParams` encodes it, the server decodes the same string; tested with `+/=`). Older
+  entries are appended after the loaded ones; an id already shown is never added twice (defensive; keyset
+  pages do not repeat). `nextCursor: null` ends the list.
+- **Refresh:** reloads the first page (new entries at the top; older pages are dropped and "Load older"
+  starts again from the new cursor) and calls `WalletProvider.refresh()` for the shared balance. The
+  loaded entries stay visible while it runs; after a failed first load the same action is the retry.
+- **One request at a time:** "load older" is ignored while any request is in flight (also for repeated
+  calls before React re-renders: an in-flight ref, not only the disabled button) and on the last page; a
+  refresh is ignored while a first page is in flight and **replaces** a "load older" in flight (aborted,
+  its late answer dropped). Every request is numbered; only the latest may change the state.
+- **Failures:** first page → `failed` with the `apiClient` "unavailable" message or "Your transaction history
+  could not be loaded."; older page → entries kept, `older: failed` with "Older entries could not be
+  loaded." (or the unavailable message); refresh → entries kept, `refresh: failed`.
+- **Session isolation:** the same pattern as `WalletProvider` (§9.4): the state carries the owner and a
+  session number, a change of player (another account, sign-out, expiry, also A → none → A) resets it
+  **during render**, every answer is checked against its session, and the effect cleanup aborts the
+  request in flight. In the app the page also unmounts on sign-out and on `401 SESSION_EXPIRED`
+  (`RequireAuth`), which aborts its request; the hook does not rely on that.
+
+**`TransactionHistory`**
+
+- One `<table>` with an sr-only `<caption>` "Wallet entries, newest first" and the columns Time, Type,
+  Amount, Balance after (`<time dateTime>` keeps the server value). Below `md` (768 px) each row is a card
+  through CSS only (`max-md:` utilities); the header row is visually hidden but stays for screen readers,
+  and each value has a visible label in an `aria-hidden` span, so nothing is read twice. Explicit ARIA
+  table roles keep the table semantics when CSS changes the display of the table elements.
+- Signed amounts as text, emerald/rose only as an extra cue; balance after with `Coins`.
+- A polite `role="status"` announces "Loading your transaction history…", "Refreshing…", "Loading older
+  entries…", "No entries yet." and "Showing the 20 entries loaded so far. Older entries are available." /
+  "Showing 35 entries: your complete history."; `aria-busy` while a request runs; skeleton rows
+  (`aria-hidden`) while the first page loads; errors in `FormAlert` (`role="alert"`) with "Try again".
+- Buttons: "Refresh history" (accessible name differs from the balance card's "Refresh"; "Refreshing…"
+  and disabled while it runs) and "Load older entries" ("Loading older entries…", disabled while loading
+  or refreshing; replaced by the alert's "Try again" after a failure; absent at `nextCursor: null`).
+
+**Tests** (33 files, 364 tests after the checkpoint review; after W5-P01: 30 files, 325 tests):
+
+| File | New tests | Covers |
+|---|---|---|
+| `features/wallet/walletFormat.test.ts` | 7 | Labels of the contract types; "Other entry" for anything else (incl. `toString`, `__proto__`); signs as text, singular, grouping up to 2^53 − 1, no currency; time in UTC, Europe/Sofia and America/New_York; local zone by default (`TZ` stubbed to Asia/Tokyo, date changes); "—" for invalid input |
+| `features/wallet/useWalletTransactions.test.tsx` | 10 | With the auth and wallet contexts set by the test: no request without a player; another player resets at once and the previous player's late page is ignored; A → none → A is a new session; StrictMode applies one first page (trial aborted); repeated "load older" before an answer sends one request; no duplicate ids; repeated refresh sends one page and one balance refresh; "load older" ignored while loading and on the last page; nothing after unmount, request aborted |
+| `pages/WalletPage.test.tsx` | 22 | Whole app, time zone pinned to Europe/Sofia. AC-W5-05.1: one first-page request with `limit=20` and no CSRF header; rows as announced (time, type, signed amount, balance after) in local time; 20 rows; unknown types as "Other entry" with their sign; no currency. AC-W5-05.2: cursor sent unchanged, 35 rows appended in order, button gone, status updated; no button on a last first page; one request while loading (disabled, `aria-busy`, status); failure keeps 20 rows, alert retry sends the same cursor; unreachable server explained. AC-W5-05.3: refresh reloads history and balance (2 + 2 requests), entries visible meanwhile, new entries on top, balance card updated; list restarts after older pages; a cursor the server rejects (`400 VALIDATION_FAILED`) fails its retry alike and a refresh recovers with the new first page and its new cursor; failed refresh keeps entries, retry; refresh replaces a "load older" in flight (aborted, never appended). AC-W5-05.4: loading announced, busy, no number; empty announced with refresh, no table or "load older"; first-page error alert and retry; gateway "starting up" message; one table with caption, four column headers, `aria-hidden` card labels, each value once, no list; disclaimer kept. Isolation: `401 SESSION_EXPIRED` on "load older" → login page with no amount left, Bob then sees only his history; Alice's late first page after sign-out is aborted and never shown to Bob |
+
+**Changes to existing tests (behaviour changed by W5-05, no assertion weakened)**
+- `PlayerOnly.test.tsx`: the wallet page now sends its own first-page request (the fake backend answers an
+  empty history); the per-page check names each page's own content and own requests (roulette: none);
+  the former "no invented transactions" placeholder test now asserts the empty history ("No entries yet.",
+  no table) and still that the only coin amounts are the server balance.
+- `HomePage.test.tsx`: the lobby wallet card's new wording.
+- `MainNav.test.tsx`, `WalletProvider.test.tsx` (checkpoint review): these tests only pass through `/wallet`;
+  their fake backends now answer the first history page with an empty history, so the page renders as for
+  a new player instead of an error state caused by a missing test route. No assertion changed; a request
+  to any other route still fails the test. The `WalletProvider` constant `EXPIRING`
+  (`/api/v1/wallet/transactions` without a query, answered `401 SESSION_EXPIRED`) is a different URL from the
+  page's `?limit=20`, so the page never ends the session there by accident; its comment says so.
+
+**Guards proven** (mutations, not kept): without the request-number check, the in-flight guard of "load
+older", the session check and render-time reset, the id de-duplication, or the abort in the cleanup, at
+least one test fails each time (3 for the abort).
+
+**Browser check (2026-11-24, local only).** Production build (`vite preview`) with the Vercel CSP header in
+Chrome through Playwright, API mocked in the browser (35 entries), time zone Europe/Sofia: at 320 / 375 /
+768 / 1024 / 1280 px 0 px horizontal overflow; below 768 px rows are cards (`display: grid`, labels
+visible, header row hidden), from 768 px a table; Chrome's accessibility tree has the table "Wallet
+entries, newest first" with 4 column headers and 21 rows at **every** width, and the row names contain
+only the values (e.g. "20 Nov 2026, 12:15 Roulette stake −30 coins 1,350 coins"), not the card labels;
+"Load older entries" sent `cursor=eyJpZCI6MTZ9%2B%2F%3D%3D` and showed 35 rows without the button; "Refresh
+history" returned to 20 rows; no console errors, warnings or CSP violations.
+
+**Checkpoint review (2026-11-25, before the commit).** AC-W5-05.1 to AC-W5-05.4 re-checked against the
+tests above. Two changes, tests only: the rejected-cursor recovery test, and the empty-history route in
+the `MainNav` and `WalletProvider` test backends. No production code changed; the bundle is identical.
+
+**Verification:** `npm run lint`, `npm run typecheck`, `npm test` (33 files, 364 tests), `npm run build` and
+`git diff --check` green. Playwright W2-16: still pending (no JDK).
+
+**Remaining risks:** a cursor rejected by the server (`400 VALIDATION_FAILED`, e.g. after a server change of
+the cursor format) fails each retry of "load older" the same way; "Refresh history" recovers (tested: it
+loads the first page again, clears the alert, and "Load older" then sends the new page's cursor). A balance
+refresh started by the history does not wait for the history (two independent reads; both are the
+server's values). Screen-reader behaviour of the card layout is verified through Chrome's accessibility
+tree, not yet with NVDA/Narrator (W5-08 manual checks).
+
 ---
 
 ## 7. API integration and error handling
@@ -1119,7 +1223,7 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | W5-03 | **Navigation and layout (done, approved 2026-11-24, §4.4):** `cardStyles.ts`, `PageHeader`, `Coins`, `MainNav`, `PlayerOnly`, routes `/roulette` and `/wallet` (placeholder content), `AppLayout` width, lobby home for players, skip link (Should); tests for role-dependent navigation; `vercelConfig.test.ts` cases | M | W5-01 (Q9) |
 | W5-04 | **Wallet state and balance (done, approved 2026-11-24, §9.4):** `WalletProvider`, `useWallet`, `BalanceBadge`, `BalanceCard`; stale-response guard; lobby and header show the balance; tests | M | W5-02, W5-03 (Q2, Q3) |
 | W5-P01 | **Phaser integration foundation (Q13; approved 2026-11-24, §3.4):** Phaser 4.2.1 as the only new runtime dependency; `games/roulette/` (wheel geometry, canvas check, `RouletteScene`, `createWheelGame`), `features/roulette/RouletteWheel` (lazy-loaded, StrictMode-safe, accessible HTML description, reduced motion, `spinTo` handle for W5-07), wheel on `/roulette`; no spin control, no client outcome | M | W5-03, W5-04 (Q11, Q13) |
-| W5-05 | **Wallet page and history:** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |
+| W5-05 | **Wallet page and history (approved 2026-11-25, §6.3):** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |
 | W5-06 | **Table, chips and bet slip (no API):** `rouletteTable.ts`, `betSlip.ts`, `RouletteBoard`, `ChipSelector`, `BetSlip`, responsive table layouts; unit and keyboard tests | L | W5-03 (Q5) |
 | W5-07 | **Spin flow:** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; the wheel (W5-P01) turns to the server-confirmed `winningNumber` before the result is revealed; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-P01, W5-06 (Q4, Q6, Q7, Q10, Q13) |
 | W5-08 | **Responsive, accessibility and responsible-play pass:** layouts at all widths, focus management, live regions, contrast, `OddsInfo` (Q8), wording review; fixes and tests; manual check record | M | W5-05, W5-07 |

@@ -9,7 +9,10 @@ const CURRENT_USER = 'GET /api/v1/users/me'
 
 type Handlers = Parameters<typeof stubApi>[0][string]
 
-/** The backend of these tests: no roulette route, so any such request fails the test. */
+/**
+ * The backend of these tests: no roulette route, so any such request fails the test. The wallet page's
+ * first history page is answered as an empty history, so that page renders as for a new player.
+ */
 function backend(currentUser: Handlers = noSession()) {
   return stubApi({
     'GET /api/v1/auth/csrf': csrfEndpoint(),
@@ -17,6 +20,7 @@ function backend(currentUser: Handlers = noSession()) {
     [CURRENT_USER]: currentUser,
     'GET /api/v1/interests': () => jsonResponse(interestCatalog),
     'GET /api/v1/wallet': () => jsonResponse(startingWallet),
+    'GET /api/v1/wallet/transactions?limit=20': () => jsonResponse({ items: [], nextCursor: null }),
     'POST /api/v1/auth/logout': () => {
       deleteCookie('XSRF-TOKEN')
       return noContent()
