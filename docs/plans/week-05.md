@@ -1,6 +1,6 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
-- **Status:** Revision 14. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
+- **Status:** Revision 17. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
   refinements (§14). W5-02 API foundation approved 2026-11-24 (§7.8). W5-03 navigation, `PlayerOnly`
   and player lobby approved 2026-11-24 (§4.4). First checkpoint (W5-01 to W5-03, `bb9e532`) approved
   and pushed. W5-04 wallet state and balance UI approved 2026-11-24 (§9.4) and pushed (`75d42da`).
@@ -10,9 +10,12 @@
   (`b40492a`). W5-07 spin flow reviewed and approved for the frontend checkpoint 2026-11-25 (§8.5)
   and pushed (`5e3d542`). W5-08 responsive, accessibility and responsible-play pass reviewed and
   approved for the checkpoint 2026-11-25 (§10.3) and pushed to the feature branch.** **AC-W5-08.3 is
-  outstanding:** no Lighthouse audit and no screen-reader smoke test have been performed. Chrome checks used a mocked API; the real Spring Boot +
-  PostgreSQL integration is **unverified** (no JDK) and is a mandatory gate before the merge to `main`.
-  Playwright W2-16 regression still pending (no JDK in this environment).
+  outstanding:** no Lighthouse audit and no screen-reader smoke test have been performed. The W5-01 to
+  W5-08 Chrome checks used a mocked API. **First real local integration run 2026-11-25 (§16.5,
+  reviewed and accepted):** Spring Boot + a throwaway PostgreSQL at V9, real spins through the UI,
+  replay and a lost answer verified; Playwright W2-16 regression 13/13 green. The remaining checks are
+  listed in §16.6 and stay open for W5-10. **W5-09 documentation reviewed and approved
+  2026-11-25 (§12.1) and pushed to the feature branch.** Week 5 is not merged into `main` and not deployed.
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -47,6 +50,9 @@
 | 12 | 2026-11-25 | W5-07 reviewed and approved for the frontend checkpoint; final safety review: a `200` body is validated before the record is cleared, the balance applied, the wheel turned or the result shown (9 malformed shapes tested, each retried with the same key and body); leaving during the animation tested; `409 IDEMPOTENCY_KEY_REUSED` logged as a defect (§8.4); W5-07 committed and pushed to the feature branch |
 | 13 | 2026-11-25 | W5-07 checkpoint recorded (`5e3d542`); W5-08 implemented: "Odds and rules" (`oddsRules`, `OddsInfo`, checked against the contract), focus restoration after removing/clearing bets and after the last older history page, 44 px touch targets for slip and history actions below `md`, wrapping instead of truncation, explicit "no monetary value" on the roulette page; audit and keyboard walkthrough recorded; real-backend readiness inspected (§10.3) |
 | 14 | 2026-11-25 | W5-08 reviewed and approved for the checkpoint with AC-W5-08.1, 08.2, 08.4 and 08.5 met and **AC-W5-08.3 outstanding** (no Lighthouse audit, no screen-reader smoke test); acceptance status recorded in §10.3; W5-08 committed and pushed to the feature branch |
+| 15 | 2026-11-25 | W5-08 checkpoint recorded (`c5d5261`); first real local integration run with the installed JDK 21 and cached Maven dependencies (offline): throwaway PostgreSQL (Flyway V1–V9), backend jar, Vite dev server, two disposable players; spins, wallet reconciliation, history, replay with the original key and a lost answer verified against the real backend; W2-16 Playwright regression 13/13 green; everything created was removed (§16.5). Corrected §10.3: `casino-postgres` listens on 127.0.0.1:5434, port 5432 belongs to another project's container |
+| 16 | 2026-11-25 | Real local integration run (§16.5) reviewed and accepted; W5-09 documentation implemented (§12.1): `architecture.md` §4 rewritten for the Week 5 frontend (§4.1–§4.10) and a Week 5 paragraph in §6, README (status, "Week 5 (feature branch only)", staging note, local roulette and wallet walkthrough, database port warning, milestones), `user-scenarios.md` S3 status, a note in `infrastructure/roulette-rollout.md`; §16.5 refined (summary of outcomes, port note); W5-10 checklist (§16.6) |
+| 17 | 2026-11-25 | W5-09 reviewed and approved: AC-W5-09.1 and 09.2 re-checked (feature branch / `main` / staging distinguished, architecture against the code, idempotency and unresolved spin, S3 without future features, Week 4 rollout steps unchanged, staging limitation explicit, §16.6 still open, AC-W5-08.3 outstanding, no sensitive data, 192 links resolve); W5-09 committed and pushed to the feature branch |
 
 ---
 
@@ -1557,7 +1563,9 @@ and "payout".
 - **Docker:** Docker 29.5.2; `postgres:17.11-alpine` and both digest-pinned `Dockerfile` base images are
   present. The project's `casino-postgres` container (named volume `online-casino-simulator_postgres-data`)
   is running with schema **V5**: starting the current backend against it would migrate that database
-  to V9. Port 5432 is served by Docker (`wslrelay` on `[::1]` is Docker Desktop's WSL relay); 8080 is free.
+  to V9. *(Corrected 2026-11-25:* `casino-postgres` listens on `127.0.0.1:5434`; port 5432 belongs to another
+  project's PostgreSQL container, so the default `DB_URL` (`localhost:5432`) must never be used for a
+  test run.) 8080 is free.
   The only backend image (`casino-backend:render-test`, 2026-11-07) predates the roulette endpoint.
 - **Shortest safe local-only path (needs approval):** (1) a throwaway database from the local image,
   `docker run --rm -d --name casino-w5-e2e -e POSTGRES_DB=… -e POSTGRES_USER=… -e POSTGRES_PASSWORD=…
@@ -1613,9 +1621,9 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | W5-P01 | **Phaser integration foundation (Q13; approved 2026-11-24, §3.4):** Phaser 4.2.1 as the only new runtime dependency; `games/roulette/` (wheel geometry, canvas check, `RouletteScene`, `createWheelGame`), `features/roulette/RouletteWheel` (lazy-loaded, StrictMode-safe, accessible HTML description, reduced motion, `spinTo` handle for W5-07), wheel on `/roulette`; no spin control, no client outcome | M | W5-03, W5-04 (Q11, Q13) |
 | W5-05 | **Wallet page and history (approved 2026-11-25, §6.3):** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |
 | W5-06 | **Table, chips and bet slip (no API; approved 2026-11-25, §5.9):** `rouletteTable.ts`, `betSlipReducer.ts`, `RouletteBoard`, `ChipSelector`, `BetSlip`, responsive table layouts; unit and keyboard tests | L | W5-03 (Q5) |
-| W5-07 | **Spin flow (approved for the frontend checkpoint 2026-11-25; real backend unverified, §8.5):** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; the wheel (W5-P01) turns to the server-confirmed `winningNumber` before the result is revealed; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-P01, W5-06 (Q4, Q6, Q7, Q10, Q13) |
+| W5-07 | **Spin flow (approved for the frontend checkpoint 2026-11-25, §8.5; first real local run 2026-11-25, §16.5):** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; the wheel (W5-P01) turns to the server-confirmed `winningNumber` before the result is revealed; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-P01, W5-06 (Q4, Q6, Q7, Q10, Q13) |
 | W5-08 | **Responsive, accessibility and responsible-play pass (approved for the checkpoint 2026-11-25, §10.3; AC-W5-08.3 Lighthouse and screen-reader checks outstanding):** layouts at all widths, focus management, live regions, contrast, `OddsInfo` (Q8), wording review; fixes and tests; manual check record | M | W5-05, W5-07 |
-| W5-09 | **Documentation:** `architecture.md` §4 (frontend structure, wallet state, spin lifecycle), README (what works today, local walkthrough), `user-scenarios.md` S3 note (animation in Week 6), this plan's implementation records | S | W5-08 |
+| W5-09 | **Documentation (approved 2026-11-25, §12.1):** `architecture.md` §4 (frontend structure, wallet state, spin lifecycle), README (what works today, local walkthrough), `user-scenarios.md` S3 note (animation in Week 6), this plan's implementation records | S | W5-08 |
 | W5-10 | **Verification and pull request preparation:** full frontend checks, local real-stack walkthrough (§16.2) including the older V7 backend (Q10), Playwright W2-16 regression and the W5 scenario (Should), checklist "no client RNG/payout, no browser storage except the pending spin record, no cloud". PR prepared, **not opened without approval** | M | all |
 
 ```mermaid
@@ -1646,6 +1654,32 @@ change Q13) follows W5-04 and precedes W5-05 in the review order; the task ids W
 3. W5-06: the table and slip enforce the contract limits with keyboard and mouse;
 4. W5-07: retry reuses the key, a new spin gets a new one, every error class tested;
 5. W5-08: manual responsive and accessibility record complete (responsive and keyboard done; Lighthouse and screen reader outstanding, AC-W5-08.3).
+
+### 12.1 Implemented in W5-09 (2026-11-25; approved 2026-11-25)
+
+Documentation only: no file under `frontend/`, `backend/` or any deployment configuration changed.
+Every statement was checked against the code of `c5d5261` and the records of this plan; planned
+features are named as planned.
+
+| File | Change |
+|---|---|
+| `docs/architecture.md` | §4 rewritten: status note (feature branch, not merged, not deployed); §4.1 the Week 2 foundation (kept, plus caller headers in `apiClient`); §4.2 routes (`App.tsx` verbatim), `PlayerOnly`, main navigation, lobby; §4.3 `WalletProvider` (one read per player session, numbered reads, `applyConfirmedBalance`, reset on player change; no polling); §4.4 wallet page and keyset history; §4.5 table, chips, slip, review; §4.6 React and Phaser (lazy chunk, one game per mount, `spinTo`, no random source, reduced motion, no canvas); §4.7 `useSpin` (one key per new spin, record before sending, one request per player, validated `200`, definitive / before-lookup / uncertain, explicit retry, session expiry); §4.8 account and session isolation; §4.9 older backends; §4.10 the existing development, production and staging notes (unchanged). §6: a Week 5 paragraph (not merged, not deployed; Vercel would deploy a merge at once; staging-ready only after the V7 check and the approved rollout). ADR references and the other sections unchanged |
+| `README.md` | Status row of Stage 3; Week 3 and Week 4 sections say "`main` has no wallet UI / roulette screen yet"; new "Week 5 (feature branch only: not merged, not deployed)"; staging paragraph: Week 5 is not on staging and not staging-ready yet; "Planned": W5-10, merge after approval, Week 6 scope; step 3: database port warning (5432 may belong to another program); step 5: "Roulette and wallet (Week 5 feature branch only)" walkthrough (lobby, bets, review, confirm, result after the wheel, history, unresolved spin and Retry spin, older backend); Playwright: the W2-16 result on the branch, no roulette scenario yet, and `POSTGRES_PORT` instead of a fixed 5432; milestones Week 5 and Week 6 |
+| `docs/user-scenarios.md` | S3: a status note: backend step 2 without play limits (Week 4, `main`, not deployed), frontend steps 1 and 3 (Week 5, feature branch), verified locally (§16.5); not built: animation refinement and round history (Week 6), statistics (S4), play limits (S6). The scenario itself is unchanged |
+| `infrastructure/roulette-rollout.md` | A short note after the status: the Week 5 UI exists only on the feature branch; a merge reaches Vercel at once; the older-backend behaviour is still to be checked (W5-10); a merge replaces or approves no runbook step. No step, command or configuration changed |
+| `docs/plans/week-05.md` | Status, revision 16, this section, the W5-09 task row, §16.5 (heading "accepted", a summary of the outcomes, the port note), §16.6 |
+
+**Corrections made while checking the code.** The plan's §9.2 lists a refresh on `visibilitychange`
+(**Should**); it was **not implemented**, so the architecture does not mention it. A wallet entry of an
+unknown future type is shown as "Other entry" (`walletFormat.ts`). The W5-09 task row still says "S3 note
+(animation in Week 6)": since Q13 the wheel already turns in Week 5, so the S3 note says that Week 6
+*refines* the animation.
+
+**Not changed:** `docs/api.md` and `docs/database.md` describe the backend, which Week 5 does not change;
+their statements (roulette endpoint, V1–V9, staging at V7) were re-read and are still correct.
+Historical records (revision rows, implementation sections, rollout records) are unchanged.
+
+**Verification (2026-11-25):** documentation only, no application code changed (`git status`: five Markdown files). `git diff --check` clean; every relative link and anchor in `README.md`, `docs/architecture.md`, `docs/user-scenarios.md`, `docs/api.md`, `docs/database.md`, `infrastructure/roulette-rollout.md` and this plan resolves (192 links; a scratch script with GitHub heading slugs, the repository has no link checker); `npm run lint`, `npm run typecheck`, `npm test` (44 files, 531 tests) and `npm run build` green, unchanged from W5-08.
 
 ---
 
@@ -1880,3 +1914,116 @@ random secrets, removed afterwards).
   any change to cloud secrets, environment variables or `vercel.json` rewrites.
 - Any backend, contract or Flyway change.
 - Commits, pushes, pull requests or merges without explicit approval.
+
+### 16.5 First real local integration run (2026-11-25; accepted)
+
+Reviewed and accepted by the project owner (2026-11-25). **Summary:**
+- **Stack:** Eclipse Temurin JDK 21; Maven Wrapper 3.9.16 in offline mode (no dependency downloaded);
+  an isolated temporary PostgreSQL 17 container; Flyway V1–V9; the real local Spring Boot backend;
+  React through the Vite proxy; temporary `PLAYER` accounts. No mocked response in the walkthrough.
+- **First round:** starting balance 1,000 coins; 10 coins on Red; the server drew **0 (green)**; balance
+  after the round **990**; the wheel stopped on 0; history and ledger showed one stake.
+- **Replay:** the completed request sent again with its original `Idempotency-Key` and unchanged body
+  returned the identical round; no second debit.
+- **Second test (lost answer):** 10 coins on Even; the server drew **26** (black) and Even won. The
+  response was dropped on the way to the browser; "Retry spin" with the **original key and body**
+  recovered the stored round; balance **1,000**; no duplicate settlement.
+- **Regression:** Playwright W2-16 **13/13** passed.
+- **Cleanup:** every temporary process, container and volume of the run was removed; the existing
+  `casino-postgres` container and its data were preserved and not accessed.
+- **Port note:** `casino-postgres` listens on `127.0.0.1:5434`, not 5432. Port 5432 belongs to another
+  local project's database and must never be assumed to be this project's (README, step 3).
+- No password, credential, cookie, CSRF token or throttle secret is recorded here or anywhere in the
+  repository; the generated values existed only in a temporary file that was deleted.
+
+Details follow.
+
+Approved as a strictly isolated, local-only check with the installed JDK and cached dependencies.
+Nothing was installed or downloaded, no system, user or project configuration was changed, and no
+cloud service was contacted. Evidence (screenshots, JSON report, logs) stays in the session's
+scratchpad, outside the repository.
+
+**Environment**
+
+| Part | Result |
+|---|---|
+| Java | Eclipse Temurin 21.0.12.1 from `%USERPROFILE%\.jdks\jdk-21.0.12.1+1`; `JAVA_HOME`/`PATH` set only for the child processes |
+| Maven | `./mvnw -o -version`: Maven 3.9.16 on Java 21.0.12.1; `./mvnw -o -DskipTests package` succeeded **offline**: every build and runtime dependency is cached (nothing missing). The jar in the git-ignored `backend/target/` was rebuilt from `c5d5261` |
+| Database | Throwaway container `casino-w5-realtest-pg` (`postgres:17.11-alpine`, `--rm`, anonymous volume only, `127.0.0.1:55432`), its own database and user, generated password never printed. `casino-postgres` (127.0.0.1:5434, V5) and its volume were not touched |
+| Backend | The jar started from an empty directory (no `.env` can be imported), all values as process environment: `DB_URL` to 55432, a fresh random throttle secret, `SPRING_PROFILES_ACTIVE` removed, admin bootstrap empty. Flyway: "Successfully applied 9 migrations … now at version v9"; started in 23.3 s; only the two SpringDoc development warnings, no error |
+| Status | `GET /api/v1/system/status` → `status UP`, `database UP`, `schemaVersion "9"`; `POST /api/v1/games/roulette/spins` without CSRF → `403` (the endpoint exists; a missing one is `404`) |
+| Frontend | `vite --host 127.0.0.1 --port 5173` with `VITE_DEV_PROXY_TARGET=http://127.0.0.1:8080` and `VITE_API_BASE_URL=` (process values take precedence over `frontend/.env`); Chrome (Playwright, headless, motion allowed) at `http://localhost:5173`, so the origin matches the backend's CORS default. Every API call went through the same-origin proxy |
+
+**Walkthrough (real backend, no mocked response).** Two disposable players were registered through
+`/register` (`@example.test`, role `PLAYER` in the database). The first run had a script error in the
+evidence collection, not in the application: it looked for the pending record in `localStorage` (it is
+in `sessionStorage`, §8.4) and stopped sampling before the reveal ended. The second run is the record;
+both runs showed the same behaviour.
+
+| Step | Observed |
+|---|---|
+| Initial balance | Header "Balance 1,000 coins", `GET /wallet` 1000, ledger: one `STARTING_BALANCE` +1000 |
+| Bet and review | Chip 10, one bet on Red; review: "Red … 10 coins · Total stake 10 coins · Your balance: 1,000 coins" |
+| Request | `POST /api/v1/games/roulette/spins`, body `{"bets":[{"category":"RED_BLACK","color":"RED","amount":10}]}`; `Idempotency-Key` a UUID (`08cbcffc-…`); `X-XSRF-TOKEN` present and equal to the `XSRF-TOKEN` cookie; cookies `SESSION`, `XSRF-TOKEN` |
+| Response (server's draw) | `200`: `winningNumber 0`, `GREEN`, Red lost (`payout 0`), `totalStake 10`, `totalPayout 0`, `balance 990`, round `46aa0c3b-…` |
+| Wheel (Phaser) | The canvas changed in every sample for about 4.7 s (15 distinct frames), then stayed identical (4 samples); the final screenshot shows **0** under the pointer. The result values appeared only after the wheel stopped (5.1 s after the click); focus moved to the "Result" heading |
+| Result | "0 · Green … Red Stake 10 coins LOST Payout 0 coins … Net result −10 coins … Balance after this round 990 coins … round 46aa0c3b. Drawn and settled by the server." |
+| Wallet | Header and `GET /wallet`: 990. Database: round row (`request_id` = the key, stake entry 7, no payout entry), ledger `ROULETTE_STAKE −10 → 990` with the round id as reference. Wallet page: "Roulette stake −10 coins 990 coins" above "Starting balance" |
+
+**Idempotency (same session, original key, unchanged body).** Replaying the completed request returned
+`200` with a body identical to the original (same round, number, settlement, balance, `createdAt`); the
+ledger, the rounds and the balance were unchanged (no second debit).
+
+**Lost answer (uncertain outcome).** The second spin (10 on Even) was allowed to reach the real backend;
+only its response was dropped on the way back to the browser (`page.route` → `route.fetch()` → abort with
+`connectionreset`). The server had settled it (26, black, Even won: payout 20, balance 1000). The UI showed
+"Spin not confirmed", betting paused; `sessionStorage` held `casino.roulette.pendingSpin.v1.<userId>` in
+state `unresolved` with the request's key; the ledger already had its stake and payout. "Retry spin" sent
+the **same key and the same body**; the backend returned the stored round (identical body); the wheel
+stopped on **26**; the result showed "26 · Black … Even … WON Payout 20 coins … Balance after this round
+1,000 coins"; the record was removed; the header showed 1,000. Database: two rounds, exactly one stake
+(and one payout) per round. Wallet page: payout +20 → 1,000, stake −10 → 980, stake −10 → 990, starting
+balance.
+
+**Console:** a `401` for `/users/me` before registering (expected), the deliberately reset spin
+response, and a `404` for `/favicon.ico` (the app defines no icon; cosmetic, pre-existing). No CSP or
+application error.
+
+**Playwright W2-16 regression.** `JAVA_HOME=<.jdks path> npm run test:e2e` with the jar above, on its own
+documented throwaway stack (`casino-e2e-pg` on 5441, backend 8091, Vite 5174, random secrets):
+**13 passed** (6.0 min). The proxy errors in the log come from the tests that stop or restart the
+backend on purpose. Its teardown removed the container and the state file.
+
+**Cleanup.** The backend and Vite processes of this run were stopped (ports 8080 and 5173 free), the
+container `casino-w5-realtest-pg` and its anonymous volume were removed (port 55432 free), and the
+generated secrets file was deleted. `casino-postgres` is still running at V5 with its volume; Git is
+unchanged apart from this record.
+
+**Not covered by this run (open for W5-10, §16.2):** several bets in one round, insufficient funds (4),
+DevTools "Offline" before the request leaves the browser (5), backend stopped during a spin (6), screen
+reader and Lighthouse (7, AC-W5-08.3), a second player in the same browser (8), the older V7 backend (9),
+reload while unresolved (10). The optional `w5-roulette.spec.ts` does not exist yet. The real
+interruption used a dropped response, not a network outage, and Chrome ran headless with Playwright.
+
+### 16.6 Open verification for W5-10 (none of these is done)
+
+Each item needs real evidence before it is ticked; nothing here is passed yet. AC-W5-08.3 stays
+**outstanding** until a Lighthouse audit and a real screen-reader smoke test have been recorded.
+
+- [ ] Several bets in one real round (§16.2 step 2), with the per-bet outcomes and totals checked
+      against the response and the ledger.
+- [ ] `409 INSUFFICIENT_FUNDS` from the real backend (§16.2 step 4): message shown, balance re-read,
+      nothing in the history.
+- [ ] Browser offline **before** the request leaves (DevTools "Offline", §16.2 step 5): unresolved state,
+      then "Retry spin" with the same key; one stake entry.
+- [ ] Backend stopped during a spin, then restarted (§16.2 step 6): unresolved, retry, one round.
+- [ ] Reload while a spin is unresolved (§16.2 step 10): the record is shown, nothing is sent until
+      "Retry spin", the retry uses the stored key.
+- [ ] Switching users in the same browser (§16.2 step 8): the balance disappears on sign-out; another
+      player sees only their own balance; the first player's pending record is neither shown nor sent.
+- [ ] Older backend (Week 3 build of `main`, V7; §16.2 step 9, AC-W5-10.5): explicit unavailable state,
+      no availability claim, wallet pages working.
+- [ ] Lighthouse accessibility audit on `/roulette` and `/wallet` without violations (AC-W5-08.3).
+- [ ] Screen-reader smoke test of the spin and the history with NVDA or Narrator (AC-W5-08.3).
+- [ ] Full final regression (`npm run lint`, `typecheck`, `test`, `build`; W2-16 Playwright; backend
+      untouched: `git diff --stat main -- backend` empty) and the repository review (AC-W5-10.1–10.4).

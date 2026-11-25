@@ -26,6 +26,20 @@ test suite. Actors: **Player** (adult user, role `PLAYER`), **Administrator** (r
 **Acceptance:** retrying the same request (same idempotency key) never settles a round twice;
 a balance never becomes negative.
 
+**Status (2026-11-25).**
+- **Backend (Week 4, on `main`, not deployed):** step 2 without play limits. The server checks the
+  balance and the bet limits, draws the number with `SecureRandom`, computes the payouts and settles
+  the wallet in one transaction; a repeated key returns the stored round. Play limits come with the
+  responsible-play features (S6, Weeks 9–10).
+- **Frontend (Week 5, feature branch only: not merged, not deployed):** steps 1 and 3. The player
+  chooses chips and bets, reviews them and confirms. The Phaser wheel turns to the server's number
+  before the result (each bet's outcome, the totals, the new balance) is shown, with the same weight
+  for a win and a loss. A spin whose answer is lost stays "not confirmed" until the player retries it
+  with the same key. Verified locally against the real backend (two rounds, a replay and a lost answer;
+  [Week 5 plan §16.5](plans/week-05.md#165-first-real-local-integration-run-2026-11-25-accepted)).
+- **Not built yet:** refinement of the wheel animation and round history (Week 6), statistics (S4),
+  play limits and other responsible-play controls (S6).
+
 ### S4 — Review history and statistics
 The player views round history, wallet transactions, total rounds, net virtual result, time played
 and the house edge of each bet type. Figures match the recorded transactions.

@@ -28,7 +28,7 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 | Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | ✅ Done: Render backend and Vercel frontend deployed and verified (registration closed); Neon `staging` now at V7 |
 | 2 — Virtual currency & game logic | 3 | Virtual wallet and immutable ledger | ✅ Done: merged into `main` (PR #9) and deployed to staging; Neon `staging` migrated V5 → V7 and verified ([rollout record](infrastructure/wallet-rollout.md#rollout-record-2026-11-15)) |
 | | 4 | Roulette engine | ✅ Merged into `main` (PR #10, [Week 4 plan](docs/plans/week-04.md)). **Not deployed**: the Render backend still runs the Week 3 build and Neon `staging` stays at V7 until a separately approved [rollout](infrastructure/roulette-rollout.md) |
-| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | 🚧 Week 5 in progress on `feature/week-05-roulette-ui` (roulette and wallet UI, Phaser wheel): [plan](docs/plans/week-05.md) |
+| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | 🚧 Week 5 in progress on `feature/week-05-roulette-ui`: player lobby, wallet page, roulette page with the Phaser wheel implemented and verified locally against the real backend; final verification (W5-10) open. **Not merged into `main`, not deployed** ([plan](docs/plans/week-05.md)) |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
 | 5 — Statistics & responsible play | 9–10 | Dashboard, limits, admin panel | Planned |
 | 6 — QA & release | 11–12 | Testing, deployment, beta release | Planned |
@@ -58,8 +58,8 @@ Week 3 (on `main`, deployed to staging):
 - **Immutable ledger:** every balance change is one append-only ledger entry; balances never go
   below 0 or above 2⁵³ − 1, and repeated operations (idempotency keys) never apply twice.
 - **Read-only API for players:** `GET /api/v1/wallet` (balance) and `GET /api/v1/wallet/transactions`
-  (history in pages). There is no endpoint that adds or removes coins, and no wallet UI yet
-  (Week 5).
+  (history in pages). There is no endpoint that adds or removes coins. `main` has no wallet UI yet;
+  it is part of Week 5 (feature branch, below).
 
 ### Week 4 (on `main`, not deployed)
 
@@ -75,7 +75,38 @@ Week 4 (PR #10) adds the European roulette backend. It runs locally and in the a
   ([API](docs/api.md#roulette-spin-post-apiv1gamesroulettespins)).
 - **Ledger:** stakes and payouts appear in the wallet history as `ROULETTE_STAKE` and
   `ROULETTE_PAYOUT`; rounds and bets are append-only (V9).
-- No roulette screen yet (Week 5) and no round history (Week 6).
+- `main` has no roulette screen yet (Week 5, feature branch, below) and no round history (Week 6).
+
+### Week 5 (feature branch only: not merged, not deployed)
+
+On `feature/week-05-roulette-ui` the frontend gets the player interface for the Week 3 wallet and the
+Week 4 roulette backend. None of it is on `main` or on staging yet
+([plan](docs/plans/week-05.md); architecture: [§4](docs/architecture.md#4-frontend-structure)).
+
+- **Player lobby and navigation:** players see Lobby · Roulette · Wallet and their balance in the
+  header; `/roulette` and `/wallet` are for signed-in players only (administrators get a notice).
+- **One shared balance:** every page shows the same server-confirmed balance; the browser never
+  calculates it.
+- **Wallet page (`/wallet`):** the balance and the transaction history, newest first, 20 entries per
+  page with "Load older entries".
+- **Roulette page (`/roulette`):** chips, the single-zero table with the five bet types, a bet slip,
+  an explicit review step, and the result of each round as the server sent it. An "Odds and rules"
+  panel explains the probabilities, payouts and the house edge of 1/37.
+- **Phaser wheel:** the wheel turns to the number the **server** drew, then the result is shown. It
+  never decides a number (with "reduce motion" it moves straight to the number).
+- **Safe retries:** every spin has one `Idempotency-Key`. If the answer is lost, the spin stays
+  "not confirmed" until the player presses **Retry spin**, which resends the same key and bets, so a
+  round is never charged twice.
+- **Older backends:** if the server has no roulette endpoint (for example the current staging
+  backend), the roulette page says so and the wallet keeps working.
+- **Accessibility and responsible presentation:** keyboard operation with managed focus, layouts from
+  320 px, 44 px touch targets for the betting and history controls, wins and losses shown alike, no urgency or "play again" prompts.
+  A Lighthouse audit and a screen-reader test are still outstanding (W5-10).
+
+Verified so far: lint, typecheck, 531 frontend tests and the build; Chrome checks with a mocked API;
+and one isolated local run against the **real** Spring Boot backend and PostgreSQL (2026-11-25, two
+real rounds, a replay and a lost answer, the Playwright W2-16 suite 13/13;
+[record](docs/plans/week-05.md#165-first-real-local-integration-run-2026-11-25-accepted)).
 
 ### Deployed to staging
 
@@ -86,9 +117,16 @@ reached staging through the approved [Week 3 rollout](infrastructure/wallet-roll
 no roulette:** V8/V9 and the spin endpoint reach it only through the separately approved
 [Week 4 rollout](infrastructure/roulette-rollout.md), which is prepared but not executed.
 
+**Week 5 is not on staging.** Vercel deploys `main` automatically, so merging Week 5 would put the new
+UI in front of the Week 3 staging backend at once; roulette would show as unavailable there. The Week 5
+frontend is not staging-ready until it has been checked against an older V7 backend (W5-10) and the
+approved roulette rollout has been followed.
+
 ### Planned (later weeks)
 
-The roulette UI and the wallet UI (Week 5), animations and round history (Week 6), learning modules,
+Finishing Week 5: the final verification (W5-10) and, after approval, the merge into `main`. Week 6:
+refinement of the wheel animation, sound, an in-app reduced-motion setting, round history and
+statistics. Later: learning modules,
 quizzes and rewards (Weeks 7–8), statistics and play limits (Week 9), the admin panel (Week 10), and
 the release (Weeks 11–12). See the table above.
 
@@ -225,6 +263,11 @@ docker compose ps        # wait until STATUS shows "(healthy)"
 The data is kept in the Docker volume `postgres-data` across restarts. `docker compose down` stops
 the container and keeps the data.
 
+**Check the port before starting the backend.** If another program already uses 5432, set
+`POSTGRES_PORT` (e.g. `5434`) in `.env` **and** the same port in `DB_URL`. Never assume that whatever
+listens on 5432 is this project's database: with the default `DB_URL` the backend would connect to it
+and Flyway would try to migrate it. `docker compose ps` shows the port of this project's container.
+
 ### 4. Start the backend (http://localhost:8080)
 
 ```bash
@@ -258,6 +301,34 @@ In the browser:
 - **Create account** (`/register`) and **Sign in** (`/login`) use the real backend.
 - **My profile** (`/profile`, signed-in users only) edits the display name and the interests.
 - After a page reload the session is restored from the cookie.
+
+#### Roulette and wallet (Week 5 feature branch only)
+
+These pages exist only on `feature/week-05-roulette-ui` and need a backend from `main` since Week 4
+(schema V9; `GET /api/v1/system/status` shows `schemaVersion` 9). Sign in as a **player** (a new account
+from **Create account** starts with 1,000 virtual coins); administrators have no wallet.
+
+1. **Lobby (`/`):** the balance card and the "European roulette" and "Wallet" cards. The header shows
+   the balance and the links Lobby · Roulette · Wallet.
+2. **Place bets (`/roulette`):** choose a chip (1–500 coins), then numbers or outside bets; each click
+   adds the chip value. The bet slip lists the bets and the total stake (1–10 bets, 1–1,000 coins per
+   bet, at most 10,000 in total). "Odds and rules" explains the chances and payouts.
+3. **Review and confirm:** "Review bets" shows the exact bets, the total stake and your balance.
+   **Confirm and spin** sends the bets once, with a new `Idempotency-Key` and the CSRF token
+   (DevTools → Network shows both on `POST /api/v1/games/roulette/spins`).
+4. **The result:** the server draws the number and settles the wallet. The Phaser wheel then turns to
+   exactly that number, and only after it stops the result appears: the number and colour, each bet's
+   outcome and payout, the totals and the balance after the round. The header balance is the server's.
+5. **Wallet history (`/wallet`):** the round appears as "Roulette stake" (and "Roulette payout" on a
+   win), newest first, each with "Balance after". "Load older entries" pages back; "Refresh history"
+   reloads.
+6. **Unresolved spin:** if the answer is lost (for example the connection drops), the page shows
+   **"Spin not confirmed"** and locks betting. **Retry spin** resends the same key and bets: if the
+   server had already played the round it returns that round, without charging again. **Check balance**
+   only reads the wallet. Nothing is retried automatically, also not after a reload in the same tab.
+
+Against a backend without the roulette endpoint (an older build, such as the current staging backend)
+the roulette page shows "Roulette is not available on this server yet"; the wallet page still works.
 
 ### 6. Optional: create the first administrator
 
@@ -384,7 +455,7 @@ What the tests use:
   backend on 8091 and Vite on `127.0.0.1:5174`, with random secrets that are never printed. The
   bootstrap test restarts the backend with a throwaway administrator that exists only in that
   container. Your local
-  database, `.env` and dev servers on 5432/8080/5173 are not used. The container and its data are
+  database (`POSTGRES_PORT`), `.env` and dev servers on 8080/5173 are not used. The container and its data are
   removed afterwards.
 - **The installed Chrome** (`channel: 'chrome'`), so no Playwright browser download is needed.
 - **Real waits:** the session-expiry scenario waits for a real 1-minute idle timeout, and some tests
@@ -392,6 +463,9 @@ What the tests use:
 - **Reports:** failures leave a screenshot and a trace in `frontend/test-results/`; the HTML report
   is in `frontend/playwright-report/` (`npx playwright show-report`). Both are git-ignored. Traces
   contain the disposable test passwords.
+- **Week 5 branch:** the W2-16 suite passed 13/13 on `feature/week-05-roulette-ui` (2026-11-25). There
+  is no Playwright scenario for roulette or the wallet yet; the real roulette round was checked once in
+  an isolated manual run ([record](docs/plans/week-05.md#165-first-real-local-integration-run-2026-11-25-accepted)).
 
 ## Configuration reference
 
@@ -488,9 +562,10 @@ Next milestones:
   `TEST_CREDIT`/`TEST_DEBIT` (release gate, Week 3 plan §7.13). **Not deployed:** the staging rollout
   is a separate, approval-gated step ([runbook](infrastructure/roulette-rollout.md)). Plan:
   [`docs/plans/week-04.md`](docs/plans/week-04.md).
-- **Week 5:** the roulette and wallet user interface and the Phaser wheel — in progress on the feature
-  branch (not merged)
-  ([`docs/plans/week-05.md`](docs/plans/week-05.md)).
+- **Week 5:** the roulette and wallet user interface and the Phaser wheel — implemented on the feature
+  branch and verified locally against the real backend; final verification (W5-10) open; not merged,
+  not deployed ([`docs/plans/week-05.md`](docs/plans/week-05.md)).
+- **Week 6:** animation refinement, sound, round history and statistics.
 
 ## Documentation
 
