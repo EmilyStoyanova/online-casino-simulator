@@ -731,6 +731,48 @@ describe('AC-W5-07.10: a backend without roulette', () => {
   })
 })
 
+describe('W5-08: responsible presentation', () => {
+  it('a win and a loss use the same layout and weight; no celebration, pressure or repeat control; disclaimers visible', async () => {
+    const lost: RouletteSpinResult = {
+      ...spinResult,
+      roundId: 'bbbbbbbb-8b3d-4c55-9a7e-2f0d5b1e9c41',
+      winningNumber: 2,
+      bets: spinResult.bets.map((bet) => ({ ...bet, payout: 0 })),
+      totalPayout: 0,
+      balance: 970,
+    }
+    backend({ spin: [() => jsonResponse(spinResult), () => jsonResponse(lost)], wallet: () => jsonResponse(startingWallet) })
+    await openRoulette()
+    const user = userEvent.setup()
+
+    await placeExampleBets(user)
+    await reviewAndConfirm(user)
+    const won = await screen.findByText('Won')
+    const lostStyle = (await screen.findByText('Lost')).className
+    expect(won.className).toBe(lostStyle)
+    /** The result's markup without the server's values (numbers, signs, words, round id) and React ids. */
+    const shape = () =>
+      screen
+        .getByRole('region', { name: 'Result' })
+        .innerHTML.replace(/ id="[^"]*"/g, '')
+        .replace(/<span class="font-mono">[^<]*<\/span>/, '')
+        .replace(/[\d,+−]|Won|Lost|Black|Red|Green/g, '')
+    const winShape = shape()
+
+    await placeExampleBets(user)
+    await reviewAndConfirm(user)
+    expect(await screen.findByText('2 · Black')).toBeInTheDocument()
+    // Same markup and classes for a win and a loss, apart from the server's values.
+    expect(shape()).toBe(winShape)
+
+    const text = document.body.textContent ?? ''
+    expect(text).not.toMatch(/!|congrat|lucky|jackpot|hot streak|big win|last chance|hurry|so close|almost won|bonus/i)
+    expect(screen.queryByRole('button', { name: /repeat|again|rebet|auto/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/virtual coins only; they have no monetary value/)).toBeInTheDocument()
+    expect(screen.getByText('Virtual currency only')).toBeInTheDocument()
+  })
+})
+
 describe('Leaving the page, and other users', () => {
   it('leaving during the request: the answer is still applied once (balance, record), no second request', async () => {
     const spin = controlled()

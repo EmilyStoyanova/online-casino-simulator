@@ -6,6 +6,7 @@ import { useAuth } from '../features/auth/useAuth'
 import { BetSlip } from '../features/roulette/BetSlip'
 import { BetSummaryBar } from '../features/roulette/BetSummaryBar'
 import { ChipSelector } from '../features/roulette/ChipSelector'
+import { OddsInfo } from '../features/roulette/OddsInfo'
 import { RouletteBoard } from '../features/roulette/RouletteBoard'
 import { RouletteWheel, type RouletteWheelHandle } from '../features/roulette/RouletteWheel'
 import { SpinResult } from '../features/roulette/SpinResult'
@@ -119,6 +120,7 @@ function RouletteTable({ userId }: { userId: string }) {
             onPlace={(cell: BetCell) => change({ type: 'add', selection: cell.selection, amount: chip })}
             lockedReason={lockedReason}
           />
+          <OddsInfo />
         </section>
 
         <div className="space-y-6">
@@ -178,7 +180,8 @@ export function RoulettePage() {
   return (
     <div className="space-y-6">
       <PageHeader title="European roulette">
-        Single-zero roulette with virtual coins only. Every number is drawn by the server, never in your browser.
+        Single-zero roulette with virtual coins only; they have no monetary value. Every number is drawn by the server,
+        never in your browser.
       </PageHeader>
       {player && <RouletteTable key={player} userId={player} />}
     </div>

@@ -116,7 +116,7 @@ export function RouletteWheel({ ref }: { ref?: Ref<RouletteWheelHandle> }) {
         European single-zero wheel: 37 pockets, 0 to 36. Zero is green; the other numbers alternate red and black.
       </figcaption>
       <details className="w-full max-w-sm text-sm text-zinc-300">
-        <summary className="cursor-pointer rounded-md text-zinc-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400">
+        <summary className="inline-flex min-h-6 cursor-pointer items-center rounded-md text-zinc-200 max-md:min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400">
           Pocket order on the wheel
         </summary>
         <ol aria-label="Pockets clockwise from zero" className="mt-3 grid grid-cols-6 gap-1.5 sm:grid-cols-8">

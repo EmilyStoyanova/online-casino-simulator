@@ -25,7 +25,7 @@ export function BetRows({
           <li key={bet.key} className="px-3 py-2">
             <div className="flex items-center gap-3">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-zinc-100">{entry.name}</p>
+                <p className="text-sm font-medium break-words text-zinc-100">{entry.name}</p>
                 <p className="text-xs text-zinc-400">
                   {entry.betType} · <span className="whitespace-nowrap">pays {entry.odds}</span>
                 </p>
@@ -35,6 +35,7 @@ export function BetRows({
                 <button
                   type="button"
                   onClick={() => onRemove(bet.key)}
+                  data-bet-key={bet.key}
                   aria-label={`Remove ${entry.name}, ${formatCoins(bet.amount)}`}
                   className="-mr-1 flex size-11 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100 max-md:scroll-mb-24 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
                 >

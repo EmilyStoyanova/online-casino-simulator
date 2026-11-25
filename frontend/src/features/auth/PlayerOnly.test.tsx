@@ -143,7 +143,8 @@ describe('Placeholder pages', () => {
     expect(within(slip).getByText(/No bets yet/)).toBeInTheDocument()
     expect(within(slip).getByText(/^Your balance:/)).toHaveTextContent('Your balance: 1,000 coins')
     expect(within(screen.getByRole('region', { name: 'Your balance' })).getByText('1,000 coins')).toBeInTheDocument()
-    expect(screen.queryByText(/win|payout/i)).not.toBeInTheDocument()
+    // No result and no payout for the player (the general "Odds and rules" panel explains the rules).
+    expect(slip.textContent).not.toMatch(/win|payout/i)
   })
 
   it('the wallet shows the server balance and only the server’s entries: none yet, so no invented transactions', async () => {

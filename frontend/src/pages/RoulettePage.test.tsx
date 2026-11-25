@@ -220,12 +220,15 @@ describe('the slip (AC-W5-06.5)', () => {
     expect(reviewButton()).not.toHaveAccessibleDescription(/too low/)
   })
 
-  it('shows no potential win or payout anywhere: only stakes and odds', async () => {
+  it('shows no potential win or payout for the player’s bets: only stakes and odds', async () => {
     const { user } = await openTable()
     await user.click(cell(/^17, black/))
     await user.click(cell(/^3rd dozen/))
 
-    expect(screen.queryByText(/win|payout|return|profit/i)).not.toBeInTheDocument()
+    // The slip and the cells; the "Odds and rules" panel (W5-08) explains the rules in general terms.
+    for (const part of [slip(), ...within(table()).getAllByRole('group').filter((group) => group.tagName === 'DIV')]) {
+      expect(part.textContent, part.getAttribute('aria-labelledby') ?? 'slip').not.toMatch(/win|payout|return|profit/i)
+    }
     expect(within(slip()).queryByText('360 coins')).not.toBeInTheDocument()
     expect(within(slip()).getByText('20 coins')).toBeInTheDocument()
   })
@@ -280,6 +283,48 @@ describe('nothing is sent and nothing changes the wallet without "Confirm and sp
     expect(screen.getByRole('link', { name: 'Balance 1,000 coins' })).toBeInTheDocument()
     expect(fakeWheel.instances).toHaveLength(1)
     expect(fakeWheel.instances[0]?.spinTo).not.toHaveBeenCalled()
+  })
+})
+
+describe('W5-08: keyboard focus never falls back to the page', () => {
+  it('after "Remove" the focus moves to the next row’s remove button, then the previous one, then "Review bets"', async () => {
+    const { user } = await openTable()
+    for (const name of [/^1, red/, /^2, black/, /^3, red/]) await user.click(cell(name))
+    const remove = (name: string) => within(slip()).getByRole('button', { name })
+
+    await user.click(remove('Remove Number 2, 10 coins'))
+    expect(remove('Remove Number 3, 10 coins')).toHaveFocus()
+
+    await user.keyboard('{Enter}')
+    expect(remove('Remove Number 1, 10 coins')).toHaveFocus()
+
+    await user.keyboard('{Enter}')
+    expect(reviewButton()).toHaveFocus()
+    expect(reviewButton()).toHaveAccessibleDescription('Place at least one bet to review it.')
+    expect(status()).toHaveTextContent('Number 1 removed. No bets left.')
+  })
+
+  it('after "Clear all bets" the focus moves to "Review bets", which explains why it is unavailable', async () => {
+    const { user } = await openTable()
+    await user.click(cell(/^Odd\./))
+
+    await user.click(within(slip()).getByRole('button', { name: 'Clear all bets' }))
+
+    expect(reviewButton()).toHaveFocus()
+    expect(reviewButton()).toHaveAttribute('aria-disabled', 'true')
+    expect(status()).toHaveTextContent('All bets cleared.')
+  })
+})
+
+describe('W5-08: touch targets', () => {
+  it('slip and summary-bar actions are at least 44 × 44 px below md (Tailwind class; sizes measured in Chrome)', async () => {
+    const { user } = await openTable()
+    await user.click(cell(/^Odd\./))
+
+    for (const button of [...within(slip()).getAllByRole('button'), ...screen.getAllByRole('button', { name: 'Review bets' })]) {
+      const isRemove = button.getAttribute('aria-label')?.startsWith('Remove')
+      expect(button.className, button.textContent ?? '').toMatch(isRemove ? /size-11/ : /max-md:min-h-11/)
+    }
   })
 })
 

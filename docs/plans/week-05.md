@@ -1,6 +1,6 @@
 # Week 5 Plan — Roulette and Wallet Frontend
 
-- **Status:** Revision 12. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
+- **Status:** Revision 14. **W5-01 reviewed 2026-11-24: architecture approved; Q1–Q12 approved with
   refinements (§14). W5-02 API foundation approved 2026-11-24 (§7.8). W5-03 navigation, `PlayerOnly`
   and player lobby approved 2026-11-24 (§4.4). First checkpoint (W5-01 to W5-03, `bb9e532`) approved
   and pushed. W5-04 wallet state and balance UI approved 2026-11-24 (§9.4) and pushed (`75d42da`).
@@ -8,7 +8,9 @@
   (§3.4) and pushed (`acabd75`). W5-05 wallet transaction history approved 2026-11-25 (§6.3) and
   pushed (`929a6c0`). W5-06 table, chips and bet slip approved 2026-11-25 (§5.9) and pushed
   (`b40492a`). W5-07 spin flow reviewed and approved for the frontend checkpoint 2026-11-25 (§8.5)
-  and committed to the feature branch.** Chrome checks used a mocked API; the real Spring Boot +
+  and pushed (`5e3d542`). W5-08 responsive, accessibility and responsible-play pass reviewed and
+  approved for the checkpoint 2026-11-25 (§10.3) and pushed to the feature branch.** **AC-W5-08.3 is
+  outstanding:** no Lighthouse audit and no screen-reader smoke test have been performed. Chrome checks used a mocked API; the real Spring Boot +
   PostgreSQL integration is **unverified** (no JDK) and is a mandatory gate before the merge to `main`.
   Playwright W2-16 regression still pending (no JDK in this environment).
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
@@ -43,6 +45,8 @@
 | 10 | 2026-11-25 | W5-06 approved; checkpoint review before the commit: AC-W5-06.1 to 06.7 re-checked; the disabled cells and "Review bets" (slip and summary bar) refuse activation in their event handlers, not only through `aria-disabled` (proven by the mutations of §5.9); W5-06 committed and pushed to the feature branch |
 | 11 | 2026-11-25 | W5-06 checkpoint recorded (`b40492a`); W5-07 implemented: `spinErrors`, `pendingSpinStore`, `rouletteAvailability`, `useSpin`, `SpinConfirmation`, `UnresolvedSpin`, `SpinResult`, `BetRows`; roulette page with the spin flow, the wheel turning to the server's number, the unavailable state; lobby card without availability claim (§8.5) |
 | 12 | 2026-11-25 | W5-07 reviewed and approved for the frontend checkpoint; final safety review: a `200` body is validated before the record is cleared, the balance applied, the wheel turned or the result shown (9 malformed shapes tested, each retried with the same key and body); leaving during the animation tested; `409 IDEMPOTENCY_KEY_REUSED` logged as a defect (§8.4); W5-07 committed and pushed to the feature branch |
+| 13 | 2026-11-25 | W5-07 checkpoint recorded (`5e3d542`); W5-08 implemented: "Odds and rules" (`oddsRules`, `OddsInfo`, checked against the contract), focus restoration after removing/clearing bets and after the last older history page, 44 px touch targets for slip and history actions below `md`, wrapping instead of truncation, explicit "no monetary value" on the roulette page; audit and keyboard walkthrough recorded; real-backend readiness inspected (§10.3) |
+| 14 | 2026-11-25 | W5-08 reviewed and approved for the checkpoint with AC-W5-08.1, 08.2, 08.4 and 08.5 met and **AC-W5-08.3 outstanding** (no Lighthouse audit, no screen-reader smoke test); acceptance status recorded in §10.3; W5-08 committed and pushed to the feature branch |
 
 ---
 
@@ -1461,6 +1465,112 @@ test of the spin and the history, Chrome Lighthouse accessibility audit with no 
 `/roulette` and `/wallet`, the axe DevTools browser extension if available. No accessibility test
 dependency is added (Q11).
 
+### 10.3 Implemented in W5-08 (2026-11-25; approved for the checkpoint, AC-W5-08.3 outstanding)
+
+**Acceptance status (review 2026-11-25)**
+
+| ID | Status | Evidence |
+|---|---|---|
+| AC-W5-08.1 | Met | Responsive audit below: 42 views at 320, 375, 768, 1024, 1440 px and 200 % zoom (mocked API) |
+| AC-W5-08.2 | Met | Keyboard-only walkthrough below; focus tests in `RoulettePage.test.tsx` and `WalletPage.test.tsx` |
+| AC-W5-08.3 | **Outstanding — not passed** | No Lighthouse audit and no screen-reader smoke test have been performed (see "Not performed"). Must be recorded before the Week 5 merge (W5-10) |
+| AC-W5-08.4 | Met | Responsible-presentation review below; "no monetary value" on the roulette page (header, odds panel) and the wallet page (header, balance card) |
+| AC-W5-08.5 | Met | `oddsRules.ts`, `OddsInfo.tsx`; checked against `openapi.yaml` by `oddsRules.test.ts` and `OddsInfo.test.tsx` |
+
+**Changes**
+
+| File | Change |
+|---|---|
+| `features/roulette/oddsRules.ts` (new) | Static rules of the five contract categories (covers, winning numbers of 37, net odds, coins returned per coin on a win), `chanceText` ("18 in 37 (about 48.65 %)"), house edge and return to player as percentages. Explains the rules; never used for a result or a payout |
+| `features/roulette/OddsInfo.tsx` (new) | "Odds and rules" (AC-W5-08.5, Q8): native `<details>`/`<summary>` (44 px summary) under the table; a list "Bet types" with one card per category (`h3` + `dl`: Covers, Chance of a win, Odds, A win returns), "Zero", "House edge" (1/37 ≈ 2.70 %, 36/37 ≈ 97.30 %, the straight-bet example, "no bet or combination changes this"), spins are independent, virtual coins have no monetary value. Cards instead of a 5-column table, so it reflows at 320 px |
+| `pages/RoulettePage.tsx` | `OddsInfo` in the table card; header "…virtual coins only; they have no monetary value…" (AC-W5-08.4) |
+| `features/roulette/BetSlip.tsx`, `BetRows.tsx` | Focus restoration (WCAG 2.4.3): after "Remove" → the next row's remove button, else the previous one, else "Review bets" (focusable while `aria-disabled`, described by its reason); after "Clear all bets" → "Review bets". Remove buttons carry `data-bet-key`. Names wrap instead of `truncate` ("3rd dozen (25–36)" was cut at 320 px) |
+| `features/wallet/TransactionHistory.tsx` | When the last older page arrives, "Load older entries" disappears: focus → the first new row (`tabIndex=-1`, visible outline); after a failed older page → the alert's "Try again"; while more pages exist the focus stays on the button. Buttons 44 px below `md` |
+| `components/buttonStyles.ts` | `touchTarget` = `max-md:min-h-11 max-md:min-w-11`, used by every slip, confirmation, unresolved-spin, summary-bar and history action (they were 40–42 px high) |
+| `features/roulette/RouletteWheel.tsx` | "Pocket order on the wheel" summary at least 24 px (44 px below `md`); it was 20 px (WCAG 2.5.8) |
+| `features/roulette/SpinConfirmation.tsx`, `UnresolvedSpin.tsx`, `BetSummaryBar.tsx`, `SpinResult.tsx` | `touchTarget`; result names wrap |
+| `components/DetailRow.tsx` (+ comments in `HomePage`, `ProfilePage`) | Values wrap (`overflow-wrap: anywhere`) instead of `truncate`: a long email was cut off in the account panel at 320 px (WCAG 1.4.10) |
+
+**Browser audit (2026-11-25, local only; mocked API, not Lighthouse).** Production build (`vite preview`)
+with the Vercel CSP header in Chrome through Playwright, long name and email, balance 1,234,567 coins;
+lobby, roulette (empty, with bets, confirmation, unresolved, result) and wallet (20 entries) at 320,
+375, 768, 1024 and 1440 px and at **200 % zoom** (1280 × 800 window = 640 × 400 CSS px,
+device scale 2): **42 views**. Before the changes: 0 px overflow, 0 contrast findings, but slip actions
+40–42 px high on narrow screens, the wheel's summary 20 px, "3rd dozen (25–36)" and a long email cut
+off. After: in all 42 views 0 px horizontal overflow, no clipped text (the wallet's `thead` is `sr-only`
+below `md` on purpose), no text below 4.5:1 (3:1 for large text; computed colours over the composited
+background; `aria-disabled` controls excluded), no unnamed control, exactly one `h1`, no slip, chip, cell
+or history action below 44 px on narrow screens. Still below 44 px (all ≥ 24 px, outside the §10.1
+44 px scope): header logo link (28 px high), balance badge (34), "My profile"/"Sign out" (40–42), main
+nav links (36), balance-card "Refresh" (34). Sticky bar: 89 px (with a message) of a 720/800 px
+viewport, 89 of 400 at 200 % zoom. Wheel: 254 px (320), 309 (375), 384 (768, 200 %), 270 (side column
+≥ 1024), canvas drawn everywhere. Console: only the deliberately aborted spin request; no CSP violation.
+
+**Keyboard-only walkthrough (Chrome, 1280 px, reduced motion).** Skip link → main nav → "Roulette"
+(Enter) → chip radio (ArrowRight 10 → 25) → cell 17 (Enter twice: 50 coins) → Red (Space) → "Remove
+Red" (Enter) → **focus on "Remove Number 17"** (before: lost to the page) → "Review bets" → focus on
+"Review your bets" → "Back to bets" → focus back on "Review bets" → "Confirm and spin" → lost answer →
+focus on "Spin not confirmed" → "Retry spin" → focus on "Result" → cell 0 → "Clear all bets" → **focus on
+"Review bets"** (before: lost) → "Odds and rules" (Enter opens it) → Wallet → "Refresh history" → "Load
+older entries" (Enter, last page) → **focus on the first new row** (before: lost). Every Tab stop had a
+visible focus indicator (outline or ring; programmatic targets are headings and rows). Tab leaves the
+document after the last control and wraps, as browsers do.
+
+**Responsible presentation (AC-W5-08.4).** Text review of all pages: no exclamation marks, urgency,
+streak, near-miss or celebration wording; no autoplay, repeat-bet or countdown; the wheel moves only to
+the server's number and not at all under reduced motion; skeleton pulses and transitions are covered by
+the reduced-motion CSS rule; a win and a loss render the same markup and classes (tested); "Virtual
+currency only" in the header, "no monetary value" on the roulette page, the balance card and the footer.
+
+**Tests** (44 files, 531 tests; after W5-07: 42 files, 518 tests):
+
+| File | New tests | Covers |
+|---|---|---|
+| `features/roulette/oddsRules.test.ts` | 4 | The five categories in contract order; chance, odds and return equal to the `RouletteBetCategory` table of `openapi.yaml`, and to the cells' odds; house edge −1/37 for every category and the contract's 2.7027 % / 97.2973 %; the contract's zero rule |
+| `features/roulette/OddsInfo.test.tsx` | 3 | Native details/summary, closed, reached by Tab, opened (Enter verified in Chrome; jsdom does not activate `<summary>` by key); the five cards with their values, no unsupported bet; zero, house edge, independence, "the server computes every result and payout" |
+| `pages/RoulettePage.test.tsx` | +3 | Focus after "Remove" (next, previous, "Review bets" with its reason) and after "Clear all bets"; slip and bar actions carry the 44 px class |
+| `pages/WalletPage.test.tsx` | +2 | Focus on the first new row after the last page; focus stays on "Load older entries" while pages remain, and moves to "Try again" after a failure |
+| `pages/RoulettePage.spin.test.tsx` | +1 | A win and a loss produce the same result markup; no pressure or celebration wording, no repeat/auto control; disclaimers visible |
+
+Changed (no assertion weakened): the W5-06 "no potential win" test and the `PlayerOnly` roulette test now
+check the slip and the table cells, because the general "Odds and rules" text legitimately says "win"
+and "payout".
+
+**Verification:** `npm run lint`, `npm run typecheck`, `npm test` (44 files, 531 tests), `npm run build`
+(main chunk 365.97 kB, CSS 40.89 kB; Phaser chunk unchanged at 1,371.67 kB), `git diff --check` green.
+
+**Not performed (recorded honestly)**
+- **Lighthouse / axe:** not installed locally, and nothing was downloaded (Q11). The audit above
+  checks a subset by script (overflow, clipping, target size, contrast, names, headings, landmarks); a
+  Lighthouse run in Chrome DevTools remains for the W5-10 manual record (AC-W5-08.3).
+- **Screen readers:** NVDA is not installed; Windows Narrator exists, but no spoken-output smoke test
+  was carried out (it cannot be observed from this environment). Semantics were checked through
+  Chrome's accessibility tree and the tests only. AC-W5-08.3's screen-reader item stays open.
+- **Real devices:** none; Chrome device emulation only (§10.1).
+
+**Real-backend readiness (read-only inspection, 2026-11-25)**
+- **JDK:** a compatible **Eclipse Temurin 21.0.12.1** is installed at `%USERPROFILE%\.jdks\jdk-21.0.12.1+1`
+  (an IntelliJ-managed JDK), not on `PATH`, `JAVA_HOME` unset. The backend requires Java 21
+  (`<java.version>21`, Spring Boot 4.1.2).
+- **Maven:** the wrapper's Maven 3.9.16 is in `%USERPROFILE%\.m2\wrapper\dists`; the local repository
+  contains Spring Boot 4.1.2 (whether every dependency is cached is unverified until an offline run).
+- **Docker:** Docker 29.5.2; `postgres:17.11-alpine` and both digest-pinned `Dockerfile` base images are
+  present. The project's `casino-postgres` container (named volume `online-casino-simulator_postgres-data`)
+  is running with schema **V5**: starting the current backend against it would migrate that database
+  to V9. Port 5432 is served by Docker (`wslrelay` on `[::1]` is Docker Desktop's WSL relay); 8080 is free.
+  The only backend image (`casino-backend:render-test`, 2026-11-07) predates the roulette endpoint.
+- **Shortest safe local-only path (needs approval):** (1) a throwaway database from the local image,
+  `docker run --rm -d --name casino-w5-e2e -e POSTGRES_DB=… -e POSTGRES_USER=… -e POSTGRES_PASSWORD=…
+  -p 127.0.0.1:55432:5432 postgres:17.11-alpine` (no named volume, removed on stop; the developer
+  database stays at V5); (2) the backend with the existing JDK, environment set for that process only:
+  `JAVA_HOME=<.jdks path> DB_URL=jdbc:postgresql://localhost:55432/… DB_USERNAME=… DB_PASSWORD=… ./mvnw -o
+  spring-boot:run` (`-o` proves nothing is downloaded; Flyway migrates the empty database to V9);
+  (3) `npm run dev` (Vite proxies `/api` to `localhost:8080`); (4) the §16.2 walkthrough with a throwaway
+  player. **To install or download:** nothing if the offline run succeeds; otherwise the missing Maven
+  dependencies from Maven Central (approval needed). A Docker image build would download the Maven
+  dependencies inside the build regardless. The real-backend run remains a mandatory gate before the
+  merge to `main` (W5-10).
+
 ---
 
 ## 11. Frontend testing strategy
@@ -1504,7 +1614,7 @@ tests are written in the same task. Size: **S** ≤ 2 h, **M** ≈ ½ day, **L**
 | W5-05 | **Wallet page and history (approved 2026-11-25, §6.3):** `useWalletTransactions`, `TransactionHistory`, `walletFormat`, `WalletPage`; tests | M | W5-04 (Q1) |
 | W5-06 | **Table, chips and bet slip (no API; approved 2026-11-25, §5.9):** `rouletteTable.ts`, `betSlipReducer.ts`, `RouletteBoard`, `ChipSelector`, `BetSlip`, responsive table layouts; unit and keyboard tests | L | W5-03 (Q5) |
 | W5-07 | **Spin flow (approved for the frontend checkpoint 2026-11-25; real backend unverified, §8.5):** `spinErrors.ts`, `pendingSpinStore.ts`, `useSpin`, `SpinConfirmation`, `SpinResult`, explicit unavailable state (§7.7), integration in `RoulettePage` with `WalletProvider`; the wheel (W5-P01) turns to the server-confirmed `winningNumber` before the result is revealed; all §7.2 cases, §8.3 lifecycle and §8.4 record tests | L | W5-02, W5-04, W5-P01, W5-06 (Q4, Q6, Q7, Q10, Q13) |
-| W5-08 | **Responsive, accessibility and responsible-play pass:** layouts at all widths, focus management, live regions, contrast, `OddsInfo` (Q8), wording review; fixes and tests; manual check record | M | W5-05, W5-07 |
+| W5-08 | **Responsive, accessibility and responsible-play pass (approved for the checkpoint 2026-11-25, §10.3; AC-W5-08.3 Lighthouse and screen-reader checks outstanding):** layouts at all widths, focus management, live regions, contrast, `OddsInfo` (Q8), wording review; fixes and tests; manual check record | M | W5-05, W5-07 |
 | W5-09 | **Documentation:** `architecture.md` §4 (frontend structure, wallet state, spin lifecycle), README (what works today, local walkthrough), `user-scenarios.md` S3 note (animation in Week 6), this plan's implementation records | S | W5-08 |
 | W5-10 | **Verification and pull request preparation:** full frontend checks, local real-stack walkthrough (§16.2) including the older V7 backend (Q10), Playwright W2-16 regression and the W5 scenario (Should), checklist "no client RNG/payout, no browser storage except the pending spin record, no cloud". PR prepared, **not opened without approval** | M | all |
 
@@ -1535,7 +1645,7 @@ change Q13) follows W5-04 and precedes W5-05 in the review order; the task ids W
 2. W5-04: one balance shown everywhere, never overwritten by a stale answer;
 3. W5-06: the table and slip enforce the contract limits with keyboard and mouse;
 4. W5-07: retry reuses the key, a new spin gets a new one, every error class tested;
-5. W5-08: manual responsive and accessibility record complete.
+5. W5-08: manual responsive and accessibility record complete (responsive and keyboard done; Lighthouse and screen reader outstanding, AC-W5-08.3).
 
 ---
 

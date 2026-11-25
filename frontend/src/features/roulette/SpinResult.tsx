@@ -58,7 +58,7 @@ export function SpinResult({ result }: { result: RouletteSpinResult }) {
           return (
             <li key={`${entry.key}-${index}`} className="flex items-center gap-3 px-3 py-2 text-sm">
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-zinc-100">{entry.name}</p>
+                <p className="font-medium break-words text-zinc-100">{entry.name}</p>
                 <p className="text-xs text-zinc-400">Stake {formatCoins(bet.amount)}</p>
               </div>
               <div className="shrink-0 text-right">

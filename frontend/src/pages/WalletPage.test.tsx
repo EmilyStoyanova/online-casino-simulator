@@ -217,6 +217,42 @@ describe('AC-W5-05.2: "Load older entries" with the opaque cursor', () => {
     expect(within(history()).queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('W5-08: after the last older page the focus moves to the first new entry (the button is gone)', async () => {
+    backend({ first: () => jsonResponse(fullFirstPage) })
+    renderApp('/wallet')
+    await shown()
+    const user = userEvent.setup()
+
+    await user.click(loadOlder() as HTMLElement)
+
+    await waitFor(() => expect(rows()).toHaveLength(35))
+    const firstNew = within(table()).getAllByRole('row')[21]
+    expect(firstNew).toHaveFocus()
+    expect(spoken(firstNew as Element)).toContain('Roulette payout')
+    expect(loadOlder()).not.toBeInTheDocument()
+  })
+
+  it('W5-08: while more pages exist the focus stays on "Load older entries"; after a failure it is on "Try again"', async () => {
+    const SECOND = 'eyJpZCI6Nn0'
+    backend({
+      first: () => jsonResponse(fullFirstPage),
+      older: [() => jsonResponse(page(entries(20, 5), SECOND))],
+      extra: { [`GET /api/v1/wallet/transactions?limit=20&cursor=${SECOND}`]: () => problemResponse(500, 'INTERNAL_ERROR') },
+    })
+    renderApp('/wallet')
+    await shown()
+    const user = userEvent.setup()
+
+    await user.click(loadOlder() as HTMLElement)
+    await waitFor(() => expect(rows()).toHaveLength(25))
+    expect(loadOlder()).toHaveFocus()
+
+    await user.keyboard('{Enter}')
+
+    const alert = await within(history()).findByRole('alert')
+    expect(within(alert).getByRole('button', { name: 'Try again' })).toHaveFocus()
+  })
+
   it('explains an unreachable server when an older page fails', async () => {
     backend({ first: () => jsonResponse(fullFirstPage), older: () => Promise.reject(new TypeError('Failed to fetch')) })
     renderApp('/wallet')

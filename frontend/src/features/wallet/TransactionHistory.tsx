@@ -1,5 +1,5 @@
-import { useId } from 'react'
-import { secondaryButton } from '../../components/buttonStyles'
+import { useEffect, useId, useRef } from 'react'
+import { secondaryButton, touchTarget } from '../../components/buttonStyles'
 import { card } from '../../components/cardStyles'
 import { Coins } from '../../components/Coins'
 import { FormAlert } from '../../components/form/FormAlert'
@@ -7,7 +7,7 @@ import type { WalletTransaction } from '../../types/wallet'
 import type { HistoryState } from './useWalletTransactions'
 import { formatEntryTime, formatSignedCoins, transactionTypeLabel } from './walletFormat'
 
-const compact = 'px-3 py-1.5'
+const compact = `px-3 py-1.5 ${touchTarget}`
 /** The visible label of a value in the narrow (card) layout; screen readers use the column header. */
 const cardLabel = 'text-xs font-medium text-zinc-500 md:hidden'
 const cell = 'py-3 pr-4 align-top max-md:flex max-md:flex-col max-md:gap-0.5 max-md:p-0'
@@ -18,7 +18,7 @@ function EntryRow({ entry }: { entry: WalletTransaction }) {
   return (
     <tr
       role="row"
-      className="md:border-t md:border-zinc-800 max-md:grid max-md:grid-cols-2 max-md:gap-x-4 max-md:gap-y-3 max-md:rounded-xl max-md:border max-md:border-zinc-800 max-md:bg-zinc-950/40 max-md:p-4"
+      className="focus:outline-2 focus:outline-offset-2 focus:outline-emerald-400 md:border-t md:border-zinc-800 max-md:grid max-md:grid-cols-2 max-md:gap-x-4 max-md:gap-y-3 max-md:rounded-xl max-md:border max-md:border-zinc-800 max-md:bg-zinc-950/40 max-md:p-4"
     >
       <td role="cell" className={`${cell} text-zinc-300`}>
         <span aria-hidden="true" className={cardLabel}>
@@ -86,11 +86,37 @@ export function TransactionHistory({
   onRefresh: () => void
 }) {
   const headingId = useId()
+  const table = useRef<HTMLTableElement>(null)
+  const olderTryAgain = useRef<HTMLButtonElement>(null)
+  // The number of entries when "Load older entries" was activated, until its page has answered.
+  const olderFrom = useRef<number | null>(null)
+
+  // On the last page "Load older entries" disappears and a failure replaces it, so the focus would fall
+  // back to the page (WCAG 2.4.3): it moves to the first new entry, or to the alert's "Try again".
+  useEffect(() => {
+    const from = olderFrom.current
+    if (from === null || state.status !== 'loaded' || state.older === 'loading') return
+    olderFrom.current = null
+    if (state.older === 'failed') {
+      olderTryAgain.current?.focus()
+    } else if (state.nextCursor === null && state.items.length > from) {
+      const row = table.current?.querySelectorAll<HTMLTableRowElement>('tbody tr')[from]
+      if (row) {
+        row.tabIndex = -1
+        row.focus()
+      }
+    }
+  }, [state])
+
   if (state.status === 'inactive') return null
 
   const loaded = state.status === 'loaded' ? state : null
   const refreshing = loaded?.refresh === 'refreshing'
   const busy = state.status === 'loading' || refreshing || loaded?.older === 'loading'
+  const loadOlder = () => {
+    olderFrom.current = loaded?.items.length ?? null
+    onLoadOlder()
+  }
 
   return (
     <section aria-labelledby={headingId} aria-busy={busy} className={card}>
@@ -141,7 +167,7 @@ export function TransactionHistory({
       )}
 
       {loaded && loaded.items.length > 0 && (
-        <table role="table" className="mt-4 w-full text-left text-sm max-md:block">
+        <table ref={table} role="table" className="mt-4 w-full text-left text-sm max-md:block">
           <caption className="sr-only">Wallet entries, newest first</caption>
           <thead role="rowgroup" className="max-md:sr-only">
             <tr role="row" className="text-xs text-zinc-400">
@@ -171,7 +197,7 @@ export function TransactionHistory({
         <div className="mt-4">
           <FormAlert tone="error">
             {loaded.error} The entries above are still shown.{' '}
-            <button type="button" onClick={onLoadOlder} className="font-semibold underline underline-offset-2">
+            <button ref={olderTryAgain} type="button" onClick={loadOlder} className="font-semibold underline underline-offset-2">
               Try again
             </button>
           </FormAlert>
@@ -182,9 +208,9 @@ export function TransactionHistory({
         <div className="mt-4">
           <button
             type="button"
-            onClick={onLoadOlder}
+            onClick={loadOlder}
             disabled={loaded.older === 'loading' || refreshing}
-            className={`${secondaryButton} w-full sm:w-auto`}
+            className={`${secondaryButton} ${touchTarget} w-full sm:w-auto`}
           >
             {loaded.older === 'loading' ? 'Loading older entries…' : 'Load older entries'}
           </button>

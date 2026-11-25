@@ -13,7 +13,7 @@ import type { UserProfile } from '../types/user'
 /** Account panel and platform status, shown on both versions of the home page. */
 function AccountAndStatus() {
   return (
-    // grid-cols-1 = minmax(0, 1fr): a long email is truncated instead of widening the page.
+    // grid-cols-1 = minmax(0, 1fr): a long email wraps instead of widening the page.
     <div className="grid w-full grid-cols-1 items-start justify-items-center gap-6 md:grid-cols-2">
       <AccountPanel />
       <SystemStatusCard />

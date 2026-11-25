@@ -1,5 +1,5 @@
 import type { Ref } from 'react'
-import { primaryButton, secondaryButton } from '../../components/buttonStyles'
+import { primaryButton, secondaryButton, touchTarget } from '../../components/buttonStyles'
 import { Coins } from '../../components/Coins'
 import type { WalletState } from '../wallet/walletContext'
 import { BetRows, Totals } from './BetRows'
@@ -71,7 +71,7 @@ export function SpinConfirmation({
           }}
           aria-disabled={inert ? true : undefined}
           aria-describedby={reason ? reasonId : undefined}
-          className={`${primaryButton} w-full max-md:scroll-mb-24 aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
+          className={`${primaryButton} w-full max-md:scroll-mb-24 ${touchTarget} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
         >
           {submitting ? 'Waiting for the server…' : 'Confirm and spin'}
         </button>
@@ -81,7 +81,7 @@ export function SpinConfirmation({
             if (!submitting) onBack()
           }}
           aria-disabled={submitting ? true : undefined}
-          className={`${secondaryButton} w-full max-md:scroll-mb-24 aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
+          className={`${secondaryButton} w-full max-md:scroll-mb-24 ${touchTarget} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
         >
           Back to bets
         </button>

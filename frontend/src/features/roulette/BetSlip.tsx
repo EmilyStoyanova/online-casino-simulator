@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef } from 'react'
-import { primaryButton, secondaryButton } from '../../components/buttonStyles'
+import { primaryButton, secondaryButton, touchTarget } from '../../components/buttonStyles'
 import { card } from '../../components/cardStyles'
 import { ROULETTE_LIMITS } from '../../types/roulette'
 import type { WalletState } from '../wallet/walletContext'
@@ -75,6 +75,9 @@ export function BetSlip({
   const reviewButton = useRef<HTMLButtonElement>(null)
   const errorRef = useRef<HTMLDivElement>(null)
   const previousPhase = useRef(spin.phase.kind)
+  const sectionRef = useRef<HTMLElement>(null)
+  // Where the focus goes after a removal: the next (or previous) row's remove button, or "Review bets".
+  const focusAfterChange = useRef<string | null>(null)
   const mode = modeOf(spin)
   const reason = blockReason(block, bets, knownBalance(wallet))
   const error = spin.error
@@ -93,6 +96,26 @@ export function BetSlip({
   useEffect(() => {
     if (error) errorRef.current?.focus()
   }, [error])
+
+  // The removed control is gone, so the focus would fall back to the page (WCAG 2.4.3).
+  useEffect(() => {
+    const target = focusAfterChange.current
+    if (target === null) return
+    focusAfterChange.current = null
+    const row = target === 'review' ? null : sectionRef.current?.querySelector<HTMLButtonElement>(`[data-bet-key="${target}"]`)
+    const next = row ?? reviewButton.current
+    next?.focus()
+  }, [bets])
+
+  const remove = (key: string) => {
+    const index = bets.findIndex((bet) => bet.key === key)
+    focusAfterChange.current = (bets[index + 1] ?? bets[index - 1])?.key ?? 'review'
+    onRemove(key)
+  }
+  const clear = () => {
+    focusAfterChange.current = 'review'
+    onClear()
+  }
 
   const rowErrors = useMemo(() => {
     const map = new Map<string, string[]>()
@@ -150,7 +173,7 @@ export function BetSlip({
         {bets.length === 0 ? (
           <p className="text-sm text-zinc-400">No bets yet. Choose a chip value, then a number or an outside bet.</p>
         ) : (
-          <BetRows bets={bets} onRemove={onRemove} errors={rowErrors} />
+          <BetRows bets={bets} onRemove={remove} errors={rowErrors} />
         )}
         <Totals bets={bets} />
         <BalanceLine wallet={wallet} />
@@ -161,7 +184,7 @@ export function BetSlip({
             onClick={onReview}
             aria-disabled={block !== null ? true : undefined}
             aria-describedby={reason ? reasonId : undefined}
-            className={`${primaryButton} w-full max-md:scroll-mb-24 aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
+            className={`${primaryButton} w-full max-md:scroll-mb-24 ${touchTarget} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
           >
             Review bets
           </button>
@@ -171,7 +194,7 @@ export function BetSlip({
             </p>
           )}
           {bets.length > 0 && (
-            <button type="button" onClick={onClear} className={`${secondaryButton} w-full max-md:scroll-mb-24`}>
+            <button type="button" onClick={clear} className={`${secondaryButton} w-full max-md:scroll-mb-24 ${touchTarget}`}>
               Clear all bets
             </button>
           )}
@@ -181,7 +204,7 @@ export function BetSlip({
   }
 
   return (
-    <section aria-labelledby={headingId} className={`${card} space-y-4 max-sm:p-4`}>
+    <section ref={sectionRef} aria-labelledby={headingId} className={`${card} space-y-4 max-sm:p-4`}>
       <h2 id={headingId} className="text-lg font-semibold text-zinc-100">
         Bet slip
       </h2>

@@ -1,4 +1,4 @@
-import { primaryButton } from '../../components/buttonStyles'
+import { primaryButton, touchTarget } from '../../components/buttonStyles'
 import { Coins } from '../../components/Coins'
 import { totalStake, type ReviewBlock, type SlipBet, type SlipFeedback } from './betSlipReducer'
 import type { SpinPhase } from './useSpin'
@@ -43,7 +43,7 @@ export function BetSummaryBar({ bets, feedback, block, reasonId, phase, onReview
             onClick={onReview}
             aria-disabled={block !== null ? true : undefined}
             aria-describedby={block !== null ? reasonId : undefined}
-            className={`${primaryButton} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
+            className={`${primaryButton} ${touchTarget} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
           >
             Review bets
           </button>

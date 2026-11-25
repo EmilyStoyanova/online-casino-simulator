@@ -1,5 +1,5 @@
 import type { Ref } from 'react'
-import { primaryButton, secondaryButton } from '../../components/buttonStyles'
+import { primaryButton, secondaryButton, touchTarget } from '../../components/buttonStyles'
 import { FormAlert } from '../../components/form/FormAlert'
 import { BetRows, Totals } from './BetRows'
 import { slipFromRequest } from './betSlipReducer'
@@ -46,11 +46,11 @@ export function UnresolvedSpin({
             if (!retrying) onRetry()
           }}
           aria-disabled={retrying ? true : undefined}
-          className={`${primaryButton} w-full max-md:scroll-mb-24 aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
+          className={`${primaryButton} w-full max-md:scroll-mb-24 ${touchTarget} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
         >
           {retrying ? 'Waiting for the server…' : 'Retry spin'}
         </button>
-        <button type="button" onClick={onCheckBalance} className={`${secondaryButton} w-full max-md:scroll-mb-24`}>
+        <button type="button" onClick={onCheckBalance} className={`${secondaryButton} w-full max-md:scroll-mb-24 ${touchTarget}`}>
           Check balance
         </button>
       </div>
