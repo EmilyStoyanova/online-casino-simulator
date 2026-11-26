@@ -88,9 +88,13 @@ describe('Main navigation', () => {
     const roulette = within(nav).getByRole('link', { name: 'Roulette' })
     await screen.findByRole('link', { name: 'Balance 1,000 coins' })
 
-    // Balance and account menu come first in the header, then the main navigation (visual order = tab order).
+    // Language, balance and account menu come first in the header, then the main navigation (visual order = tab order).
     await user.tab() // skip link
     await user.tab() // brand
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'EN English' })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'BG Български' })).toHaveFocus()
     await user.tab() // balance
     await user.tab() // My profile
     await user.tab() // Sign out

@@ -1,11 +1,12 @@
 import { useEffect, useId, useMemo, useRef } from 'react'
 import { primaryButton, secondaryButton, touchTarget } from '../../components/buttonStyles'
 import { card } from '../../components/cardStyles'
+import type { Message } from '../../i18n/translate'
+import { useI18n } from '../../i18n/useI18n'
 import { ROULETTE_LIMITS } from '../../types/roulette'
 import type { WalletState } from '../wallet/walletContext'
 import { BetRows, Totals } from './BetRows'
 import { blockReason, knownBalance, type ReviewBlock, type SlipBet, type SlipFeedback } from './betSlipReducer'
-import { formatCoins } from './rouletteTable'
 import { BalanceLine, SpinConfirmation } from './SpinConfirmation'
 import { UnresolvedSpin } from './UnresolvedSpin'
 import type { SpinState } from './useSpin'
@@ -70,6 +71,7 @@ export function BetSlip({
   onRetry,
   onCheckBalance,
 }: BetSlipProps) {
+  const { t, coins } = useI18n()
   const headingId = useId()
   const stepHeading = useRef<HTMLHeadingElement>(null)
   const reviewButton = useRef<HTMLButtonElement>(null)
@@ -79,7 +81,8 @@ export function BetSlip({
   // Where the focus goes after a removal: the next (or previous) row's remove button, or "Review bets".
   const focusAfterChange = useRef<string | null>(null)
   const mode = modeOf(spin)
-  const reason = blockReason(block, bets, knownBalance(wallet))
+  const reasonMessage = blockReason(block, bets, knownBalance(wallet))
+  const reason = reasonMessage && t(reasonMessage)
   const error = spin.error
 
   const phase = spin.phase.kind
@@ -118,13 +121,13 @@ export function BetSlip({
   }
 
   const rowErrors = useMemo(() => {
-    const map = new Map<string, string[]>()
+    const map = new Map<string, Message[]>()
     for (const { betKey, message } of error?.fieldErrors ?? []) {
       if (betKey !== null) map.set(betKey, [...(map.get(betKey) ?? []), message])
     }
     return map
   }, [error])
-  const generalErrors = (error?.fieldErrors ?? []).filter((entry) => entry.betKey === null)
+  const generalErrors = (error?.fieldErrors ?? []).filter((entry) => entry.betKey === null).map(({ message }) => t(message))
 
   let content
   if (mode === 'confirming') {
@@ -145,7 +148,7 @@ export function BetSlip({
     content = (
       <UnresolvedSpin
         attempt={spin.phase.attempt}
-        message={spin.phase.kind === 'unresolved' ? spin.phase.message : ''}
+        message={spin.phase.kind === 'unresolved' ? spin.phase.message : null}
         retrying={spin.phase.kind === 'submitting'}
         headingRef={stepHeading}
         onRetry={onRetry}
@@ -161,8 +164,8 @@ export function BetSlip({
               role="alert"
               className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3.5 py-3 text-sm leading-relaxed text-rose-200"
             >
-              <p>{error.message}</p>
-              {generalErrors.map(({ message }) => (
+              <p>{t(error.message)}</p>
+              {generalErrors.map((message) => (
                 <p key={message} className="mt-1">
                   {message}
                 </p>
@@ -171,7 +174,7 @@ export function BetSlip({
           </div>
         )}
         {bets.length === 0 ? (
-          <p className="text-sm text-zinc-400">No bets yet. Choose a chip value, then a number or an outside bet.</p>
+          <p className="text-sm text-zinc-400">{t('slip.empty')}</p>
         ) : (
           <BetRows bets={bets} onRemove={remove} errors={rowErrors} />
         )}
@@ -186,7 +189,7 @@ export function BetSlip({
             aria-describedby={reason ? reasonId : undefined}
             className={`${primaryButton} w-full max-md:scroll-mb-24 ${touchTarget} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
           >
-            Review bets
+            {t('slip.review')}
           </button>
           {reason && (
             <p id={reasonId} className="text-sm text-zinc-400">
@@ -195,7 +198,7 @@ export function BetSlip({
           )}
           {bets.length > 0 && (
             <button type="button" onClick={clear} className={`${secondaryButton} w-full max-md:scroll-mb-24 ${touchTarget}`}>
-              Clear all bets
+              {t('slip.clear')}
             </button>
           )}
         </div>
@@ -206,7 +209,7 @@ export function BetSlip({
   return (
     <section ref={sectionRef} aria-labelledby={headingId} className={`${card} space-y-4 max-sm:p-4`}>
       <h2 id={headingId} className="text-lg font-semibold text-zinc-100">
-        Bet slip
+        {t('slip.heading')}
       </h2>
 
       {content}
@@ -215,14 +218,18 @@ export function BetSlip({
       <p role="status" className="text-sm">
         {feedback && (
           <span key={feedback.id} className={feedback.tone === 'refused' ? 'text-amber-200' : 'text-zinc-300'}>
-            {feedback.message}
+            {t(feedback.message)}
           </span>
         )}
       </p>
 
       <p className="text-xs leading-relaxed text-zinc-400">
-        Up to {ROULETTE_LIMITS.maxBets} different bets per spin, {formatCoins(ROULETTE_LIMITS.minAmount)} to{' '}
-        {formatCoins(ROULETTE_LIMITS.maxAmount)} per bet, {formatCoins(ROULETTE_LIMITS.maxTotalStake)} in total.
+        {t('slip.limits', {
+          maxBets: ROULETTE_LIMITS.maxBets,
+          min: coins(ROULETTE_LIMITS.minAmount),
+          max: coins(ROULETTE_LIMITS.maxAmount),
+          total: coins(ROULETTE_LIMITS.maxTotalStake),
+        })}
       </p>
     </section>
   )

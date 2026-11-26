@@ -1,15 +1,17 @@
 import { Link } from 'react-router'
 import { ghostButton, primaryButton, secondaryButton } from '../../components/buttonStyles'
+import { useI18n } from '../../i18n/useI18n'
 import { loginPath } from './returnPath'
 import { useAuth } from './useAuth'
 import { useSignOut } from './useSignOut'
 
 /** While `GET /api/v1/users/me` is pending (`checking`). */
 export function CheckingSession() {
+  const { t } = useI18n()
   return (
     <p className="flex items-center gap-2 text-sm text-zinc-400">
       <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-emerald-400/70" />
-      Checking your sign-in status…
+      {t('session.checking')}
     </p>
   )
 }
@@ -21,27 +23,25 @@ export function CheckingSession() {
 export function SessionUnavailable({ returnTo }: { returnTo?: string }) {
   const { checkSession } = useAuth()
   const { signOut, pending, error } = useSignOut()
+  const { t } = useI18n()
 
   return (
     <>
-      <p className="text-sm leading-relaxed text-zinc-300">
-        Your sign-in status could not be checked: the server is not reachable right now. If you
-        signed in earlier, your session may still be active.
-      </p>
+      <p className="text-sm leading-relaxed text-zinc-300">{t('session.unavailable')}</p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button type="button" onClick={checkSession} className={primaryButton}>
-          Try again
+          {t('common.tryAgain')}
         </button>
         <Link to={loginPath(returnTo)} className={secondaryButton}>
-          Sign in
+          {t('common.signIn')}
         </Link>
         <button type="button" onClick={() => void signOut()} disabled={pending} className={ghostButton}>
-          {pending ? 'Signing out…' : 'Sign out'}
+          {pending ? t('common.signingOut') : t('common.signOut')}
         </button>
       </div>
       {error && (
         <p role="alert" className="mt-3 text-sm text-rose-300">
-          {error}
+          {t(error)}
         </p>
       )}
     </>

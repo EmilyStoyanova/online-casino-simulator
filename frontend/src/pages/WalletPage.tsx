@@ -2,6 +2,7 @@ import { PageHeader } from '../components/layout/PageHeader'
 import { BalanceCard } from '../features/wallet/BalanceCard'
 import { TransactionHistory } from '../features/wallet/TransactionHistory'
 import { useWalletTransactions } from '../features/wallet/useWalletTransactions'
+import { useI18n } from '../i18n/useI18n'
 
 /**
  * `/wallet`, inside `RequireAuth` and `PlayerOnly`: the shared, server-confirmed balance and the
@@ -9,9 +10,10 @@ import { useWalletTransactions } from '../features/wallet/useWalletTransactions'
  */
 export function WalletPage() {
   const history = useWalletTransactions()
+  const { t } = useI18n()
   return (
     <div className="space-y-6">
-      <PageHeader title="Wallet">Virtual coins only. They have no monetary value and cannot be bought or paid out.</PageHeader>
+      <PageHeader title={t('wallet.title')}>{t('wallet.intro')}</PageHeader>
       <div className="max-w-md">
         <BalanceCard />
       </div>

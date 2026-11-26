@@ -86,7 +86,7 @@ describe('InterestPicker', () => {
     const onRetry = vi.fn()
     render(
       <Picker
-        catalog={{ status: 'failed', message: 'The list of interests could not be loaded.' }}
+        catalog={{ status: 'failed', message: { key: 'interests.loadFailed' } }}
         initial={['PROBABILITY', 'HISTORY']}
         onRetry={onRetry}
       />,

@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router'
 import { ghostButton, primaryButton, secondaryButton } from '../../components/buttonStyles'
+import { useI18n } from '../../i18n/useI18n'
 import { useAuth } from './useAuth'
 import { useSignOut } from './useSignOut'
 
@@ -12,6 +13,7 @@ const compact = 'px-3 py-1.5'
 export function UserMenu() {
   const { state } = useAuth()
   const { signOut, pending, error } = useSignOut()
+  const { t } = useI18n()
 
   if (state.status === 'authenticated') {
     const { displayName } = state.user
@@ -19,7 +21,7 @@ export function UserMenu() {
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
         {/* NavLink sets aria-current="page" on the profile page. */}
         <NavLink to="/profile" className={`${ghostButton} ${compact} aria-[current=page]:bg-zinc-800 aria-[current=page]:text-zinc-50`}>
-          My profile
+          {t('menu.myProfile')}
         </NavLink>
         <span className="flex min-w-0 items-center gap-2 text-sm">
           <span
@@ -29,16 +31,16 @@ export function UserMenu() {
             {displayName.charAt(0)}
           </span>
           <span className="max-w-40 truncate font-medium text-zinc-100">
-            <span className="sr-only">Signed in as </span>
+            <span className="sr-only">{t('menu.signedInAs')}</span>
             {displayName}
           </span>
         </span>
         <button type="button" onClick={() => void signOut()} disabled={pending} className={`${secondaryButton} ${compact}`}>
-          {pending ? 'Signing out…' : 'Sign out'}
+          {pending ? t('common.signingOut') : t('common.signOut')}
         </button>
         {error && (
           <p role="alert" className="w-full text-right text-xs text-rose-300">
-            {error}
+            {t(error)}
           </p>
         )}
       </div>
@@ -49,7 +51,7 @@ export function UserMenu() {
     return (
       <span className="flex items-center gap-2 text-sm text-zinc-400">
         <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-emerald-400/70" />
-        Checking sign-in…
+        {t('menu.checking')}
       </span>
     )
   }
@@ -58,10 +60,10 @@ export function UserMenu() {
   return (
     <div className="flex items-center gap-2">
       <NavLink to="/login" className={`${ghostButton} ${compact}`}>
-        Sign in
+        {t('common.signIn')}
       </NavLink>
       <NavLink to="/register" className={`${primaryButton} ${compact}`}>
-        Create account
+        {t('common.createAccount')}
       </NavLink>
     </div>
   )

@@ -450,7 +450,8 @@ providers (`AuthProvider`, `WalletProvider`) and local reducers hold all state.
    (`features/roulette/pendingSpinStore.ts`, key `casino.roulette.pendingSpin.v1.<userId>`: version,
    user id, key, frozen body, creation time, `ambiguous`, `state`) and read back; only then is the
    request sent. If the write fails, nothing is sent and the player is told why. The record holds no
-   session id, token, email or balance, and it is the only thing the SPA keeps in browser storage.
+   session id, token, email or balance. Besides the interface language (§4.11), it is the only thing
+   the SPA keeps in browser storage.
 3. **One request per player at a time.** Requests in flight are tracked per user at module level, so
    double activation, a page left and opened again, or a second component never sends a second
    request; the answer is handled exactly once.
@@ -520,6 +521,53 @@ database and on a V9 database (W5-10, [Week 5 plan §16.7](plans/week-05.md#167-
   instead of the backend are shown as "starting up or temporarily unavailable"
   (`ApiError.isUnavailable`): 502/503/504 without Problem Details, or a 2xx that is not JSON. This
   covers a Render Free cold start that exceeds Vercel's 120 s proxy timeout.
+
+### 4.11 Interface languages (English, Bulgarian)
+
+> **Status.** Branch `feature/bulgarian-language`, based on the Week 5 branch; not merged, not deployed.
+
+The whole interface is available in English (default) and Bulgarian. No runtime dependency was added;
+`frontend/src/i18n/` holds the implementation.
+
+- **Dictionaries.** `messages/en.ts` is the source of the message keys (`MessageKey`); `messages/bg.ts` is
+  typed as a complete `Dictionary`, so a missing or extra key fails the type check. Texts use `{name}`
+  placeholders; entries with `one`/`other` are chosen by `Intl.PluralRules`. `messages.test.ts` also
+  checks the key sets, the plural shapes and that both languages use the same placeholders. At run time
+  a key missing in Bulgarian falls back to English, and an unknown key is shown as the key itself.
+- **Provider and hook.** `LocaleProvider` (outermost in `App.tsx`) holds the locale; `useI18n()` gives
+  `t`, `rich` (placeholders filled with React elements, e.g. a link or `<Coins>`, so the word order
+  stays the translation's) and the formatters (`coins`, `signedCoins`, `number`, `percentFigure`, `date`,
+  `dateTime`; `en-GB` / `bg-BG` through `Intl`). Pure helpers (`walletFormat`, `rouletteTable`,
+  `oddsRules`, `profileFormat`) take an optional locale that defaults to English.
+- **Messages in state.** Text that outlives a render — form and spin errors, the bet slip's
+  announcements, the message of an unresolved spin, failed wallet and history reads — is stored as a
+  `Message` (key and values, nested messages allowed) and translated when it is rendered. Changing the
+  language therefore re-renders the texts only: no provider is re-created, no component is remounted,
+  no request is sent, and the session, the wallet, the bet slip, the spin state, the pending record in
+  `sessionStorage` and its `Idempotency-Key` stay exactly as they were.
+- **Bet names** ("Number 17", "1st dozen (1–12)", the cells' accessible names) are built from the
+  dictionary for the current language (`cellText`, `cellNameMessage`); the table model itself holds
+  only selections, colours and ranges.
+- **Server texts.** Decisions still use the Problem Details `code` and the status only. For display,
+  `serverMessages.ts` maps the backend's fixed field messages (`errors[].message`, e.g.
+  "must be less than or equal to 1000") and the API client's own messages to keys; an unknown message is
+  shown exactly as the server sent it. The interest catalogue from `GET /api/v1/interests` is shown as
+  the server sends it in English and translated by code in Bulgarian. API contract, error codes and the
+  backend are unchanged.
+- **Switcher.** `components/layout/LanguageSwitcher` in the header (visitors and signed-in users): a
+  group "Language" of two toggle buttons, `EN` / `BG`, with `aria-pressed` and their own `lang`, named
+  "EN English" / "BG Български". The provider keeps `<html lang>`, the document title and the meta
+  description in the current language. The product name "Online Casino Simulator" is the same in both
+  languages (header, title); the descriptive text around it is translated.
+- **Browser storage — narrow exception.** The chosen language is the only value in `localStorage`, under
+  the key `casino.locale`, with the value `en` or `bg` and nothing else (no user, session, wallet or spin
+  data). Every access is wrapped in `try`/`catch`; a missing, unknown or unreadable value means English,
+  and a failed write only means the choice lasts for the page visit. It is a display preference, so
+  it is shared by every account in that browser, and signing out does not clear it.
+- **Verification.** Unit and component tests in `src/i18n/` (dictionaries, fallback, storage, server
+  messages, switching with pending bets, results, errors and unresolved spins), and the browser
+  scenario `frontend/e2e/bg-language.spec.ts` against the real backend (registration, sign-in, a round,
+  the wallet, switching before and after the round: one `POST`, one committed round).
 
 ## 5. Cross-cutting concerns
 

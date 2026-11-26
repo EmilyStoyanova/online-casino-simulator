@@ -1,5 +1,7 @@
 import { primaryButton, touchTarget } from '../../components/buttonStyles'
 import { Coins } from '../../components/Coins'
+import type { MessageKey } from '../../i18n/translate'
+import { useI18n } from '../../i18n/useI18n'
 import { totalStake, type ReviewBlock, type SlipBet, type SlipFeedback } from './betSlipReducer'
 import type { SpinPhase } from './useSpin'
 
@@ -13,11 +15,11 @@ interface BetSummaryBarProps {
   onReview: () => void
 }
 
-const PHASE_TEXT: Partial<Record<SpinPhase['kind'], string>> = {
-  confirming: 'Confirm in the bet slip',
-  submitting: 'Waiting for the server…',
-  revealing: 'The wheel is turning',
-  unresolved: 'Spin not confirmed',
+const PHASE_TEXT: Partial<Record<SpinPhase['kind'], MessageKey>> = {
+  confirming: 'bar.confirming',
+  submitting: 'common.waitingForServer',
+  revealing: 'bar.revealing',
+  unresolved: 'spin.notConfirmed',
 }
 
 /**
@@ -26,6 +28,7 @@ const PHASE_TEXT: Partial<Record<SpinPhase['kind'], string>> = {
  * last message for sighted players (`aria-hidden`: the slip's live region already announces it).
  */
 export function BetSummaryBar({ bets, feedback, block, reasonId, phase, onReview }: BetSummaryBarProps) {
+  const { t } = useI18n()
   if (bets.length === 0) return null
   const text = PHASE_TEXT[phase]
 
@@ -33,10 +36,10 @@ export function BetSummaryBar({ bets, feedback, block, reasonId, phase, onReview
     <div className="sticky bottom-0 z-20 -mx-4 border-t border-zinc-800 bg-zinc-950/95 px-4 py-3 shadow-[0_-8px_24px_rgba(0,0,0,0.45)] backdrop-blur md:hidden">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-zinc-200">
-          {bets.length} {bets.length === 1 ? 'bet' : 'bets'} · <Coins amount={totalStake(bets)} className="font-semibold" />
+          {t('common.bets', { count: bets.length })} · <Coins amount={totalStake(bets)} className="font-semibold" />
         </p>
         {text ? (
-          <p className="text-sm text-zinc-400">{text}</p>
+          <p className="text-sm text-zinc-400">{t(text)}</p>
         ) : (
           <button
             type="button"
@@ -45,13 +48,13 @@ export function BetSummaryBar({ bets, feedback, block, reasonId, phase, onReview
             aria-describedby={block !== null ? reasonId : undefined}
             className={`${primaryButton} ${touchTarget} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
           >
-            Review bets
+            {t('slip.review')}
           </button>
         )}
       </div>
       {feedback && (
         <p aria-hidden="true" className={`mt-1 text-xs ${feedback.tone === 'refused' ? 'text-amber-200' : 'text-zinc-400'}`}>
-          {feedback.message}
+          {t(feedback.message)}
         </p>
       )}
     </div>

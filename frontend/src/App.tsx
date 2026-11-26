@@ -4,6 +4,7 @@ import { AuthProvider } from './features/auth/AuthProvider'
 import { PlayerOnly } from './features/auth/PlayerOnly'
 import { RequireAuth } from './features/auth/RequireAuth'
 import { WalletProvider } from './features/wallet/WalletProvider'
+import { LocaleProvider } from './i18n/LocaleProvider'
 import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
@@ -17,27 +18,30 @@ import { WalletPage } from './pages/WalletPage'
  * need a signed-in user go under `<Route element={<RequireAuth />}>`; pages only players can use go
  * one level deeper, under `<Route element={<PlayerOnly />}>`. `WalletProvider` sits above the layout and
  * the routes, so the header and every page share one balance and navigation never reloads it.
+ * `LocaleProvider` is outermost: changing the language re-renders the texts and keeps every other state.
  */
 export function App() {
   return (
-    <AuthProvider>
-      <WalletProvider>
-        <AppLayout>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route element={<RequireAuth />}>
-              <Route path="/profile" element={<ProfilePage />} />
-              <Route element={<PlayerOnly />}>
-                <Route path="/roulette" element={<RoulettePage />} />
-                <Route path="/wallet" element={<WalletPage />} />
+    <LocaleProvider>
+      <AuthProvider>
+        <WalletProvider>
+          <AppLayout>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route element={<RequireAuth />}>
+                <Route path="/profile" element={<ProfilePage />} />
+                <Route element={<PlayerOnly />}>
+                  <Route path="/roulette" element={<RoulettePage />} />
+                  <Route path="/wallet" element={<WalletPage />} />
+                </Route>
               </Route>
-            </Route>
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </AppLayout>
-      </WalletProvider>
-    </AuthProvider>
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </AppLayout>
+        </WalletProvider>
+      </AuthProvider>
+    </LocaleProvider>
   )
 }

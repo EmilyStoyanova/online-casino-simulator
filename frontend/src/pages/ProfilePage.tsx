@@ -2,37 +2,41 @@ import { card } from '../components/cardStyles'
 import { DetailRow } from '../components/DetailRow'
 import { formatDate, roleLabel } from '../features/auth/profileFormat'
 import { useAuth } from '../features/auth/useAuth'
+import { interestName } from '../features/profile/interestText'
 import { ProfileForm } from '../features/profile/ProfileForm'
 import { useInterests, type InterestCatalog } from '../features/profile/useInterests'
+import type { Locale } from '../i18n/locales'
+import { useI18n } from '../i18n/useI18n'
 import type { UserProfile } from '../types/user'
 
-function interestNames(codes: readonly string[], catalog: InterestCatalog): string[] {
+function interestNames(codes: readonly string[], catalog: InterestCatalog, locale: Locale): string[] {
   if (catalog.status !== 'loaded') return [...codes]
-  const names = new Map(catalog.interests.map((interest) => [interest.code, interest.name]))
+  const names = new Map(catalog.interests.map((interest) => [interest.code, interestName(interest, locale)]))
   return codes.map((code) => names.get(code) ?? code)
 }
 
 /** The saved profile, as the server returned it last. */
 function AccountDetails({ user, catalog }: { user: UserProfile; catalog: InterestCatalog }) {
-  const names = interestNames(user.interests, catalog)
+  const { t, locale } = useI18n()
+  const names = interestNames(user.interests, catalog, locale)
 
   return (
     <section aria-labelledby="profile-details-heading" className={card}>
       <h2 id="profile-details-heading" className="mb-4 text-lg font-semibold text-zinc-100">
-        Account details
+        {t('profile.details')}
       </h2>
       <dl className="divide-y divide-zinc-800">
-        <DetailRow label="Display name">{user.displayName}</DetailRow>
-        <DetailRow label="Email">{user.email}</DetailRow>
-        <DetailRow label="Role">{roleLabel(user.role)}</DetailRow>
-        <DetailRow label="Member since">{formatDate(user.createdAt)}</DetailRow>
-        <DetailRow label="18+ confirmed">{formatDate(user.adultConfirmedAt)}</DetailRow>
+        <DetailRow label={t('common.displayName')}>{user.displayName}</DetailRow>
+        <DetailRow label={t('common.email')}>{user.email}</DetailRow>
+        <DetailRow label={t('common.role')}>{roleLabel(user.role, locale)}</DetailRow>
+        <DetailRow label={t('common.memberSince')}>{formatDate(user.createdAt, locale)}</DetailRow>
+        <DetailRow label={t('common.adultConfirmed')}>{formatDate(user.adultConfirmedAt, locale)}</DetailRow>
       </dl>
-      <h3 className="mt-5 text-sm font-medium text-zinc-300">Interests</h3>
+      <h3 className="mt-5 text-sm font-medium text-zinc-300">{t('profile.interests')}</h3>
       {names.length === 0 ? (
-        <p className="mt-2 text-sm text-zinc-400">None selected yet.</p>
+        <p className="mt-2 text-sm text-zinc-400">{t('profile.noInterests')}</p>
       ) : (
-        <ul aria-label="Saved interests" className="mt-2 flex flex-wrap gap-2">
+        <ul aria-label={t('profile.savedInterests')} className="mt-2 flex flex-wrap gap-2">
           {names.map((name) => (
             <li
               key={name}
@@ -43,9 +47,7 @@ function AccountDetails({ user, catalog }: { user: UserProfile; catalog: Interes
           ))}
         </ul>
       )}
-      <p className="mt-5 text-xs leading-relaxed text-zinc-400">
-        Your email, role and 18+ confirmation cannot be changed here.
-      </p>
+      <p className="mt-5 text-xs leading-relaxed text-zinc-400">{t('profile.readOnly')}</p>
     </section>
   )
 }
@@ -53,6 +55,7 @@ function AccountDetails({ user, catalog }: { user: UserProfile; catalog: Interes
 /** `/profile`, inside `RequireAuth`: the signed-in user's profile and the form to edit it. */
 export function ProfilePage() {
   const { state } = useAuth()
+  const { t } = useI18n()
   const { catalog, reload } = useInterests()
 
   // RequireAuth renders this page only for a signed-in user.
@@ -62,15 +65,15 @@ export function ProfilePage() {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">My profile</h1>
-        <p className="text-sm text-zinc-400">Choose how you appear to other players and what you want to learn.</p>
+        <h1 className="text-3xl font-bold tracking-tight">{t('profile.title')}</h1>
+        <p className="text-sm text-zinc-400">{t('profile.intro')}</p>
       </div>
       {/* grid-cols-1 = minmax(0, 1fr): a long email wraps instead of widening the page. */}
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <AccountDetails user={user} catalog={catalog} />
         <section aria-labelledby="profile-edit-heading" className={card}>
           <h2 id="profile-edit-heading" className="mb-4 text-lg font-semibold text-zinc-100">
-            Edit profile
+            {t('common.editProfile')}
           </h2>
           <ProfileForm key={user.id} user={user} catalog={catalog} onRetryCatalog={reload} />
         </section>

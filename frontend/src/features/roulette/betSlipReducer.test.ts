@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createI18n } from '../../i18n/translate'
 import type { RouletteSelection } from '../../types/roulette'
 import {
   betSlipReducer,
@@ -17,6 +18,13 @@ import {
 } from './betSlipReducer'
 import { selectionKey } from './rouletteTable'
 
+/** The texts as the English interface shows them (the reducer keeps messages, not strings). */
+const { t } = createI18n('en')
+const shown = (state: BetSlipState) => state.feedback && { ...state.feedback, message: t(state.feedback.message) }
+const reason = (...args: Parameters<typeof blockReason>) => {
+  const message = blockReason(...args)
+  return message && t(message)
+}
 const RED: RouletteSelection = { category: 'RED_BLACK', color: 'RED' }
 const n = (number: number): RouletteSelection => ({ category: 'STRAIGHT', number })
 const add = (selection: RouletteSelection, amount: number): BetSlipAction => ({ type: 'add', selection, amount })
@@ -40,7 +48,7 @@ describe('AC-W5-06.4: one bet per selection and the contract limits', () => {
     const state = run([add(RED, 10)])
 
     expect(summary(state)).toEqual([['RED_BLACK:RED', 10]])
-    expect(state.feedback).toEqual({ id: 1, tone: 'change', message: 'Red: 10 coins. 1 bet, total 10 coins.' })
+    expect(shown(state)).toEqual({ id: 1, tone: 'change', message: 'Red: 10 coins. 1 bet, total 10 coins.' })
   })
 
   it('adds further chips on the same selection to the one existing bet', () => {
@@ -50,18 +58,18 @@ describe('AC-W5-06.4: one bet per selection and the contract limits', () => {
       ['RED_BLACK:RED', 36],
       ['STRAIGHT:17', 5],
     ])
-    expect(state.feedback?.message).toBe('Red: 36 coins. 2 bets, total 41 coins.')
+    expect(shown(state)?.message).toBe('Red: 36 coins. 2 bets, total 41 coins.')
   })
 
   it('caps a bet at 1,000 coins and says so; a further chip is refused and announced', () => {
     const capped = run([add(n(7), 500), add(n(7), 100), add(n(7), 100), add(n(7), 100), add(n(7), 100), add(n(7), 500)])
 
     expect(summary(capped)).toEqual([['STRAIGHT:7', 1000]])
-    expect(capped.feedback).toMatchObject({ tone: 'change', message: 'Number 7: 1,000 coins, the maximum per bet. 1 bet, total 1,000 coins.' })
+    expect(shown(capped)).toMatchObject({ tone: 'change', message: 'Number 7: 1,000 coins, the maximum per bet. 1 bet, total 1,000 coins.' })
 
     const refused = betSlipReducer(capped, add(n(7), 1))
     expect(refused.bets).toBe(capped.bets)
-    expect(refused.feedback).toMatchObject({ tone: 'refused', message: 'Not added: Number 7 already has 1,000 coins, the maximum per bet.' })
+    expect(shown(refused)).toMatchObject({ tone: 'refused', message: 'Not added: Number 7 already has 1,000 coins, the maximum per bet.' })
   })
 
   it('refuses an eleventh selection and announces it; chips on the ten existing bets still add', () => {
@@ -70,7 +78,7 @@ describe('AC-W5-06.4: one bet per selection and the contract limits', () => {
 
     const refused = betSlipReducer(ten, add(RED, 10))
     expect(refused.bets).toBe(ten.bets)
-    expect(refused.feedback).toMatchObject({ tone: 'refused', message: 'Not added: up to 10 different bets per spin. Remove a bet to choose Red.' })
+    expect(shown(refused)).toMatchObject({ tone: 'refused', message: 'Not added: up to 10 different bets per spin. Remove a bet to choose Red.' })
 
     expect(summary(betSlipReducer(refused, add(n(3), 5)))[3]).toEqual(['STRAIGHT:3', 15])
   })
@@ -83,7 +91,7 @@ describe('AC-W5-06.4: one bet per selection and the contract limits', () => {
 
     const newBet = reducer(state, add(RED, 500))
     expect(newBet.bets).toBe(state.bets)
-    expect(newBet.feedback).toMatchObject({ tone: 'refused', message: 'Not added: up to 1,200 coins per spin.' })
+    expect(shown(newBet)).toMatchObject({ tone: 'refused', message: 'Not added: up to 1,200 coins per spin.' })
 
     const existing = reducer(state, add(n(3), 500))
     expect(existing.bets).toBe(state.bets)
@@ -107,7 +115,7 @@ describe('AC-W5-06.4: one bet per selection and the contract limits', () => {
     const first = betSlipReducer(ten, add(RED, 10))
     const second = betSlipReducer(first, add(RED, 10))
 
-    expect(second.feedback?.message).toBe(first.feedback?.message)
+    expect(shown(second)?.message).toBe(shown(first)?.message)
     expect(second.feedback?.id).toBe((first.feedback?.id ?? 0) + 1)
   })
 
@@ -134,8 +142,8 @@ describe('AC-W5-06.5: remove, clear and the total stake', () => {
       ['STRAIGHT:1', 10],
       ['STRAIGHT:2', 5],
     ])
-    expect(state.feedback?.message).toBe('Red removed. 2 bets, total 15 coins.')
-    expect(run([{ type: 'remove', key: 'STRAIGHT:1' }, { type: 'remove', key: 'STRAIGHT:2' }], betSlipReducer, state).feedback?.message).toBe(
+    expect(shown(state)?.message).toBe('Red removed. 2 bets, total 15 coins.')
+    expect(shown(run([{ type: 'remove', key: 'STRAIGHT:1' }, { type: 'remove', key: 'STRAIGHT:2' }], betSlipReducer, state))?.message).toBe(
       'Number 2 removed. No bets left.',
     )
   })
@@ -144,7 +152,7 @@ describe('AC-W5-06.5: remove, clear and the total stake', () => {
     const state = run([add(n(1), 10), add(RED, 25), { type: 'clear' }])
 
     expect(state.bets).toEqual([])
-    expect(state.feedback?.message).toBe('All bets cleared.')
+    expect(shown(state)?.message).toBe('All bets cleared.')
     expect(betSlipReducer(state, { type: 'clear' })).toBe(state)
     expect(betSlipReducer(state, { type: 'remove', key: 'STRAIGHT:1' })).toBe(state)
   })
@@ -161,12 +169,12 @@ describe('AC-W5-06.5: when "Review bets" is available', () => {
   it('is blocked for an empty slip', () => {
     expect(reviewBlock([], 1000)).toBe('empty')
     expect(reviewBlock([], null)).toBe('empty')
-    expect(blockReason('empty', [], null)).toBe('Place at least one bet to review it.')
+    expect(reason('empty', [], null)).toBe('Place at least one bet to review it.')
   })
 
   it('is blocked when the known balance is lower than the total, and explains it', () => {
     expect(reviewBlock(bets, 1099)).toBe('insufficient-balance')
-    expect(blockReason('insufficient-balance', bets, 1099)).toBe(
+    expect(reason('insufficient-balance', bets, 1099)).toBe(
       'Your balance is too low for these bets: 1,100 coins in bets, 1,099 coins available.',
     )
     expect(reviewBlock(bets, 1100)).toBeNull()
@@ -175,9 +183,9 @@ describe('AC-W5-06.5: when "Review bets" is available', () => {
 
   it('is not blocked by an unknown balance: unknown is not zero, the server decides', () => {
     expect(reviewBlock(bets, null)).toBeNull()
-    expect(blockReason(null, bets, null)).toBeNull()
+    expect(reason(null, bets, null)).toBeNull()
     expect(knownBalance({ status: 'loading' })).toBeNull()
-    expect(knownBalance({ status: 'failed', message: 'x' })).toBeNull()
+    expect(knownBalance({ status: 'failed', message: { text: 'x' } })).toBeNull()
     expect(knownBalance({ status: 'inactive' })).toBeNull()
   })
 

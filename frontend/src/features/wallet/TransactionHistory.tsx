@@ -3,6 +3,8 @@ import { secondaryButton, touchTarget } from '../../components/buttonStyles'
 import { card } from '../../components/cardStyles'
 import { Coins } from '../../components/Coins'
 import { FormAlert } from '../../components/form/FormAlert'
+import type { Translate } from '../../i18n/translate'
+import { useI18n } from '../../i18n/useI18n'
 import type { WalletTransaction } from '../../types/wallet'
 import type { HistoryState } from './useWalletTransactions'
 import { formatEntryTime, formatSignedCoins, transactionTypeLabel } from './walletFormat'
@@ -14,6 +16,7 @@ const cell = 'py-3 pr-4 align-top max-md:flex max-md:flex-col max-md:gap-0.5 max
 const numericCell = `${cell} tabular-nums md:text-right last:pr-0`
 
 function EntryRow({ entry }: { entry: WalletTransaction }) {
+  const { t, locale } = useI18n()
   const credit = entry.amount > 0
   return (
     <tr
@@ -22,26 +25,26 @@ function EntryRow({ entry }: { entry: WalletTransaction }) {
     >
       <td role="cell" className={`${cell} text-zinc-300`}>
         <span aria-hidden="true" className={cardLabel}>
-          Time
+          {t('history.time')}
         </span>
-        <time dateTime={entry.createdAt}>{formatEntryTime(entry.createdAt)}</time>
+        <time dateTime={entry.createdAt}>{formatEntryTime(entry.createdAt, undefined, locale)}</time>
       </td>
       <td role="cell" className={`${cell} text-zinc-100`}>
         <span aria-hidden="true" className={cardLabel}>
-          Type
+          {t('history.type')}
         </span>
-        {transactionTypeLabel(entry.type)}
+        {transactionTypeLabel(entry.type, locale)}
       </td>
       {/* The sign is text; the colour is only an extra cue. */}
       <td role="cell" className={`${numericCell} font-semibold ${credit ? 'text-emerald-300' : 'text-rose-300'}`}>
         <span aria-hidden="true" className={cardLabel}>
-          Amount
+          {t('history.amount')}
         </span>
-        {formatSignedCoins(entry.amount)}
+        {formatSignedCoins(entry.amount, locale)}
       </td>
       <td role="cell" className={`${numericCell} text-zinc-200`}>
         <span aria-hidden="true" className={cardLabel}>
-          Balance after
+          {t('history.balanceAfter')}
         </span>
         <Coins amount={entry.balanceAfter} />
       </td>
@@ -50,19 +53,17 @@ function EntryRow({ entry }: { entry: WalletTransaction }) {
 }
 
 /** What the polite live region says, so loading, empty and appended pages are announced. */
-function statusText(state: HistoryState): string {
+function statusText(state: HistoryState, t: Translate): string {
   switch (state.status) {
     case 'loading':
-      return 'Loading your transaction history…'
+      return t('history.loading')
     case 'loaded': {
-      if (state.refresh === 'refreshing') return 'Refreshing your transaction history…'
-      if (state.older === 'loading') return 'Loading older entries…'
+      if (state.refresh === 'refreshing') return t('history.refreshing')
+      if (state.older === 'loading') return t('history.loadingOlder')
       const count = state.items.length
-      if (count === 0) return 'No entries yet.'
-      const entries = `${count.toLocaleString('en-GB')} ${count === 1 ? 'entry' : 'entries'}`
-      return state.nextCursor === null
-        ? `Showing ${entries}: your complete history.`
-        : `Showing the ${entries} loaded so far. Older entries are available.`
+      if (count === 0) return t('history.empty')
+      const entries = t('history.entries', { count })
+      return state.nextCursor === null ? t('history.complete', { entries }) : t('history.partial', { entries })
     }
     default:
       return ''
@@ -85,6 +86,7 @@ export function TransactionHistory({
   onLoadOlder: () => void
   onRefresh: () => void
 }) {
+  const { t } = useI18n()
   const headingId = useId()
   const table = useRef<HTMLTableElement>(null)
   const olderTryAgain = useRef<HTMLButtonElement>(null)
@@ -122,20 +124,18 @@ export function TransactionHistory({
     <section aria-labelledby={headingId} aria-busy={busy} className={card}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id={headingId} className="text-lg font-semibold text-zinc-100">
-          Transaction history
+          {t('history.heading')}
         </h2>
         {loaded && (
           <button type="button" onClick={onRefresh} disabled={refreshing} className={`${secondaryButton} ${compact}`}>
-            {refreshing ? 'Refreshing…' : 'Refresh history'}
+            {refreshing ? t('common.refreshing') : t('history.refresh')}
           </button>
         )}
       </div>
-      <p className="mt-1 text-sm text-zinc-400">
-        Every change to your virtual balance, newest first, as recorded by the server.
-      </p>
+      <p className="mt-1 text-sm text-zinc-400">{t('history.intro')}</p>
 
       <p role="status" className="mt-4 text-sm text-zinc-300 empty:hidden">
-        {statusText(state)}
+        {statusText(state, t)}
       </p>
 
       {state.status === 'loading' && (
@@ -148,9 +148,9 @@ export function TransactionHistory({
 
       {state.status === 'failed' && (
         <div className="mt-4 space-y-3">
-          <FormAlert tone="error">{state.message}</FormAlert>
+          <FormAlert tone="error">{t(state.message)}</FormAlert>
           <button type="button" onClick={onRefresh} className={`${secondaryButton} ${compact}`}>
-            Try again
+            {t('common.tryAgain')}
           </button>
         </div>
       )}
@@ -158,9 +158,9 @@ export function TransactionHistory({
       {loaded?.refresh === 'failed' && (
         <div className="mt-4">
           <FormAlert tone="error">
-            Your transaction history could not be refreshed, so it may be out of date.{' '}
+            {t('history.refreshFailed')}{' '}
             <button type="button" onClick={onRefresh} className="font-semibold underline underline-offset-2">
-              Try again
+              {t('common.tryAgain')}
             </button>
           </FormAlert>
         </div>
@@ -168,20 +168,20 @@ export function TransactionHistory({
 
       {loaded && loaded.items.length > 0 && (
         <table ref={table} role="table" className="mt-4 w-full text-left text-sm max-md:block">
-          <caption className="sr-only">Wallet entries, newest first</caption>
+          <caption className="sr-only">{t('history.caption')}</caption>
           <thead role="rowgroup" className="max-md:sr-only">
             <tr role="row" className="text-xs text-zinc-400">
               <th role="columnheader" scope="col" className="pb-2 pr-4 font-medium">
-                Time
+                {t('history.time')}
               </th>
               <th role="columnheader" scope="col" className="pb-2 pr-4 font-medium">
-                Type
+                {t('history.type')}
               </th>
               <th role="columnheader" scope="col" className="pb-2 pr-4 text-right font-medium">
-                Amount
+                {t('history.amount')}
               </th>
               <th role="columnheader" scope="col" className="pb-2 text-right font-medium">
-                Balance after
+                {t('history.balanceAfter')}
               </th>
             </tr>
           </thead>
@@ -196,9 +196,9 @@ export function TransactionHistory({
       {loaded?.older === 'failed' && (
         <div className="mt-4">
           <FormAlert tone="error">
-            {loaded.error} The entries above are still shown.{' '}
+            {loaded.error && t(loaded.error)} {t('history.olderKept')}{' '}
             <button ref={olderTryAgain} type="button" onClick={loadOlder} className="font-semibold underline underline-offset-2">
-              Try again
+              {t('common.tryAgain')}
             </button>
           </FormAlert>
         </div>
@@ -212,7 +212,7 @@ export function TransactionHistory({
             disabled={loaded.older === 'loading' || refreshing}
             className={`${secondaryButton} ${touchTarget} w-full sm:w-auto`}
           >
-            {loaded.older === 'loading' ? 'Loading older entries…' : 'Load older entries'}
+            {loaded.older === 'loading' ? t('history.loadingOlder') : t('history.loadOlder')}
           </button>
         </div>
       )}

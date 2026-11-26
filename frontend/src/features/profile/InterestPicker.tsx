@@ -1,6 +1,8 @@
 import { CheckboxField } from '../../components/form/CheckboxField'
 import { FormAlert } from '../../components/form/FormAlert'
 import { secondaryButton } from '../../components/buttonStyles'
+import { useI18n } from '../../i18n/useI18n'
+import { interestDescription, interestName } from './interestText'
 import { MAX_INTERESTS } from './profileChanges'
 import type { InterestCatalog } from './useInterests'
 
@@ -21,6 +23,7 @@ export interface InterestPickerProps {
  * unchanged and shown by code, so a save cannot remove it by accident.
  */
 export function InterestPicker({ id, catalog, onRetryCatalog, selected, onChange, disabled, error }: InterestPickerProps) {
+  const { t, locale } = useI18n()
   const hintId = `${id}-hint`
   const errorId = error ? `${id}-error` : undefined
   const atMaximum = selected.length >= MAX_INTERESTS
@@ -41,39 +44,36 @@ export function InterestPicker({ id, catalog, onRetryCatalog, selected, onChange
 
   return (
     <fieldset aria-describedby={[hintId, errorId].filter(Boolean).join(' ')} className="space-y-3">
-      <legend className="text-sm font-medium text-zinc-200">Interests</legend>
+      <legend className="text-sm font-medium text-zinc-200">{t('profile.interests')}</legend>
       <div id={hintId} className="space-y-1 text-xs text-zinc-400">
-        <p>
-          Choose up to {MAX_INTERESTS} topics you would like to learn about. Your choice is saved when you
-          save your profile.
-        </p>
+        <p>{t('interests.hint', { max: MAX_INTERESTS })}</p>
         <p aria-live="polite" className={atMaximum ? 'text-amber-300' : undefined}>
-          {selected.length} of {MAX_INTERESTS} selected.
-          {atMaximum && ` You have reached the maximum; deselect one to choose another.`}
+          {t('interests.count', { count: selected.length, max: MAX_INTERESTS })}
+          {atMaximum && ` ${t('interests.atMaximum')}`}
         </p>
       </div>
 
       {catalog.status === 'loading' && (
         <p role="status" className="flex items-center gap-2 text-sm text-zinc-400">
           <span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-emerald-400/70" />
-          Loading interests…
+          {t('interests.loading')}
         </p>
       )}
 
       {catalog.status === 'failed' && (
         <div className="space-y-3">
           <FormAlert tone="error">
-            {catalog.message} Your current selection is kept as it is
-            {selected.length > 0 ? `: ${selected.join(', ')}.` : '.'}
+            {t(catalog.message)}{' '}
+            {selected.length > 0 ? t('interests.keptWith', { codes: selected.join(', ') }) : t('interests.kept')}
           </FormAlert>
           <button type="button" onClick={onRetryCatalog} className={secondaryButton}>
-            Load interests again
+            {t('interests.reload')}
           </button>
         </div>
       )}
 
       {catalog.status === 'loaded' && catalog.interests.length === 0 && (
-        <p className="text-sm text-zinc-400">No interests are available at the moment.</p>
+        <p className="text-sm text-zinc-400">{t('interests.none')}</p>
       )}
 
       {catalog.status === 'loaded' && catalog.interests.length > 0 && (
@@ -89,8 +89,8 @@ export function InterestPicker({ id, catalog, onRetryCatalog, selected, onChange
                   id={`${id}-${interest.code}`}
                   label={
                     <>
-                      <span className="block font-medium text-zinc-100">{interest.name}</span>
-                      <span className="block text-xs text-zinc-400">{interest.description}</span>
+                      <span className="block font-medium text-zinc-100">{interestName(interest, locale)}</span>
+                      <span className="block text-xs text-zinc-400">{interestDescription(interest, locale)}</span>
                     </>
                   }
                   checked={checked}

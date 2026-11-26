@@ -4,11 +4,13 @@ import { AuthCard } from '../components/layout/AuthCard'
 import { LoginForm } from '../features/auth/LoginForm'
 import { registerPath, useReturnPath } from '../features/auth/returnPath'
 import { useAuth } from '../features/auth/useAuth'
+import { useI18n } from '../i18n/useI18n'
 
 const linkClasses = 'font-semibold text-emerald-300 underline-offset-2 hover:underline'
 
 export function LoginPage() {
   const { state } = useAuth()
+  const { t } = useI18n()
   const navigate = useNavigate()
   // The page that sent the user here (`RequireAuth`), checked to be internal.
   const returnTo = useReturnPath()
@@ -20,25 +22,25 @@ export function LoginPage() {
   const expired = state.status === 'anonymous' && state.reason === 'session-expired'
   return (
     <AuthCard
-      title="Sign in"
-      description="Welcome back. Sign in to continue learning with virtual coins."
+      title={t('login.title')}
+      description={t('login.description')}
       footer={
         <>
-          New here?{' '}
+          {t('login.newHere')}{' '}
           <Link to={registerPath(returnTo)} className={linkClasses}>
-            Create an account
+            {t('login.createAccountLink')}
           </Link>
         </>
       }
     >
       {expired && (
         <div className="mb-5">
-          <FormAlert tone="info">Your session has ended. Sign in again to continue.</FormAlert>
+          <FormAlert tone="info">{t('session.ended')}</FormAlert>
         </div>
       )}
       {!expired && returnTo !== '/' && (
         <div className="mb-5">
-          <FormAlert tone="info">Please sign in to open this page.</FormAlert>
+          <FormAlert tone="info">{t('login.required')}</FormAlert>
         </div>
       )}
       <LoginForm onSuccess={() => navigate(returnTo, { replace: true })} />

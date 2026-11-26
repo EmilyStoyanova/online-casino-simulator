@@ -1,3 +1,4 @@
+import { coinsMessage, msg, type Message } from '../../i18n/translate'
 import {
   ROULETTE_LIMITS,
   type RouletteBet,
@@ -5,7 +6,7 @@ import {
   type RouletteSpinRequest,
 } from '../../types/roulette'
 import type { WalletState } from '../wallet/walletContext'
-import { cellFor, formatCoins } from './rouletteTable'
+import { cellFor, cellNameMessage } from './rouletteTable'
 
 /**
  * The local, unsubmitted bets of one round (§5.5): a pure reducer, its selectors and `toSpinRequest`.
@@ -29,12 +30,13 @@ export interface SlipBet {
 
 /**
  * The result of the last action, for the polite announcement and the visible note. `id` changes with
- * every action, so the same message (e.g. a second refusal) is announced again.
+ * every action, so the same message (e.g. a second refusal) is announced again. `message` is
+ * translated when shown, so a change of language does not touch the slip.
  */
 export interface SlipFeedback {
   readonly id: number
   readonly tone: 'change' | 'refused'
-  readonly message: string
+  readonly message: Message
 }
 
 export interface BetSlipState {
@@ -64,9 +66,9 @@ export function totalStake(bets: readonly SlipBet[]): number {
   return bets.reduce((sum, bet) => sum + bet.amount, 0)
 }
 
-function summary(bets: readonly SlipBet[]): string {
-  if (bets.length === 0) return 'No bets left.'
-  return `${bets.length} ${bets.length === 1 ? 'bet' : 'bets'}, total ${formatCoins(totalStake(bets))}.`
+function summary(bets: readonly SlipBet[]): Message {
+  if (bets.length === 0) return msg('slip.noBetsLeft')
+  return msg('slip.summary', { bets: msg('common.bets', { count: bets.length }), total: coinsMessage(totalStake(bets)) })
 }
 
 function isWholeAmount(value: number, limits: SlipLimits): boolean {
@@ -78,15 +80,15 @@ function isWholeAmount(value: number, limits: SlipLimits): boolean {
  * smaller limits to reach the total-stake rule, which 10 × 1,000 coins cannot exceed today.
  */
 export function createBetSlipReducer(limits: SlipLimits = ROULETTE_LIMITS) {
-  const maxTotal = formatCoins(limits.maxTotalStake)
+  const maxTotal = coinsMessage(limits.maxTotalStake)
 
   return function betSlipReducer(state: BetSlipState, action: BetSlipAction): BetSlipState {
     const nextId = (state.feedback?.id ?? 0) + 1
-    const change = (bets: readonly SlipBet[], message: string): BetSlipState => ({
+    const change = (bets: readonly SlipBet[], message: Message): BetSlipState => ({
       bets,
       feedback: { id: nextId, tone: 'change', message },
     })
-    const refuse = (message: string): BetSlipState => ({
+    const refuse = (message: Message): BetSlipState => ({
       bets: state.bets,
       feedback: { id: nextId, tone: 'refused', message },
     })
@@ -96,36 +98,38 @@ export function createBetSlipReducer(limits: SlipLimits = ROULETTE_LIMITS) {
         // Programming errors, not user input: the board offers only table cells and fixed chips.
         const entry = cellFor(action.selection)
         if (!isWholeAmount(action.amount, limits)) throw new RangeError(`Not a chip amount: ${action.amount}`)
+        const name = cellNameMessage(entry.selection)
 
         const total = totalStake(state.bets)
         const index = state.bets.findIndex((bet) => bet.key === entry.key)
         if (index === -1) {
-          if (state.bets.length >= limits.maxBets) {
-            return refuse(`Not added: up to ${limits.maxBets} different bets per spin. Remove a bet to choose ${entry.name}.`)
-          }
-          if (total + action.amount > limits.maxTotalStake) return refuse(`Not added: up to ${maxTotal} per spin.`)
+          if (state.bets.length >= limits.maxBets) return refuse(msg('slip.refused.maxBets', { max: limits.maxBets, name }))
+          if (total + action.amount > limits.maxTotalStake) return refuse(msg('slip.refused.maxTotal', { total: maxTotal }))
           const bets = [...state.bets, { key: entry.key, selection: entry.selection, amount: action.amount }]
-          return change(bets, `${entry.name}: ${formatCoins(action.amount)}. ${summary(bets)}`)
+          return change(bets, msg('slip.added', { name, amount: coinsMessage(action.amount), summary: summary(bets) }))
         }
 
         const current = state.bets[index] as SlipBet
         if (current.amount >= limits.maxAmount) {
-          return refuse(`Not added: ${entry.name} already has ${formatCoins(limits.maxAmount)}, the maximum per bet.`)
+          return refuse(msg('slip.refused.maxAmount', { name, amount: coinsMessage(limits.maxAmount) }))
         }
         const amount = Math.min(current.amount + action.amount, limits.maxAmount)
-        if (total - current.amount + amount > limits.maxTotalStake) return refuse(`Not added: up to ${maxTotal} per spin.`)
+        if (total - current.amount + amount > limits.maxTotalStake) return refuse(msg('slip.refused.maxTotal', { total: maxTotal }))
         const bets = state.bets.map((bet, position) => (position === index ? { ...bet, amount } : bet))
-        const capped = amount < current.amount + action.amount ? ', the maximum per bet' : ''
-        return change(bets, `${entry.name}: ${formatCoins(amount)}${capped}. ${summary(bets)}`)
+        const capped = amount < current.amount + action.amount
+        return change(
+          bets,
+          msg(capped ? 'slip.addedCapped' : 'slip.added', { name, amount: coinsMessage(amount), summary: summary(bets) }),
+        )
       }
       case 'remove': {
         const removed = state.bets.find((bet) => bet.key === action.key)
         if (!removed) return state
         const bets = state.bets.filter((bet) => bet !== removed)
-        return change(bets, `${cellFor(removed.selection).name} removed. ${summary(bets)}`)
+        return change(bets, msg('slip.removed', { name: cellNameMessage(removed.selection), summary: summary(bets) }))
       }
       case 'clear':
-        return state.bets.length === 0 ? state : change([], 'All bets cleared.')
+        return state.bets.length === 0 ? state : change([], msg('slip.cleared'))
       case 'reset':
         return EMPTY_BET_SLIP
     }
@@ -154,11 +158,11 @@ export function knownBalance(wallet: WalletState): number | null {
 }
 
 /** The visible reason why "Review bets" is not available (also its accessible description). */
-export function blockReason(block: ReviewBlock, bets: readonly SlipBet[], balance: number | null): string | null {
-  if (block === 'unavailable') return 'Roulette is not available on this server yet.'
-  if (block === 'empty') return 'Place at least one bet to review it.'
+export function blockReason(block: ReviewBlock, bets: readonly SlipBet[], balance: number | null): Message | null {
+  if (block === 'unavailable') return msg('roulette.unavailable')
+  if (block === 'empty') return msg('slip.block.empty')
   if (block === 'insufficient-balance' && balance !== null) {
-    return `Your balance is too low for these bets: ${formatCoins(totalStake(bets))} in bets, ${formatCoins(balance)} available.`
+    return msg('slip.block.balance', { stake: coinsMessage(totalStake(bets)), balance: coinsMessage(balance) })
   }
   return null
 }

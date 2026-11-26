@@ -1,9 +1,11 @@
 import { useId } from 'react'
+import { useI18n } from '../../i18n/useI18n'
 import {
   DOZEN_CELLS,
   NUMBER_CELLS,
   OUTSIDE_CELLS,
   cellAccessibleName,
+  cellText,
   formatAmount,
   type BetCell,
 } from './rouletteTable'
@@ -45,10 +47,12 @@ function Cell({
   lockId: string | undefined
   className?: string
 }) {
+  const { locale } = useI18n()
+  const text = cellText(entry, locale)
   return (
     <button
       type="button"
-      aria-label={cellAccessibleName(entry, amount)}
+      aria-label={cellAccessibleName(entry, amount, locale)}
       aria-disabled={lockId ? true : undefined}
       aria-describedby={lockId}
       data-color={entry.color ?? 'NONE'}
@@ -57,11 +61,11 @@ function Cell({
       }}
       className={`${cellBase} ${cellColor[entry.color ?? 'none']} ${className}`}
     >
-      <span className="text-sm font-semibold leading-5 tabular-nums">{entry.label}</span>
-      {entry.detail && <span className="text-[11px] leading-4 text-white/80">{entry.detail}</span>}
+      <span className="text-sm font-semibold leading-5 tabular-nums">{text.label}</span>
+      {text.detail && <span className="text-[11px] leading-4 text-white/80">{text.detail}</span>}
       {amount > 0 && (
         <span className="mt-0.5 rounded-full bg-amber-300 px-1.5 text-[10px] font-bold leading-4 text-zinc-950 tabular-nums shadow">
-          {formatAmount(amount)}
+          {formatAmount(amount, locale)}
         </span>
       )}
     </button>
@@ -79,6 +83,7 @@ function Cell({
  * A placed bet shows its amount on the cell as text, and the cell's name ends with "… coins placed."
  */
 export function RouletteBoard({ amounts, onPlace, lockedReason }: BoardProps) {
+  const { t } = useI18n()
   const numbersId = useId()
   const dozensId = useId()
   const outsideId = useId()
@@ -106,9 +111,9 @@ export function RouletteBoard({ amounts, onPlace, lockedReason }: BoardProps) {
         <div role="group" aria-labelledby={numbersId}>
           <p className="mb-2 text-xs text-emerald-100/80">
             <span id={numbersId} className="font-semibold text-emerald-50">
-              Numbers
+              {t('board.numbers')}
             </span>{' '}
-            · straight bet, pays 35 to 1
+            · {t('board.numbersNote')}
           </p>
           <div className="flex flex-col gap-1 md:flex-row">
             {render(NUMBER_CELLS[0] as BetCell, 'md:w-12 md:shrink-0')}
@@ -125,9 +130,9 @@ export function RouletteBoard({ amounts, onPlace, lockedReason }: BoardProps) {
         <div role="group" aria-labelledby={dozensId}>
           <p className="mb-2 text-xs text-emerald-100/80">
             <span id={dozensId} className="font-semibold text-emerald-50">
-              Dozens
+              {t('board.dozens')}
             </span>{' '}
-            · pay 2 to 1
+            · {t('board.dozensNote')}
           </p>
           <div className="grid grid-cols-3 gap-1 md:ml-13">{DOZEN_CELLS.map((entry) => render(entry))}</div>
         </div>
@@ -135,9 +140,9 @@ export function RouletteBoard({ amounts, onPlace, lockedReason }: BoardProps) {
         <div role="group" aria-labelledby={outsideId}>
           <p className="mb-2 text-xs text-emerald-100/80">
             <span id={outsideId} className="font-semibold text-emerald-50">
-              Outside bets
+              {t('board.outside')}
             </span>{' '}
-            · pay 1 to 1
+            · {t('board.outsideNote')}
           </p>
           <div className="grid grid-cols-3 gap-1 md:ml-13 md:grid-cols-6">{OUTSIDE_CELLS.map((entry) => render(entry))}</div>
         </div>

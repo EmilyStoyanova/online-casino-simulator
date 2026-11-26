@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { FormAlert } from '../../components/form/FormAlert'
 import { TextField } from '../../components/form/TextField'
 import { primaryButton, secondaryButton } from '../../components/buttonStyles'
+import { msg, type Message } from '../../i18n/translate'
+import { useI18n } from '../../i18n/useI18n'
 import type { UserProfile } from '../../types/user'
 import { useAuth } from '../auth/useAuth'
 import { hasErrors, validateDisplayName, type FieldErrors } from '../auth/validation'
@@ -14,7 +16,7 @@ type Notice =
   | { kind: 'conflict' }
   | { kind: 'reloaded' }
   | { kind: 'reload-failed' }
-  | { kind: 'error'; message: string; retry: boolean }
+  | { kind: 'error'; message: Message; retry: boolean }
 
 /**
  * Edits the display name and the interests (`PATCH /api/v1/users/me`); email, role and the 18+
@@ -35,6 +37,7 @@ export function ProfileForm({
   onRetryCatalog: () => void
 }) {
   const { updateProfile, reloadProfile } = useAuth()
+  const { t } = useI18n()
   const formRef = useRef<HTMLFormElement>(null)
   // Set synchronously, so a second click before the next render cannot send a second request.
   const savingRef = useRef(false)
@@ -49,6 +52,10 @@ export function ProfileForm({
   const changes = profileChanges(user, { displayName, interests })
   const dirty = Object.keys(changes).length > 0
   const busy = saving || reloading
+  const fieldError = (field: string) => {
+    const error = fieldErrors[field]
+    return error && t(error)
+  }
 
   useEffect(() => {
     if (focusRequest > 0) {
@@ -65,7 +72,7 @@ export function ProfileForm({
     if (savingRef.current || !dirty) return
     const clientErrors: FieldErrors = {}
     if (changes.displayName !== undefined) clientErrors.displayName = validateDisplayName(displayName)
-    if (interests.length > MAX_INTERESTS) clientErrors.interests = `Choose at most ${MAX_INTERESTS} interests.`
+    if (interests.length > MAX_INTERESTS) clientErrors.interests = msg('profile.maxInterests', { max: MAX_INTERESTS })
     if (hasErrors(clientErrors)) {
       setFieldErrors(clientErrors)
       setNotice(null)
@@ -86,7 +93,7 @@ export function ProfileForm({
       const failure = describeSaveFailure(error)
       if (failure.kind === 'invalid') {
         setFieldErrors(failure.fieldErrors)
-        setNotice({ kind: 'error', message: 'Please correct the highlighted fields.', retry: false })
+        setNotice({ kind: 'error', message: msg('error.correctFields'), retry: false })
         setFocusRequest((request) => request + 1)
       } else {
         setNotice(failure)
@@ -128,49 +135,41 @@ export function ProfileForm({
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} noValidate aria-busy={busy} className="space-y-6">
-      {notice?.kind === 'saved' && <FormAlert tone="success">Your profile has been saved.</FormAlert>}
+      {notice?.kind === 'saved' && <FormAlert tone="success">{t('profile.saved')}</FormAlert>}
       {notice?.kind === 'error' && (
         <FormAlert tone="error">
-          <p>{notice.message}</p>
+          <p>{t(notice.message)}</p>
           {notice.retry && (
             <button type="button" onClick={() => void save()} disabled={busy} className={`${secondaryButton} mt-3`}>
-              Try again
+              {t('common.tryAgain')}
             </button>
           )}
         </FormAlert>
       )}
       {(notice?.kind === 'conflict' || notice?.kind === 'reload-failed') && (
         <FormAlert tone="error">
-          <p>
-            {notice.kind === 'conflict'
-              ? 'Your profile was changed somewhere else (for example in another tab) while you were editing, so nothing was saved. Your edits are still in the form.'
-              : 'The latest saved version could not be loaded. Your edits are still in the form.'}
-          </p>
+          <p>{notice.kind === 'conflict' ? t('profile.conflict') : t('profile.reloadFailed')}</p>
           <button type="button" onClick={() => void loadLatest()} disabled={busy} className={`${secondaryButton} mt-3`}>
-            {reloading ? 'Loading…' : 'Load the latest saved version'}
+            {reloading ? t('common.loading') : t('profile.loadLatest')}
           </button>
         </FormAlert>
       )}
       {notice?.kind === 'reloaded' && (
-        <FormAlert tone="info">
-          {dirty
-            ? 'The latest saved version is now shown under Account details. Your edits are still in the form: save them to replace it, or discard them to keep the saved version.'
-            : 'The latest saved version is now shown under Account details. It already matches the form.'}
-        </FormAlert>
+        <FormAlert tone="info">{dirty ? t('profile.reloadedDirty') : t('profile.reloadedClean')}</FormAlert>
       )}
 
       <TextField
         id="profile-display-name"
-        label="Display name"
+        label={t('common.displayName')}
         autoComplete="nickname"
         maxLength={30}
-        hint="3 to 30 characters. Shown to other players."
+        hint={t('common.displayNameHint')}
         value={displayName}
         onChange={(event) => {
           setDisplayName(event.target.value)
           edited('displayName')
         }}
-        error={fieldErrors.displayName}
+        error={fieldError('displayName')}
         disabled={busy}
       />
 
@@ -183,19 +182,19 @@ export function ProfileForm({
           setInterests(codes)
           edited('interests')
         }}
-        error={fieldErrors.interests}
+        error={fieldError('interests')}
         disabled={busy}
       />
 
       <div className="flex flex-wrap items-center gap-3 border-t border-zinc-800 pt-5">
         <button type="submit" disabled={!dirty || busy} className={primaryButton}>
-          {saving ? 'Saving…' : 'Save changes'}
+          {saving ? t('common.saving') : t('profile.save')}
         </button>
         <button type="button" onClick={discard} disabled={!dirty || busy} className={secondaryButton}>
-          Discard changes
+          {t('profile.discard')}
         </button>
         <p aria-live="polite" className="text-sm text-zinc-400">
-          {dirty && !saving ? 'You have unsaved changes.' : ''}
+          {dirty && !saving ? t('profile.unsaved') : ''}
         </p>
       </div>
     </form>

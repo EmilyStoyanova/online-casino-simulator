@@ -25,39 +25,44 @@ import type { BetCell } from '../features/roulette/rouletteTable'
 import { useSpin, type SpinPhase } from '../features/roulette/useSpin'
 import { BalanceCard } from '../features/wallet/BalanceCard'
 import { useWallet } from '../features/wallet/useWallet'
+import type { MessageKey } from '../i18n/translate'
+import { useI18n } from '../i18n/useI18n'
 
-const LOCK_REASON: Partial<Record<SpinPhase['kind'], string>> = {
-  confirming: 'Your bets are being reviewed. Choose “Back to bets” in the bet slip to change them.',
-  submitting: 'Your spin is with the server. The table opens again when the result is confirmed.',
-  revealing: 'The wheel is turning to the number the server drew.',
-  unresolved: 'An earlier spin is not confirmed yet. Use “Retry spin” in the bet slip first.',
+const LOCK_REASON: Partial<Record<SpinPhase['kind'], MessageKey>> = {
+  confirming: 'roulette.lock.confirming',
+  submitting: 'roulette.lock.submitting',
+  revealing: 'roulette.lock.revealing',
+  unresolved: 'roulette.lock.unresolved',
 }
-const UNAVAILABLE_LOCK = 'Roulette is not available on this server yet, so no bets can be placed.'
 
 function Unavailable() {
+  const { t, rich } = useI18n()
   return (
     <div role="status" className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3.5 py-3 text-sm leading-relaxed text-amber-100">
-      <p className="font-semibold">Roulette is not available on this server yet.</p>
+      <p className="font-semibold">{t('roulette.unavailable')}</p>
       <p className="mt-1">
-        This server does not offer the roulette game, so nothing can be played here. Your balance is unchanged, and your{' '}
-        <Link to="/wallet" className="font-semibold underline underline-offset-2">
-          wallet and its history
-        </Link>{' '}
-        still work.
+        {rich('roulette.unavailableText', {
+          link: (
+            <Link to="/wallet" className="font-semibold underline underline-offset-2">
+              {t('roulette.walletLink')}
+            </Link>
+          ),
+        })}
       </p>
     </div>
   )
 }
 
 function ResultArea({ phase, children }: { phase: SpinPhase; children: ReactNode }) {
+  const { t } = useI18n()
   if (phase.kind === 'revealing') {
     return (
       <section aria-labelledby="roulette-result-heading" aria-busy="true" className={`${card} max-sm:p-4`}>
         <h2 id="roulette-result-heading" className="text-lg font-semibold text-zinc-100">
-          Result
+          {t('result.heading')}
         </h2>
         <p role="status" className="mt-2 text-sm text-zinc-300">
-          The server has confirmed the round. The wheel is turning to the number it drew…
+          {t('result.revealing')}
         </p>
       </section>
     )
@@ -76,6 +81,7 @@ function ResultArea({ phase, children }: { phase: SpinPhase; children: ReactNode
 function RouletteTable({ userId }: { userId: string }) {
   const [slip, dispatch] = useReducer(betSlipReducer, EMPTY_BET_SLIP)
   const [chip, setChip] = useState<ChipValue>(DEFAULT_CHIP)
+  const { t } = useI18n()
   const { state: wallet } = useWallet()
   const availability = useRouletteAvailability()
   const wheel = useRef<RouletteWheelHandle>(null)
@@ -86,7 +92,8 @@ function RouletteTable({ userId }: { userId: string }) {
   const unavailable = availability.status === 'unavailable'
   const phase = spin.state.phase
   const block: ReviewBlock = unavailable ? 'unavailable' : reviewBlock(slip.bets, knownBalance(wallet))
-  const lockedReason = unavailable ? UNAVAILABLE_LOCK : (LOCK_REASON[phase.kind] ?? null)
+  const lockKey = unavailable ? 'roulette.lock.unavailable' : LOCK_REASON[phase.kind]
+  const lockedReason = lockKey ? t(lockKey) : null
   const amounts = useMemo(() => new Map(slip.bets.map((bet) => [bet.key, bet.amount])), [slip.bets])
 
   const change = (action: BetSlipAction) => {
@@ -103,16 +110,9 @@ function RouletteTable({ userId }: { userId: string }) {
         <section aria-labelledby="roulette-table-heading" className={`${card} min-w-0 space-y-5 max-sm:p-4`}>
           <div className="space-y-2">
             <h2 id="roulette-table-heading" className="text-lg font-semibold text-zinc-100">
-              Place your bets
+              {t('roulette.placeBets')}
             </h2>
-            {unavailable ? (
-              <Unavailable />
-            ) : (
-              <p className="text-sm leading-relaxed text-zinc-300">
-                Choose a chip, place your bets, then review and confirm them. The server draws the number and settles
-                your virtual coins.
-              </p>
-            )}
+            {unavailable ? <Unavailable /> : <p className="text-sm leading-relaxed text-zinc-300">{t('roulette.howTo')}</p>}
           </div>
           <ChipSelector value={chip} onChange={setChip} />
           <RouletteBoard
@@ -126,12 +126,10 @@ function RouletteTable({ userId }: { userId: string }) {
         <div className="space-y-6">
           <section aria-labelledby="roulette-wheel-heading" className={`${card} max-sm:p-4`}>
             <h2 id="roulette-wheel-heading" className="mb-4 text-lg font-semibold text-zinc-100">
-              The wheel
+              {t('wheel.heading')}
             </h2>
             <RouletteWheel ref={wheel} />
-            <p className="mt-4 text-center text-xs text-zinc-400">
-              The wheel turns only to show the number the server drew. It never decides a result.
-            </p>
+            <p className="mt-4 text-center text-xs text-zinc-400">{t('wheel.note')}</p>
           </section>
           <ResultArea phase={phase}>{spin.state.result && <SpinResult result={spin.state.result} />}</ResultArea>
           <BalanceCard />
@@ -175,14 +173,12 @@ function RouletteTable({ userId }: { userId: string }) {
  */
 export function RoulettePage() {
   const { state } = useAuth()
+  const { t } = useI18n()
   const player = state.status === 'authenticated' ? state.user.id : null
 
   return (
     <div className="space-y-6">
-      <PageHeader title="European roulette">
-        Single-zero roulette with virtual coins only; they have no monetary value. Every number is drawn by the server,
-        never in your browser.
-      </PageHeader>
+      <PageHeader title={t('roulette.title')}>{t('roulette.intro')}</PageHeader>
       {player && <RouletteTable key={player} userId={player} />}
     </div>
   )

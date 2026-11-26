@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
+import { createI18n, type Message } from '../../i18n/translate'
 import { ApiError } from '../../services/apiClient'
 import { BUSY_MESSAGE, classifySpinError, UNAVAILABLE_MESSAGE, UNCERTAIN_MESSAGE } from './spinErrors'
 
-const problem = (status: number, code: string, extra: Record<string, unknown> = {}) =>
+/** A failure with its message as the English interface shows it. */
+const { t } = createI18n('en')
+const english = (failure: { message: Message }) => ({ ...failure, message: t(failure.message) })
+
+const problem =(status: number, code: string, extra: Record<string, unknown> = {}) =>
   new ApiError(`Request failed with status ${status}`, status, { title: 'Ignored title', detail: 'Ignored detail', status, code, ...extra })
 
 describe('§7.2: definitive failures (nothing was played by this request)', () => {
@@ -16,7 +21,7 @@ describe('§7.2: definitive failures (nothing was played by this request)', () =
       }),
     )
     expect(failure).toMatchObject({ kind: 'definitive', recordEffect: 'resolves', code: 'VALIDATION_FAILED', refreshBalance: false })
-    expect(failure.message).toBe('Some bets were not accepted. Change them and review again.')
+    expect(t(failure.message)).toBe('Some bets were not accepted. Change them and review again.')
     expect(failure.fieldErrors).toEqual([
       { betIndex: 1, field: 'bets[1].amount', message: 'must be less than or equal to 1000' },
       { betIndex: null, field: 'bets', message: 'contains the same selection twice' },
@@ -29,7 +34,7 @@ describe('§7.2: definitive failures (nothing was played by this request)', () =
     [409, 'BALANCE_LIMIT_EXCEEDED', 'This spin cannot be played with your current balance. Nothing was charged.', true],
     [409, 'IDEMPOTENCY_KEY_REUSED', 'This spin could not be confirmed as sent. Check your wallet history for the round before you play again.', true],
   ])('%i %s resolves the record (decided after the key lookup)', (status, code, message, refreshBalance) => {
-    expect(classifySpinError(problem(status, code))).toMatchObject({
+    expect(english(classifySpinError(problem(status, code)))).toMatchObject({
       kind: 'definitive',
       recordEffect: 'resolves',
       code,
@@ -48,7 +53,7 @@ describe('§7.2: definitive failures (nothing was played by this request)', () =
     [413, 'CONTENT_TOO_LARGE', 'The server did not accept this spin. Reload the page and try again.'],
     [415, 'UNSUPPORTED_MEDIA_TYPE', 'The server did not accept this spin. Reload the page and try again.'],
   ])('%i %s was rejected before the key lookup', (status, code, message) => {
-    expect(classifySpinError(problem(status, code))).toMatchObject({ kind: 'definitive', recordEffect: 'before-lookup', message })
+    expect(english(classifySpinError(problem(status, code)))).toMatchObject({ kind: 'definitive', recordEffect: 'before-lookup', message })
   })
 
   it('404 means no roulette on this server: the unavailable state', () => {
@@ -97,6 +102,6 @@ describe('§7.2: uncertain outcomes (only a retry with the same key can tell)', 
     expect(classifySpinError(problem(500, 'INSUFFICIENT_FUNDS')).kind).toBe('uncertain')
     expect(classifySpinError(problem(500, 'VALIDATION_FAILED')).kind).toBe('uncertain')
     const message = classifySpinError(problem(409, 'INSUFFICIENT_FUNDS', { title: 'You won!', detail: 'Retry now' })).message
-    expect(message).not.toMatch(/won|Retry now/)
+    expect(t(message)).not.toMatch(/won|Retry now/)
   })
 })

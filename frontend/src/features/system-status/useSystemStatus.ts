@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { apiErrorMessage } from '../../i18n/serverMessages'
+import { msg, type Message } from '../../i18n/translate'
 import { ApiError } from '../../services/apiClient'
 import { fetchSystemStatus } from '../../services/systemApi'
 import type { SystemStatus } from '../../types/system'
@@ -7,7 +9,7 @@ import { noteSchemaVersion } from '../roulette/rouletteAvailability'
 export type SystemStatusState =
   | { kind: 'loading' }
   | { kind: 'success'; data: SystemStatus }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: Message }
 
 export function useSystemStatus(): { state: SystemStatusState; refresh: () => void } {
   const [state, setState] = useState<SystemStatusState>({ kind: 'loading' })
@@ -24,8 +26,7 @@ export function useSystemStatus(): { state: SystemStatusState; refresh: () => vo
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
-        const message =
-          error instanceof ApiError ? error.message : 'Unexpected error while contacting the server.'
+        const message = error instanceof ApiError ? apiErrorMessage(error) : msg('status.unexpected')
         setState({ kind: 'error', message })
       })
 

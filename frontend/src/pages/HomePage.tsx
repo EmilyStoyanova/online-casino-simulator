@@ -6,8 +6,10 @@ import { PageHeader } from '../components/layout/PageHeader'
 import { AccountPanel } from '../features/auth/AccountPanel'
 import { useAuth } from '../features/auth/useAuth'
 import { SystemStatusCard } from '../features/system-status/SystemStatusCard'
+import { houseEdgePercent } from '../features/roulette/oddsRules'
 import { useRouletteAvailability } from '../features/roulette/rouletteAvailability'
 import { BalanceCard } from '../features/wallet/BalanceCard'
+import { useI18n } from '../i18n/useI18n'
 import type { UserProfile } from '../types/user'
 
 /** Account panel and platform status, shown on both versions of the home page. */
@@ -23,20 +25,14 @@ function AccountAndStatus() {
 
 /** The introduction for visitors, administrators and while the session is being checked. */
 function Welcome({ administrator }: { administrator: boolean }) {
+  const { t } = useI18n()
   return (
     <div className="max-w-2xl space-y-4">
       <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-        Learn the odds. <span className="text-emerald-400">Play without risk.</span>
+        {t('home.welcome.lead')} <span className="text-emerald-400">{t('home.welcome.accent')}</span>
       </h1>
-      <p className="text-base text-zinc-400 sm:text-lg">
-        Authentic European roulette rules and probabilities, educational content and responsible-play
-        tools — powered entirely by virtual coins.
-      </p>
-      {administrator && (
-        <p className="text-sm text-zinc-400">
-          You are signed in as an administrator. The roulette table and the wallet are for player accounts.
-        </p>
-      )}
+      <p className="text-base text-zinc-400 sm:text-lg">{t('home.welcome.intro')}</p>
+      {administrator && <p className="text-sm text-zinc-400">{t('home.welcome.admin')}</p>}
     </div>
   )
 }
@@ -80,33 +76,34 @@ function LobbyCard({
 
 /** The lobby of a signed-in player: the server-confirmed balance and where to go next. */
 function PlayerLobby({ user }: { user: UserProfile }) {
+  const { t, locale } = useI18n()
   // No availability claim before the backend has shown it; a known absence is said plainly (§7.7).
   const roulette = useRouletteAvailability()
   const unavailable = roulette.status === 'unavailable'
   return (
     <div className="w-full space-y-8">
-      <PageHeader title={`Welcome back, ${user.displayName}`}>
-        Your casino lobby. Everything here uses virtual coins with no monetary value.
-      </PageHeader>
+      <PageHeader title={t('home.lobby.title', { name: user.displayName })}>{t('home.lobby.intro')}</PageHeader>
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
         <BalanceCard />
         <LobbyCard
           id="lobby-roulette"
-          title="European roulette"
-          progress={unavailable ? 'Not available on this server yet' : 'Virtual coins'}
+          title={t('home.roulette.title')}
+          progress={unavailable ? t('home.roulette.badgeUnavailable') : t('home.roulette.badge')}
           to="/roulette"
-          action="Open roulette"
+          action={t('home.roulette.action')}
         >
-          <p>Single zero, 37 numbers. Every bet has the same house edge of 1/37 (about 2.70 %).</p>
-          <p className="text-zinc-400">
-            {unavailable
-              ? 'This server does not offer roulette yet. Your wallet still works.'
-              : 'Every number is drawn by the server; your browser never decides a result.'}
-          </p>
+          <p>{t('home.roulette.facts', { percent: houseEdgePercent(locale) })}</p>
+          <p className="text-zinc-400">{unavailable ? t('home.roulette.unavailable') : t('home.roulette.serverDraws')}</p>
         </LobbyCard>
-        <LobbyCard id="lobby-wallet" title="Wallet" progress="History available" to="/wallet" action="Open wallet">
-          <p>Your virtual balance and every change to it, recorded by the server.</p>
-          <p className="text-zinc-400">See your transaction history, newest first.</p>
+        <LobbyCard
+          id="lobby-wallet"
+          title={t('home.wallet.title')}
+          progress={t('home.wallet.badge')}
+          to="/wallet"
+          action={t('home.wallet.action')}
+        >
+          <p>{t('home.wallet.text')}</p>
+          <p className="text-zinc-400">{t('home.wallet.history')}</p>
         </LobbyCard>
       </div>
     </div>

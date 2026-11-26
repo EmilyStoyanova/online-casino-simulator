@@ -1,10 +1,14 @@
+import { msg, type Message } from '../../i18n/translate'
+
 /**
  * Client-side checks that mirror the backend rules (`RegisterRequest`, `LoginRequest` in `openapi.yaml`)
  * for immediate feedback. The server stays authoritative: it validates again and its field errors are
  * shown the same way. The common-password denylist is checked only by the server (the list is not
  * shipped to the browser).
+ *
+ * Errors are messages (`Message`), translated when they are shown, so they follow a change of language.
  */
-export type FieldErrors = Partial<Record<string, string>>
+export type FieldErrors = Partial<Record<string, Message>>
 
 export interface RegistrationValues {
   email: string
@@ -37,47 +41,47 @@ export function validateRegistration(values: RegistrationValues): FieldErrors {
 
   const password = values.password
   if (password === '') {
-    errors.password = 'Enter a password.'
+    errors.password = msg('validation.passwordRequired')
   } else if ([...password].length < PASSWORD_MIN_CHARACTERS) {
-    errors.password = `Use at least ${PASSWORD_MIN_CHARACTERS} characters.`
+    errors.password = msg('validation.passwordMin', { min: PASSWORD_MIN_CHARACTERS })
   } else if (new TextEncoder().encode(password).length > PASSWORD_MAX_UTF8_BYTES) {
-    errors.password = `Use at most ${PASSWORD_MAX_UTF8_BYTES} bytes (fewer characters if you use accents or emoji).`
+    errors.password = msg('validation.passwordMaxBytes', { max: PASSWORD_MAX_UTF8_BYTES })
   } else if (sameIgnoringCase(password, email)) {
-    errors.password = 'Your password must not be your email address.'
+    errors.password = msg('validation.passwordIsEmail')
   } else if (sameIgnoringCase(password, displayName)) {
-    errors.password = 'Your password must not be your display name.'
+    errors.password = msg('validation.passwordIsDisplayName')
   }
 
   if (!values.adultConfirmed) {
-    errors.adultConfirmed = 'Confirm that you are at least 18 years old.'
+    errors.adultConfirmed = msg('validation.adult')
   }
   return errors
 }
 
 export function validateLogin(values: LoginValues): FieldErrors {
   const errors: FieldErrors = {}
-  if (values.email.trim() === '') errors.email = 'Enter your email address.'
-  if (values.password === '') errors.password = 'Enter your password.'
+  if (values.email.trim() === '') errors.email = msg('validation.emailRequired')
+  if (values.password === '') errors.password = msg('validation.loginPasswordRequired')
   return errors
 }
 
 /** Registration and profile (`displayName` of `RegisterRequest` and `UpdateProfileRequest`); trims first. */
-export function validateDisplayName(value: string): string | undefined {
+export function validateDisplayName(value: string): Message | undefined {
   const displayName = value.trim()
-  if (displayName === '') return 'Enter a display name.'
+  if (displayName === '') return msg('validation.displayNameRequired')
   if (displayName.length < DISPLAY_NAME_MIN || displayName.length > DISPLAY_NAME_MAX) {
-    return `Use ${DISPLAY_NAME_MIN} to ${DISPLAY_NAME_MAX} characters.`
+    return msg('validation.displayNameLength', { min: DISPLAY_NAME_MIN, max: DISPLAY_NAME_MAX })
   }
-  if (/\p{Cc}/u.test(displayName)) return 'Remove control characters such as tabs or line breaks.'
+  if (/\p{Cc}/u.test(displayName)) return msg('validation.controlCharacters')
   return undefined
 }
 
-function validateEmail(email: string): string | undefined {
-  if (email === '') return 'Enter your email address.'
-  if (email.length > EMAIL_MAX_LENGTH) return `Use at most ${EMAIL_MAX_LENGTH} characters.`
+function validateEmail(email: string): Message | undefined {
+  if (email === '') return msg('validation.emailRequired')
+  if (email.length > EMAIL_MAX_LENGTH) return msg('validation.emailMax', { max: EMAIL_MAX_LENGTH })
   // Same restriction as the server: only ASCII is accepted.
-  if (!/^[\x21-\x7e]+$/.test(email)) return 'Use only Latin letters, digits and common symbols.'
-  if (!/^[^@]+@[^@]+$/.test(email)) return 'Enter a valid email address, e.g. alice@example.com.'
+  if (!/^[\x21-\x7e]+$/.test(email)) return msg('validation.emailAscii')
+  if (!/^[^@]+@[^@]+$/.test(email)) return msg('validation.emailFormat')
   return undefined
 }
 

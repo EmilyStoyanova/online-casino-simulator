@@ -1,4 +1,5 @@
 import { createContext } from 'react'
+import type { Message } from '../../i18n/translate'
 
 /**
  * What the SPA knows about the signed-in player's wallet. In memory only; every value comes from the
@@ -12,7 +13,7 @@ import { createContext } from 'react'
  *   when the value came from a spin result and the reconciling read has not answered yet. `refresh`:
  *   `refreshing` while a newer read is in flight (the value stays visible), `failed` when that read
  *   failed (the value is then shown as possibly out of date).
- * - `failed`: the first read failed; no balance is known.
+ * - `failed`: the first read failed; no balance is known. `message` is translated when shown.
  */
 export type WalletState =
   | { status: 'inactive' }
@@ -23,7 +24,7 @@ export type WalletState =
       updatedAt: string | null
       refresh: 'idle' | 'refreshing' | 'failed'
     }
-  | { status: 'failed'; message: string }
+  | { status: 'failed'; message: Message }
 
 export interface WalletContextValue {
   state: WalletState

@@ -1,6 +1,7 @@
 import { useEffect, useId, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import { canRenderWheel } from '../../games/roulette/canvasSupport'
 import type { WheelGame } from '../../games/roulette/createWheelGame'
+import { useI18n } from '../../i18n/useI18n'
 import { EUROPEAN_WHEEL_ORDER, numberColor } from './rouletteNumbers'
 import { usePrefersReducedMotion } from './usePrefersReducedMotion'
 
@@ -27,7 +28,7 @@ function loadWheelModule(): Promise<WheelModule> {
   return wheelModule
 }
 
-const colorName = { RED: 'red', BLACK: 'black', GREEN: 'green' } as const
+const colorName = { RED: 'colorWord.RED', BLACK: 'colorWord.BLACK', GREEN: 'colorWord.GREEN' } as const
 
 const pocketStyle = {
   RED: 'bg-rose-700 text-white',
@@ -47,6 +48,7 @@ const pocketStyle = {
  * wheel is replaced by a short notice and the description stays.
  */
 export function RouletteWheel({ ref }: { ref?: Ref<RouletteWheelHandle> }) {
+  const { t } = useI18n()
   const container = useRef<HTMLDivElement>(null)
   const game = useRef<WheelGame | null>(null)
   const reducedMotion = usePrefersReducedMotion()
@@ -104,28 +106,24 @@ export function RouletteWheel({ ref }: { ref?: Ref<RouletteWheelHandle> }) {
         {/* Phaser owns this element's children (its canvas); React renders nothing inside it. */}
         <div ref={container} aria-hidden="true" data-testid="roulette-wheel-canvas" className="absolute inset-0" />
         <div aria-live="polite" className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center">
-          {status === 'loading' && <p className="text-sm text-zinc-400">Loading the wheel…</p>}
-          {status === 'unavailable' && (
-            <p className="text-sm leading-relaxed text-zinc-300">
-              The wheel picture cannot be shown in this browser. The pocket order is listed below.
-            </p>
-          )}
+          {status === 'loading' && <p className="text-sm text-zinc-400">{t('wheel.loading')}</p>}
+          {status === 'unavailable' && <p className="text-sm leading-relaxed text-zinc-300">{t('wheel.unavailable')}</p>}
         </div>
       </div>
       <figcaption id={captionId} className="text-center text-sm text-zinc-300">
-        European single-zero wheel: 37 pockets, 0 to 36. Zero is green; the other numbers alternate red and black.
+        {t('wheel.caption')}
       </figcaption>
       <details className="w-full max-w-sm text-sm text-zinc-300">
         <summary className="inline-flex min-h-6 cursor-pointer items-center rounded-md text-zinc-200 max-md:min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400">
-          Pocket order on the wheel
+          {t('wheel.pocketOrder')}
         </summary>
-        <ol aria-label="Pockets clockwise from zero" className="mt-3 grid grid-cols-6 gap-1.5 sm:grid-cols-8">
+        <ol aria-label={t('wheel.pocketsLabel')} className="mt-3 grid grid-cols-6 gap-1.5 sm:grid-cols-8">
           {EUROPEAN_WHEEL_ORDER.map((value) => {
             const color = numberColor(value)
             return (
               <li key={value} className={`rounded-md py-1 text-center text-xs font-semibold tabular-nums ${pocketStyle[color]}`}>
                 {value}
-                <span className="sr-only"> {colorName[color]}</span>
+                <span className="sr-only"> {t(colorName[color])}</span>
               </li>
             )
           })}

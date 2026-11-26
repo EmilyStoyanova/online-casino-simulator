@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { apiErrorMessage } from '../../i18n/serverMessages'
+import { msg, type Message } from '../../i18n/translate'
 import { ApiError } from '../../services/apiClient'
 import { listWalletTransactions } from '../../services/walletApi'
 import type { WalletTransaction, WalletTransactionPage } from '../../types/wallet'
@@ -22,15 +24,15 @@ export const HISTORY_PAGE_SIZE = 20
 export type HistoryState =
   | { status: 'inactive' }
   | { status: 'loading' }
-  | { status: 'failed'; message: string }
+  | { status: 'failed'; message: Message }
   | {
       status: 'loaded'
       items: readonly WalletTransaction[]
       nextCursor: string | null
       older: 'idle' | 'loading' | 'failed'
       refresh: 'idle' | 'refreshing' | 'failed'
-      /** The message of the last failed "load older" (shown with its retry). */
-      error: string | null
+      /** The message of the last failed "load older" (shown with its retry, translated when shown). */
+      error: Message | null
     }
 
 export interface WalletTransactions {
@@ -57,8 +59,8 @@ interface Snapshot {
 const INACTIVE: HistoryState = { status: 'inactive' }
 const LOADING: HistoryState = { status: 'loading' }
 
-function describeFailure(error: unknown, fallback: string): string {
-  return error instanceof ApiError && error.isUnavailable ? error.message : fallback
+function describeFailure(error: unknown, fallback: Message): Message {
+  return error instanceof ApiError && error.isUnavailable ? apiErrorMessage(error) : fallback
 }
 
 /** Appends an older page; an entry already shown is never shown twice (keyset pages do not repeat). */
@@ -128,12 +130,12 @@ export function useWalletTransactions(): WalletTransactions {
         if (controller.signal.aborted || request !== latestRequest.current) return
         update((previous) => {
           if (previous.status !== 'loaded') {
-            return { status: 'failed', message: describeFailure(error, 'Your transaction history could not be loaded.') }
+            return { status: 'failed', message: describeFailure(error, msg('history.loadFailed')) }
           }
           // The entries already shown stay; only the failed step is marked.
           return kind === 'first'
             ? { ...previous, refresh: 'failed' }
-            : { ...previous, older: 'failed', error: describeFailure(error, 'Older entries could not be loaded.') }
+            : { ...previous, older: 'failed', error: describeFailure(error, msg('history.olderFailed')) }
         })
       })
   }, [])

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { apiErrorMessage } from '../../i18n/serverMessages'
+import { msg, type Message } from '../../i18n/translate'
 import { ApiError } from '../../services/apiClient'
 import { listInterests } from '../../services/interestApi'
 import type { Interest } from '../../types/interest'
@@ -7,7 +9,7 @@ import type { Interest } from '../../types/interest'
 export type InterestCatalog =
   | { status: 'loading' }
   | { status: 'loaded'; interests: Interest[] }
-  | { status: 'failed'; message: string }
+  | { status: 'failed'; message: Message }
 
 export function useInterests(): { catalog: InterestCatalog; reload: () => void } {
   const [catalog, setCatalog] = useState<InterestCatalog>({ status: 'loading' })
@@ -21,9 +23,7 @@ export function useInterests(): { catalog: InterestCatalog; reload: () => void }
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         const message =
-          error instanceof ApiError && error.isUnavailable
-            ? error.message
-            : 'The list of interests could not be loaded.'
+          error instanceof ApiError && error.isUnavailable ? apiErrorMessage(error) : msg('interests.loadFailed')
         setCatalog({ status: 'failed', message })
       })
 

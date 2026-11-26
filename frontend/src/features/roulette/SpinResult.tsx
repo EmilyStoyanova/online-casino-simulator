@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef } from 'react'
 import { card } from '../../components/cardStyles'
 import { Coins } from '../../components/Coins'
+import type { MessageKey } from '../../i18n/translate'
+import { useI18n } from '../../i18n/useI18n'
 import type { RouletteNumberColor, RouletteSpinResult } from '../../types/roulette'
-import { formatEntryTime, formatSignedCoins } from '../wallet/walletFormat'
-import { cellFor, formatCoins } from './rouletteTable'
+import { cellFor, cellText } from './rouletteTable'
 
-const COLOR_NAME: Record<RouletteNumberColor, string> = { RED: 'Red', BLACK: 'Black', GREEN: 'Green' }
+const COLOR_NAME: Record<RouletteNumberColor, MessageKey> = { RED: 'color.RED', BLACK: 'color.BLACK', GREEN: 'color.GREEN' }
 
 const badgeColor: Record<RouletteNumberColor, string> = {
   RED: 'bg-rose-700',
@@ -19,13 +20,13 @@ const badgeColor: Record<RouletteNumberColor, string> = {
  * payout, the totals, the net result (`totalPayout − totalStake`: the contract's definition, arithmetic
  * on two server values) and the balance right after the round. Wins and losses share one layout and
  * weight; there is no celebration and no "repeat bet". Focus moves to the heading when a new round is
- * shown.
+ * shown (not when only the language changes).
  */
 export function SpinResult({ result }: { result: RouletteSpinResult }) {
+  const { t, rich, locale, coins, signedCoins, dateTime } = useI18n()
   const headingId = useId()
   const heading = useRef<HTMLHeadingElement>(null)
   const net = result.totalPayout - result.totalStake
-  const color = COLOR_NAME[result.winningColor]
 
   useEffect(() => {
     heading.current?.focus()
@@ -34,7 +35,7 @@ export function SpinResult({ result }: { result: RouletteSpinResult }) {
   return (
     <section aria-labelledby={headingId} className={`${card} space-y-4 max-sm:p-4`}>
       <h2 id={headingId} ref={heading} tabIndex={-1} className="text-lg font-semibold text-zinc-100 focus:outline-none">
-        Result
+        {t('result.heading')}
       </h2>
       <div className="flex items-center gap-4">
         <span
@@ -45,25 +46,26 @@ export function SpinResult({ result }: { result: RouletteSpinResult }) {
         </span>
         <p role="status" className="text-sm leading-relaxed text-zinc-200">
           <span className="block text-base font-semibold text-zinc-50">
-            {result.winningNumber} · {color}
+            {result.winningNumber} · {t(COLOR_NAME[result.winningColor])}
           </span>
-          Staked {formatCoins(result.totalStake)}, returned {formatCoins(result.totalPayout)}, net{' '}
-          {formatSignedCoins(net)}.
+          {t('result.summary', { stake: coins(result.totalStake), payout: coins(result.totalPayout), net: signedCoins(net) })}
         </p>
       </div>
 
-      <ul aria-label="Your bets in this round" className="divide-y divide-zinc-800 rounded-lg border border-zinc-800">
+      <ul aria-label={t('result.betsLabel')} className="divide-y divide-zinc-800 rounded-lg border border-zinc-800">
         {result.bets.map((bet, index) => {
           const entry = cellFor(bet)
           return (
             <li key={`${entry.key}-${index}`} className="flex items-center gap-3 px-3 py-2 text-sm">
               <div className="min-w-0 flex-1">
-                <p className="font-medium break-words text-zinc-100">{entry.name}</p>
-                <p className="text-xs text-zinc-400">Stake {formatCoins(bet.amount)}</p>
+                <p className="font-medium break-words text-zinc-100">{cellText(entry, locale).name}</p>
+                <p className="text-xs text-zinc-400">{t('result.stake', { amount: coins(bet.amount) })}</p>
               </div>
               <div className="shrink-0 text-right">
-                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-300">{bet.payout > 0 ? 'Won' : 'Lost'}</p>
-                <p className="text-xs text-zinc-400">Payout {formatCoins(bet.payout)}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-300">
+                  {bet.payout > 0 ? t('result.won') : t('result.lost')}
+                </p>
+                <p className="text-xs text-zinc-400">{t('result.payout', { amount: coins(bet.payout) })}</p>
               </div>
             </li>
           )
@@ -71,25 +73,27 @@ export function SpinResult({ result }: { result: RouletteSpinResult }) {
       </ul>
 
       <dl className="grid grid-cols-2 gap-y-1 text-sm">
-        <dt className="text-zinc-400">Total stake</dt>
+        <dt className="text-zinc-400">{t('slip.totalStake')}</dt>
         <dd className="text-right text-zinc-200">
           <Coins amount={result.totalStake} />
         </dd>
-        <dt className="text-zinc-400">Total payout</dt>
+        <dt className="text-zinc-400">{t('result.totalPayout')}</dt>
         <dd className="text-right text-zinc-200">
           <Coins amount={result.totalPayout} />
         </dd>
-        <dt className="text-zinc-400">Net result</dt>
-        <dd className="text-right tabular-nums text-zinc-200">{formatSignedCoins(net)}</dd>
-        <dt className="text-zinc-400">Balance after this round</dt>
+        <dt className="text-zinc-400">{t('result.net')}</dt>
+        <dd className="text-right tabular-nums text-zinc-200">{signedCoins(net)}</dd>
+        <dt className="text-zinc-400">{t('result.balanceAfter')}</dt>
         <dd className="text-right font-semibold text-zinc-50">
           <Coins amount={result.balance} />
         </dd>
       </dl>
 
       <p className="text-xs text-zinc-400">
-        Played <time dateTime={result.createdAt}>{formatEntryTime(result.createdAt)}</time> · round{' '}
-        <span className="font-mono">{result.roundId.slice(0, 8)}</span>. Drawn and settled by the server.
+        {rich('result.played', {
+          time: <time dateTime={result.createdAt}>{dateTime(result.createdAt)}</time>,
+          round: <span className="font-mono">{result.roundId.slice(0, 8)}</span>,
+        })}
       </p>
     </section>
   )

@@ -2,6 +2,8 @@ import type { MouseEvent, ReactNode } from 'react'
 import { Link } from 'react-router'
 import { UserMenu } from '../../features/auth/UserMenu'
 import { BalanceBadge } from '../../features/wallet/BalanceBadge'
+import { useI18n } from '../../i18n/useI18n'
+import { LanguageSwitcher } from './LanguageSwitcher'
 import { MainNav } from './MainNav'
 
 const MAIN_ID = 'main-content'
@@ -13,6 +15,8 @@ function skipToMain(event: MouseEvent<HTMLAnchorElement>) {
 }
 
 export function AppLayout({ children }: { children: ReactNode }) {
+  const { t } = useI18n()
+
   return (
     <div className="flex min-h-dvh flex-col bg-zinc-950 text-zinc-100">
       <a
@@ -20,7 +24,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         onClick={skipToMain}
         className="sr-only rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50"
       >
-        Skip to main content
+        {t('layout.skipToMain')}
       </a>
       <header className="border-b border-zinc-800">
         <div className="mx-auto max-w-6xl space-y-3 px-4 py-4">
@@ -33,16 +37,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 <span className="text-emerald-400" aria-hidden="true">
                   ◆
                 </span>{' '}
-                Online Casino Simulator
+                {t('app.name')}
               </Link>
               <span className="rounded-full bg-amber-400/10 px-3 py-1 text-xs font-medium text-amber-300 ring-1 ring-amber-400/30">
-                Virtual currency only
+                {t('layout.virtualOnly')}
               </span>
             </div>
-            {/* The player's server-confirmed balance (nothing for visitors and administrators), then the account menu. */}
+            {/* The language (for everyone), the player's server-confirmed balance (nothing for visitors and administrators), then the account menu. */}
             <div className="flex flex-wrap items-center justify-end gap-3">
+              <LanguageSwitcher />
               <BalanceBadge />
-              <nav aria-label="Account">
+              <nav aria-label={t('layout.accountNav')}>
                 <UserMenu />
               </nav>
             </div>
@@ -61,11 +66,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </main>
 
       <footer className="border-t border-zinc-800">
-        <p className="mx-auto max-w-6xl px-4 py-4 text-xs leading-relaxed text-zinc-400">
-          This is a simulator and educational platform. It uses virtual coins with no monetary value — no
-          real-money deposits, withdrawals, purchases or prizes. It is not a treatment for gambling
-          problems; if gambling is causing you harm, please contact a professional support service.
-        </p>
+        <p className="mx-auto max-w-6xl px-4 py-4 text-xs leading-relaxed text-zinc-400">{t('layout.footer')}</p>
       </footer>
     </div>
   )

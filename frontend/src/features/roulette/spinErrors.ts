@@ -1,3 +1,4 @@
+import { msg, type Message } from '../../i18n/translate'
 import { ApiError } from '../../services/apiClient'
 
 /**
@@ -28,6 +29,7 @@ export interface BetFieldError {
   /** Index of the bet in the request, or `null` for a message about the request as a whole. */
   readonly betIndex: number | null
   readonly field: string
+  /** The server's text as it was sent (translated for display by `serverFieldMessage`). */
   readonly message: string
 }
 
@@ -37,7 +39,8 @@ export interface SpinFailure {
   /** The Problem Details `code`, `NETWORK` for no answer from the API, or `UNKNOWN`. */
   readonly code: string
   readonly status: number
-  readonly message: string
+  /** What the player reads; translated when shown. */
+  readonly message: Message
   readonly fieldErrors: readonly BetFieldError[]
   /** Re-read the wallet: the server's balance explains the rejection or may have changed. */
   readonly refreshBalance: boolean
@@ -45,10 +48,9 @@ export interface SpinFailure {
   readonly unavailable: boolean
 }
 
-export const UNCERTAIN_MESSAGE =
-  'We could not confirm this spin. Retry to get the confirmed result — a retry never charges twice.'
-export const BUSY_MESSAGE = 'The wallet is busy. Try again in a moment — a retry never charges twice.'
-export const UNAVAILABLE_MESSAGE = 'Roulette is not available on this server yet.'
+export const UNCERTAIN_MESSAGE: Message = msg('spin.error.uncertain')
+export const BUSY_MESSAGE: Message = msg('spin.error.busy')
+export const UNAVAILABLE_MESSAGE: Message = msg('roulette.unavailable')
 
 const STATUSES_BEFORE_LOOKUP: ReadonlySet<number> = new Set([401, 403, 404, 405, 413, 415])
 
@@ -63,7 +65,7 @@ function fieldErrors(error: ApiError): BetFieldError[] {
 
 function definitive(
   error: ApiError,
-  message: string,
+  message: Message,
   recordEffect: RecordEffect,
   extra: Partial<Pick<SpinFailure, 'fieldErrors' | 'refreshBalance' | 'unavailable'>> = {},
 ): SpinFailure {
@@ -79,7 +81,7 @@ function definitive(
   }
 }
 
-function uncertain(code: string, status: number, message = UNCERTAIN_MESSAGE): SpinFailure {
+function uncertain(code: string, status: number, message: Message = UNCERTAIN_MESSAGE): SpinFailure {
   return { kind: 'uncertain', recordEffect: 'unknown', code, status, message, fieldErrors: [], refreshBalance: false, unavailable: false }
 }
 
@@ -92,24 +94,24 @@ export function classifySpinError(error: unknown): SpinFailure {
   switch (code) {
     case 'VALIDATION_FAILED':
       if (error.status === 400) {
-        return definitive(error, 'Some bets were not accepted. Change them and review again.', 'resolves', {
+        return definitive(error, msg('spin.error.validation'), 'resolves', {
           fieldErrors: fieldErrors(error),
         })
       }
       break
     case 'MALFORMED_REQUEST':
       if (error.status === 400) {
-        return definitive(error, 'The request could not be processed. Reload the page and try again.', 'resolves')
+        return definitive(error, msg('error.malformed'), 'resolves')
       }
       break
     case 'INSUFFICIENT_FUNDS':
       if (error.status === 409) {
-        return definitive(error, 'Your balance is too low for these bets.', 'resolves', { refreshBalance: true })
+        return definitive(error, msg('spin.error.insufficientFunds'), 'resolves', { refreshBalance: true })
       }
       break
     case 'BALANCE_LIMIT_EXCEEDED':
       if (error.status === 409) {
-        return definitive(error, 'This spin cannot be played with your current balance. Nothing was charged.', 'resolves', {
+        return definitive(error, msg('spin.error.balanceLimit'), 'resolves', {
           refreshBalance: true,
         })
       }
@@ -117,12 +119,7 @@ export function classifySpinError(error: unknown): SpinFailure {
     case 'IDEMPOTENCY_KEY_REUSED':
       if (error.status === 409) {
         // Cannot happen with a frozen body (§8.4); a defect. The round of this key exists: see the history.
-        return definitive(
-          error,
-          'This spin could not be confirmed as sent. Check your wallet history for the round before you play again.',
-          'resolves',
-          { refreshBalance: true },
-        )
+        return definitive(error, msg('spin.error.keyReused'), 'resolves', { refreshBalance: true })
       }
       break
     case 'SERVICE_UNAVAILABLE':
@@ -131,11 +128,11 @@ export function classifySpinError(error: unknown): SpinFailure {
       break
     case 'SESSION_EXPIRED':
     case 'AUTHENTICATION_REQUIRED':
-      return definitive(error, 'Your session has ended. Sign in again to continue.', 'before-lookup')
+      return definitive(error, msg('session.ended'), 'before-lookup')
     case 'ACCESS_DENIED':
-      return definitive(error, 'Roulette is for player accounts.', 'before-lookup')
+      return definitive(error, msg('spin.error.accessDenied'), 'before-lookup')
     case 'CSRF_TOKEN_INVALID':
-      return definitive(error, 'Your security token could not be renewed. Reload the page and try again.', 'before-lookup')
+      return definitive(error, msg('error.csrf'), 'before-lookup')
     default:
       break
   }
@@ -144,7 +141,7 @@ export function classifySpinError(error: unknown): SpinFailure {
     return definitive(error, UNAVAILABLE_MESSAGE, 'before-lookup', { unavailable: true })
   }
   if (STATUSES_BEFORE_LOOKUP.has(error.status)) {
-    return definitive(error, 'The server did not accept this spin. Reload the page and try again.', 'before-lookup')
+    return definitive(error, msg('spin.error.notAccepted'), 'before-lookup')
   }
   // 500, other 5xx with Problem Details, unknown 4xx and codes: the outcome is unknown.
   return uncertain(code ?? `HTTP_${error.status}`, error.status)

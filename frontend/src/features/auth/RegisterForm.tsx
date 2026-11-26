@@ -5,6 +5,7 @@ import { FormAlert } from '../../components/form/FormAlert'
 import { PasswordField } from '../../components/form/PasswordField'
 import { TextField } from '../../components/form/TextField'
 import { primaryButton } from '../../components/buttonStyles'
+import { useI18n } from '../../i18n/useI18n'
 import { useAuth } from './useAuth'
 import { useAuthForm } from './useAuthForm'
 import { PASSWORD_MAX_UTF8_BYTES, PASSWORD_MIN_CHARACTERS, validateRegistration } from './validation'
@@ -15,12 +16,17 @@ import { PASSWORD_MAX_UTF8_BYTES, PASSWORD_MIN_CHARACTERS, validateRegistration 
  */
 export function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
   const { register } = useAuth()
+  const { t } = useI18n()
   const { formRef, fieldErrors, message, failureCode, submitting, locked, submit, clearFieldError } =
     useAuthForm('register')
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [password, setPassword] = useState('')
   const [adultConfirmed, setAdultConfirmed] = useState(false)
+  const fieldError = (field: string) => {
+    const error = fieldErrors[field]
+    return error && t(error)
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -32,17 +38,17 @@ export function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
   }
 
   if (failureCode === 'REGISTRATION_DISABLED' && message) {
-    return <RegistrationClosed message={message} />
+    return <RegistrationClosed message={t(message)} />
   }
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} noValidate aria-busy={submitting} className="space-y-5">
       {message && (
         <FormAlert tone="error">
-          {message}{' '}
+          {t(message)}{' '}
           {failureCode === 'EMAIL_ALREADY_REGISTERED' && (
             <Link to="/login" className="font-semibold text-rose-100 underline underline-offset-2">
-              Go to sign in
+              {t('register.goToSignIn')}
             </Link>
           )}
         </FormAlert>
@@ -50,7 +56,7 @@ export function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
 
       <TextField
         id="register-email"
-        label="Email"
+        label={t('common.email')}
         type="email"
         autoComplete="email"
         inputMode="email"
@@ -60,50 +66,50 @@ export function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
           setEmail(event.target.value)
           clearFieldError('email')
         }}
-        error={fieldErrors.email}
+        error={fieldError('email')}
         disabled={submitting}
       />
       <TextField
         id="register-display-name"
-        label="Display name"
+        label={t('common.displayName')}
         autoComplete="nickname"
         maxLength={30}
-        hint="3 to 30 characters. Shown to other players."
+        hint={t('common.displayNameHint')}
         value={displayName}
         onChange={(event) => {
           setDisplayName(event.target.value)
           clearFieldError('displayName')
         }}
-        error={fieldErrors.displayName}
+        error={fieldError('displayName')}
         disabled={submitting}
       />
       <PasswordField
         id="register-password"
-        label="Password"
+        label={t('common.password')}
         autoComplete="new-password"
-        hint={`At least ${PASSWORD_MIN_CHARACTERS} characters (at most ${PASSWORD_MAX_UTF8_BYTES} bytes), different from your email and display name, and not a commonly used password. A passphrase of a few words works well.`}
+        hint={t('register.passwordHint', { min: PASSWORD_MIN_CHARACTERS, max: PASSWORD_MAX_UTF8_BYTES })}
         value={password}
         onChange={(event) => {
           setPassword(event.target.value)
           clearFieldError('password')
         }}
-        error={fieldErrors.password}
+        error={fieldError('password')}
         disabled={submitting}
       />
       <CheckboxField
         id="register-adult"
-        label="I confirm that I am at least 18 years old."
+        label={t('register.adult')}
         checked={adultConfirmed}
         onChange={(event) => {
           setAdultConfirmed(event.target.checked)
           clearFieldError('adultConfirmed')
         }}
-        error={fieldErrors.adultConfirmed}
+        error={fieldError('adultConfirmed')}
         disabled={submitting}
       />
 
       <button type="submit" disabled={submitting || locked} className={`${primaryButton} w-full`}>
-        {submitting ? 'Creating account…' : 'Create account'}
+        {submitting ? t('register.submitting') : t('common.createAccount')}
       </button>
     </form>
   )
@@ -115,6 +121,7 @@ export function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
  */
 function RegistrationClosed({ message }: { message: string }) {
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const { t } = useI18n()
 
   useEffect(() => {
     headingRef.current?.focus()
@@ -126,11 +133,11 @@ function RegistrationClosed({ message }: { message: string }) {
       className="space-y-4 rounded-lg border border-sky-500/40 bg-sky-500/10 px-4 py-4 text-sm leading-relaxed text-sky-100"
     >
       <h2 id="registration-closed-heading" ref={headingRef} tabIndex={-1} className="text-base font-semibold outline-none">
-        Registration is closed
+        {t('register.closed')}
       </h2>
       <p>{message}</p>
       <Link to="/login" className={`${primaryButton} w-full`}>
-        Go to sign in
+        {t('register.goToSignIn')}
       </Link>
     </section>
   )

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { apiErrorMessage } from '../../i18n/serverMessages'
+import { msg, type Message } from '../../i18n/translate'
 import { ApiError } from '../../services/apiClient'
 import { getWallet } from '../../services/walletApi'
 import { useAuth } from '../auth/useAuth'
@@ -18,8 +20,8 @@ interface Snapshot {
   state: WalletState
 }
 
-function describeFailure(error: unknown): string {
-  return error instanceof ApiError && error.isUnavailable ? error.message : 'Your balance could not be loaded.'
+function describeFailure(error: unknown): Message {
+  return error instanceof ApiError && error.isUnavailable ? apiErrorMessage(error) : msg('balance.loadFailed')
 }
 
 /**

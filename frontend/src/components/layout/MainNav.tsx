@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router'
 import { useAuth } from '../../features/auth/useAuth'
+import { useI18n } from '../../i18n/useI18n'
 
 const destinations = [
-  { to: '/', label: 'Lobby', end: true },
-  { to: '/roulette', label: 'Roulette', end: false },
-  { to: '/wallet', label: 'Wallet', end: false },
+  { to: '/', label: 'nav.lobby', end: true },
+  { to: '/roulette', label: 'nav.roulette', end: false },
+  { to: '/wallet', label: 'nav.wallet', end: false },
 ] as const
 
 const link =
@@ -21,16 +22,17 @@ const link =
  */
 export function MainNav() {
   const { state } = useAuth()
+  const { t } = useI18n()
   if (state.status !== 'authenticated' || state.user.role !== 'PLAYER') return null
 
   return (
-    <nav aria-label="Main">
+    <nav aria-label={t('nav.main')}>
       {/* Three equal columns on small screens, a compact row from `sm` up; nothing is hidden behind a toggle. */}
       <ul className="grid grid-cols-3 gap-1 sm:flex sm:gap-2">
         {destinations.map(({ to, label, end }) => (
           <li key={to}>
             <NavLink to={to} end={end} className={`block ${link}`}>
-              {label}
+              {t(label)}
             </NavLink>
           </li>
         ))}

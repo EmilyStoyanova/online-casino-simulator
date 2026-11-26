@@ -1,6 +1,7 @@
 import { Link, Outlet } from 'react-router'
 import { secondaryButton } from '../../components/buttonStyles'
 import { card } from '../../components/cardStyles'
+import { useI18n } from '../../i18n/useI18n'
 import { useAuth } from './useAuth'
 
 /**
@@ -23,6 +24,7 @@ import { useAuth } from './useAuth'
  */
 export function PlayerOnly() {
   const { state } = useAuth()
+  const { t } = useI18n()
 
   // Defensive: outside RequireAuth an unconfirmed session must never show the page either.
   if (state.status !== 'authenticated') return null
@@ -32,15 +34,12 @@ export function PlayerOnly() {
     <div className="flex flex-1 items-start justify-center sm:items-center">
       <section aria-labelledby="player-only-heading" className={`${card} max-w-md sm:p-8`}>
         <h1 id="player-only-heading" className="mb-3 text-xl font-semibold tracking-tight text-zinc-50">
-          For player accounts only
+          {t('playerOnly.title')}
         </h1>
-        <p className="text-sm leading-relaxed text-zinc-300">
-          The roulette table and the wallet are part of the player experience. Administrator accounts have no
-          wallet, so this page is not available to you.
-        </p>
+        <p className="text-sm leading-relaxed text-zinc-300">{t('playerOnly.text')}</p>
         <div className="mt-5">
           <Link to="/" className={secondaryButton}>
-            Back to the home page
+            {t('common.backHome')}
           </Link>
         </div>
       </section>

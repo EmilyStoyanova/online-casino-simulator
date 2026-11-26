@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import { Coins } from '../../components/Coins'
+import { useI18n } from '../../i18n/useI18n'
 import { useWallet } from './useWallet'
 
 const pill =
@@ -15,6 +16,7 @@ const retry =
  */
 export function BalanceBadge() {
   const { state, refresh } = useWallet()
+  const { t } = useI18n()
 
   switch (state.status) {
     case 'inactive':
@@ -22,15 +24,15 @@ export function BalanceBadge() {
     case 'loading':
       return (
         <p className={pill} aria-busy="true">
-          <span className="text-zinc-400">Balance</span> <span className="text-zinc-400">Loading…</span>
+          <span className="text-zinc-400">{t('balance.label')}</span> <span className="text-zinc-400">{t('common.loading')}</span>
         </p>
       )
     case 'failed':
       return (
         <div className={pill}>
-          <span>Balance unavailable</span>
-          <button type="button" onClick={refresh} className={retry} aria-label="Retry loading the balance">
-            Retry
+          <span>{t('balance.unavailable')}</span>
+          <button type="button" onClick={refresh} className={retry} aria-label={t('balance.retryLabel')}>
+            {t('common.retry')}
           </button>
         </div>
       )
@@ -43,13 +45,13 @@ export function BalanceBadge() {
             className={`${pill} hover:bg-zinc-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400`}
           >
             {/* A real space: the accessible name must read "Balance 1,000 coins", not "Balance1,000 coins". */}
-            <span className="text-zinc-400">Balance</span> <Coins amount={state.balance} className="font-semibold" />
+            <span className="text-zinc-400">{t('balance.label')}</span> <Coins amount={state.balance} className="font-semibold" />
           </Link>
           {state.refresh === 'failed' && (
             <>
-              <span className="text-xs text-amber-300">Not up to date</span>
-              <button type="button" onClick={refresh} className={retry} aria-label="Retry loading the balance">
-                Retry
+              <span className="text-xs text-amber-300">{t('balance.stale')}</span>
+              <button type="button" onClick={refresh} className={retry} aria-label={t('balance.retryLabel')}>
+                {t('common.retry')}
               </button>
             </>
           )}

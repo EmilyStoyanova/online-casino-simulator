@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router'
+import { useI18n } from '../../i18n/useI18n'
 import { loginPath } from './returnPath'
 import { CheckingSession, SessionUnavailable } from './SessionStatus'
 import { useAuth } from './useAuth'
@@ -38,6 +39,7 @@ function StatusCard({ title, busy, children }: { title: string; busy?: boolean; 
  */
 export function RequireAuth() {
   const { state } = useAuth()
+  const { t } = useI18n()
   const location = useLocation()
   const here = `${location.pathname}${location.search}${location.hash}`
 
@@ -48,13 +50,13 @@ export function RequireAuth() {
       return <Navigate to={loginPath(here)} replace />
     case 'checking':
       return (
-        <StatusCard title="One moment" busy>
+        <StatusCard title={t('requireAuth.checking')} busy>
           <CheckingSession />
         </StatusCard>
       )
     case 'unknown':
       return (
-        <StatusCard title="Sign-in status unavailable">
+        <StatusCard title={t('requireAuth.unknown')}>
           <SessionUnavailable returnTo={here} />
         </StatusCard>
       )

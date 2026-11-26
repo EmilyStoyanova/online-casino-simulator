@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import { DetailRow as Row } from '../../components/DetailRow'
 import { primaryButton, secondaryButton } from '../../components/buttonStyles'
+import { useI18n } from '../../i18n/useI18n'
 import type { UserProfile } from '../../types/user'
 import { formatDate, roleLabel } from './profileFormat'
 import { CheckingSession, SessionUnavailable } from './SessionStatus'
@@ -9,32 +10,30 @@ import { useSignOut } from './useSignOut'
 
 function SignedIn({ user }: { user: UserProfile }) {
   const { signOut, pending, error } = useSignOut()
+  const { t, rich, locale } = useI18n()
 
   return (
     <>
       <p className="mb-3 text-sm text-zinc-300">
-        Signed in as <span className="font-semibold text-emerald-300">{user.displayName}</span>
+        {rich('account.signedInAs', { name: <span className="font-semibold text-emerald-300">{user.displayName}</span> })}
       </p>
       <dl className="divide-y divide-zinc-800">
-        <Row label="Email">{user.email}</Row>
-        <Row label="Role">{roleLabel(user.role)}</Row>
-        <Row label="Member since">{formatDate(user.createdAt)}</Row>
-        <Row label="18+ confirmed">{formatDate(user.adultConfirmedAt)}</Row>
+        <Row label={t('common.email')}>{user.email}</Row>
+        <Row label={t('common.role')}>{roleLabel(user.role, locale)}</Row>
+        <Row label={t('common.memberSince')}>{formatDate(user.createdAt, locale)}</Row>
+        <Row label={t('common.adultConfirmed')}>{formatDate(user.adultConfirmedAt, locale)}</Row>
       </dl>
-      <p className="mt-4 text-xs leading-relaxed text-zinc-400">
-        Your session is kept in a secure cookie. It ends after 30 minutes without activity, 12 hours
-        after signing in, or when you sign out.
-      </p>
+      <p className="mt-4 text-xs leading-relaxed text-zinc-400">{t('account.sessionInfo')}</p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <Link to="/profile" className={primaryButton}>
-          Edit profile
+          {t('common.editProfile')}
         </Link>
         <button type="button" onClick={() => void signOut()} disabled={pending} className={secondaryButton}>
-          {pending ? 'Signing out…' : 'Sign out'}
+          {pending ? t('common.signingOut') : t('common.signOut')}
         </button>
         {error && (
           <p role="alert" className="text-sm text-rose-300">
-            {error}
+            {t(error)}
           </p>
         )}
       </div>
@@ -43,18 +42,18 @@ function SignedIn({ user }: { user: UserProfile }) {
 }
 
 function SignedOut({ expired }: { expired: boolean }) {
+  const { t } = useI18n()
   return (
     <>
       <p className="text-sm leading-relaxed text-zinc-300">
-        {expired ? 'Your session has ended. Sign in again to continue.' : 'You are signed out.'} New here?
-        Create a free account in a minute.
+        {expired ? t('session.ended') : t('account.signedOut')} {t('account.joinPrompt')}
       </p>
       <div className="mt-4 flex flex-wrap gap-3">
         <Link to="/register" className={primaryButton}>
-          Create account
+          {t('common.createAccount')}
         </Link>
         <Link to="/login" className={secondaryButton}>
-          Sign in
+          {t('common.signIn')}
         </Link>
       </div>
     </>
@@ -64,6 +63,7 @@ function SignedOut({ expired }: { expired: boolean }) {
 /** The user's account on the home page: profile data when signed in, otherwise how to sign in. */
 export function AccountPanel() {
   const { state } = useAuth()
+  const { t } = useI18n()
 
   return (
     <section
@@ -71,7 +71,7 @@ export function AccountPanel() {
       className="w-full rounded-2xl border border-zinc-800 bg-zinc-900/70 p-6 text-left shadow-xl"
     >
       <h2 id="account-heading" className="mb-4 text-lg font-semibold text-zinc-100">
-        Your account
+        {t('account.heading')}
       </h2>
       <div aria-live="polite" aria-busy={state.status === 'checking'}>
         {state.status === 'checking' && <CheckingSession />}

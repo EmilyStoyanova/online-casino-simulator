@@ -19,8 +19,14 @@ import { CSRF_HEADER, CSRF_PATH, readCsrfToken } from './csrf'
 /** Statuses of a proxy that could not get an answer from the backend. */
 const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504])
 
-const UNAVAILABLE_MESSAGE =
+/**
+ * The client's own error texts (English). The interface shows them translated
+ * (`i18n/serverMessages.ts`, `apiErrorMessage`); they are exported for that mapping only.
+ */
+export const UNAVAILABLE_MESSAGE =
   'The server is starting up or temporarily unavailable. This can take about a minute; please try again shortly.'
+export const UNREACHABLE_MESSAGE = 'The server could not be reached. Please check your connection.'
+export const CSRF_UNREADABLE_MESSAGE = 'The security token could not be read. Reload the page and try again.'
 
 /** Error raised for non-2xx responses and network failures. */
 export class ApiError extends Error {
@@ -198,7 +204,7 @@ async function request<T>(
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw error
     }
-    throw new ApiError('The server could not be reached. Please check your connection.', 0)
+    throw new ApiError(UNREACHABLE_MESSAGE, 0)
   }
 
   const responseBody = await parseBody(response)
@@ -263,7 +269,7 @@ export function refreshCsrfToken(): Promise<string> {
       const token = readCsrfToken()
       if (token === null) {
         // E.g. the API runs on another site, whose cookies JavaScript cannot read (ADR-0006, Week 12).
-        throw new ApiError('The security token could not be read. Reload the page and try again.', 0)
+        throw new ApiError(CSRF_UNREADABLE_MESSAGE, 0)
       }
       return token
     } finally {

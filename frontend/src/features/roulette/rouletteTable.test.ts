@@ -3,6 +3,7 @@ import { ROULETTE_BET_CATEGORIES } from '../../types/roulette'
 import {
   cellAccessibleName,
   cellFor,
+  cellText,
   DOZEN_CELLS,
   NUMBER_CELLS,
   OUTSIDE_CELLS,
@@ -49,7 +50,7 @@ describe('AC-W5-06.1: exactly the cells of the five contract categories', () => 
     const categories = new Set(TABLE_CELLS.map((cell) => cell.selection.category))
     expect([...categories].sort()).toEqual([...ROULETTE_BET_CATEGORIES].sort())
     for (const cell of TABLE_CELLS) {
-      expect(cell.name, cell.key).not.toMatch(/column|split|street|corner|line|basket/i)
+      expect(cellText(cell).name, cell.key).not.toMatch(/column|split|street|corner|line|basket/i)
     }
   })
 
@@ -63,14 +64,14 @@ describe('AC-W5-06.1: exactly the cells of the five contract categories', () => 
 
 describe('AC-W5-06.2: colours, odds and accessible names', () => {
   it('colours the numbers as the contract lists them: 18 red, 18 black, zero green', () => {
-    const byColor = (color: string) => NUMBER_CELLS.filter((cell) => cell.color === color).map((cell) => Number(cell.label))
+    const byColor = (color: string) => NUMBER_CELLS.filter((cell) => cell.color === color).map((cell) => Number(cellText(cell).label))
     expect(byColor('RED')).toEqual(CONTRACT_RED)
     expect(byColor('BLACK')).toEqual(CONTRACT_BLACK)
     expect(byColor('GREEN')).toEqual([0])
   })
 
   it('colours the red and black cells and leaves the other outside cells uncoloured', () => {
-    expect(OUTSIDE_CELLS.map((cell) => [cell.label, cell.color])).toEqual([
+    expect(OUTSIDE_CELLS.map((cell) => [cellText(cell).label, cell.color])).toEqual([
       ['Low', null],
       ['Even', null],
       ['Red', 'RED'],
@@ -82,9 +83,9 @@ describe('AC-W5-06.2: colours, odds and accessible names', () => {
   })
 
   it('states the contract odds of each category: 35 to 1, 2 to 1, 1 to 1', () => {
-    for (const cell of NUMBER_CELLS) expect(cell.odds).toBe('35 to 1')
-    for (const cell of DOZEN_CELLS) expect(cell.odds).toBe('2 to 1')
-    for (const cell of OUTSIDE_CELLS) expect(cell.odds).toBe('1 to 1')
+    for (const cell of NUMBER_CELLS) expect(cellText(cell).odds).toBe('35 to 1')
+    for (const cell of DOZEN_CELLS) expect(cellText(cell).odds).toBe('2 to 1')
+    for (const cell of OUTSIDE_CELLS) expect(cellText(cell).odds).toBe('1 to 1')
   })
 
   it('names number, colour, bet type and odds, and the placed amount', () => {
@@ -106,7 +107,42 @@ describe('AC-W5-06.2: colours, odds and accessible names', () => {
 
   it('starts every accessible name with the visible label, for speech input', () => {
     for (const cell of TABLE_CELLS) {
-      expect(cellAccessibleName(cell).startsWith(cell.label), cell.key).toBe(true)
+      expect(cellAccessibleName(cell).startsWith(cellText(cell).label), cell.key).toBe(true)
+    }
+  })
+})
+
+describe('bet names in Bulgarian (generated from the dictionary, same cells)', () => {
+  it('names numbers, dozens and outside bets in Bulgarian, with the contract odds', () => {
+    const bg = (index: number) => cellText(TABLE_CELLS[index] as (typeof TABLE_CELLS)[number], 'bg')
+    expect(bg(17)).toEqual({
+      label: '17',
+      detail: null,
+      name: 'Число 17',
+      spoken: '17, черно',
+      betType: 'Залог на число',
+      odds: '35 към 1',
+    })
+    expect(bg(37)).toMatchObject({ label: '1-ва дузина', detail: '1–12', name: '1-ва дузина (1–12)', odds: '2 към 1' })
+    expect(OUTSIDE_CELLS.map((cell) => cellText(cell, 'bg').name)).toEqual([
+      'Ниски (1–18)',
+      'Четни',
+      'Червено',
+      'Черно',
+      'Нечетни',
+      'Високи (19–36)',
+    ])
+  })
+
+  it('builds the accessible name in Bulgarian, starting with the visible label, with the placed amount', () => {
+    const zero = NUMBER_CELLS[0] as (typeof NUMBER_CELLS)[number]
+    expect(cellAccessibleName(zero, 0, 'bg')).toBe('0, зелено. Залог на число, плаща 35 към 1.')
+    expect(cellAccessibleName(DOZEN_CELLS[2] as (typeof DOZEN_CELLS)[number], 1, 'bg')).toBe(
+      '3-та дузина, от 25 до 36. Залог на дузина, плаща 2 към 1. Заложено: 1 монета.',
+    )
+    expect(cellAccessibleName(zero, 1000, 'bg')).toBe('0, зелено. Залог на число, плаща 35 към 1. Заложено: 1000 монети.')
+    for (const cell of TABLE_CELLS) {
+      expect(cellAccessibleName(cell, 0, 'bg').startsWith(cellText(cell, 'bg').label), cell.key).toBe(true)
     }
   })
 })

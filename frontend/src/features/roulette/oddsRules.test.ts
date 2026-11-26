@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import rawContract from '../../../../backend/src/main/resources/static/openapi.yaml?raw'
 import { ROULETTE_BET_CATEGORIES } from '../../types/roulette'
-import { CATEGORY_RULES, chanceText, HOUSE_EDGE_PERCENT, POCKETS, RETURN_TO_PLAYER_PERCENT } from './oddsRules'
+import { CATEGORY_RULES, chanceText, houseEdgePercent, POCKETS, returnToPlayerPercent } from './oddsRules'
 import { CATEGORY_ODDS } from './rouletteTable'
 
 const contract = rawContract.replace(/\r\n/g, '\n')
@@ -35,7 +35,7 @@ describe('AC-W5-08.5: the odds and rules match the contract (source of truth)', 
       expect(odds, rule.category).toBe(`${rule.netOdds}:1`)
       expect(payout, rule.category).toBe(`${rule.returnedPerCoin} × amount`)
       // The same odds as the table cells' names.
-      expect(CATEGORY_ODDS[rule.category]).toBe(`${rule.netOdds} to 1`)
+      expect(CATEGORY_ODDS[rule.category]).toBe(rule.netOdds)
     }
   })
 
@@ -46,8 +46,12 @@ describe('AC-W5-08.5: the odds and rules match the contract (source of truth)', 
       expect(expected, rule.category).toBeCloseTo(-1 / 37, 12)
     }
     expect(contract).toContain('house edge 1/37 ≈ 2.7027 %, return to player 36/37 ≈ 97.2973 %')
-    expect(HOUSE_EDGE_PERCENT).toBe((2.7027).toFixed(2))
-    expect(RETURN_TO_PLAYER_PERCENT).toBe((97.2973).toFixed(2))
+    expect(houseEdgePercent()).toBe((2.7027).toFixed(2))
+    expect(returnToPlayerPercent()).toBe((97.2973).toFixed(2))
+    // The same figures in Bulgarian, with a decimal comma.
+    expect(houseEdgePercent('bg')).toBe('2,70')
+    expect(returnToPlayerPercent('bg')).toBe('97,30')
+    expect(chanceText(18, 'bg')).toBe('18 от 37 (около 48,65 %)')
   })
 
   it('says what the contract says about zero', () => {

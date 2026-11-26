@@ -4,7 +4,13 @@ import { formatEntryTime, formatSignedCoins, transactionTypeLabel } from './wall
 
 describe('transactionTypeLabel', () => {
   it('labels every entry type of the contract', () => {
-    expect(WALLET_TRANSACTION_TYPES.map(transactionTypeLabel)).toEqual(['Starting balance', 'Roulette stake', 'Roulette payout'])
+    expect(WALLET_TRANSACTION_TYPES.map((type) => transactionTypeLabel(type))).toEqual(['Starting balance', 'Roulette stake', 'Roulette payout'])
+    expect(WALLET_TRANSACTION_TYPES.map((type) => transactionTypeLabel(type, 'bg'))).toEqual([
+      'Начален баланс',
+      'Залог в рулетка',
+      'Изплащане от рулетка',
+    ])
+    expect(transactionTypeLabel('LEARNING_REWARD', 'bg')).toBe('Друг запис')
   })
 
   it('shows any other value as "Other entry", including names of object properties', () => {
@@ -46,5 +52,20 @@ describe('formatEntryTime', () => {
 
   it('shows "—" for a value that is not a date instead of a wrong one', () => {
     expect(formatEntryTime('not a date', 'UTC')).toBe('—')
+  })
+})
+
+describe('Bulgarian formatting', () => {
+  it('groups coins with a (no-break) space and uses the Bulgarian plural, never a currency', () => {
+    expect(formatSignedCoins(360, 'bg')).toBe('+360 монети')
+    expect(formatSignedCoins(-1, 'bg')).toBe('−1 монета')
+    // bg-BG groups from five digits, with U+00A0.
+    expect(formatSignedCoins(1_000, 'bg')).toBe('+1000 монети')
+    expect(formatSignedCoins(-12_345, 'bg')).toBe('−12\u00a0345 монети')
+  })
+
+  it('formats entry times with the Bulgarian date format', () => {
+    expect(formatEntryTime('2026-11-20T10:15:30Z', 'Europe/Sofia', 'bg')).toMatch(/^20\.11\.2026 г\., 12:15/)
+    expect(formatEntryTime('not a date', 'UTC', 'bg')).toBe('—')
   })
 })

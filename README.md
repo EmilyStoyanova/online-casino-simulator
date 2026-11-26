@@ -149,6 +149,9 @@ the release (Weeks 11–12). See the table above.
 - Authentication uses session cookies and CSRF tokens, with no tokens in browser storage.
 - The backend is **authoritative** for every balance (Week 3) and, with the Week 4 roulette engine, for
   every game outcome and payout; the frontend only renders server-confirmed results.
+- The interface is available in English (default) and Bulgarian (EN / BG switcher in the header, no
+  extra dependency); only the chosen language is remembered, in `localStorage` (`casino.locale`).
+  Details: [architecture §4.11](docs/architecture.md#411-interface-languages-english-bulgarian).
 
 Details: [`docs/architecture.md`](docs/architecture.md).
 

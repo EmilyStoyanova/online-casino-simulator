@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { SPIN_DURATION_MS } from '../../games/roulette/wheelConfig'
+import { serverFieldMessage } from '../../i18n/serverMessages'
+import { msg, type Message } from '../../i18n/translate'
 import { newIdempotencyKey } from '../../services/idempotency'
 import { spinRoulette } from '../../services/rouletteApi'
 import { ROULETTE_NUMBER_COLORS, type RouletteSpinRequest, type RouletteSpinResult } from '../../types/roulette'
@@ -33,13 +35,16 @@ export type SpinPhase =
   /** The server confirmed the round; the wheel turns to its number before the result is shown. */
   | { readonly kind: 'revealing'; readonly result: RouletteSpinResult }
   /** The outcome is unknown; betting is locked until "Retry spin" resolves it. */
-  | { readonly kind: 'unresolved'; readonly attempt: PendingSpin; readonly message: string }
+  | { readonly kind: 'unresolved'; readonly attempt: PendingSpin; readonly message: Message }
 
-/** A definitive failure: nothing was played, the slip is editable again. */
+/**
+ * A definitive failure: nothing was played, the slip is editable again. Messages are translated when
+ * shown, so a change of language keeps the error (and the focus) as it is.
+ */
 export interface SpinError {
-  readonly message: string
+  readonly message: Message
   /** Server validation messages by slip entry (`SlipBet.key`), or `null` for the request as a whole. */
-  readonly fieldErrors: readonly { readonly betKey: string | null; readonly message: string }[]
+  readonly fieldErrors: readonly { readonly betKey: string | null; readonly message: Message }[]
 }
 
 export interface SpinState {
@@ -64,13 +69,10 @@ export interface Spin {
   dismissError: () => void
 }
 
-export const EARLIER_SPIN_MESSAGE =
-  'An earlier spin could not be confirmed. Retry it to get the confirmed result — a retry never charges twice.'
-export const INVALID_RECORD_MESSAGE =
-  'An earlier spin could not be checked safely and was set aside. Your wallet history shows whether it was played.'
-export const NOT_SAVED_MESSAGE =
-  'This spin was not sent: your browser could not save it safely, which is needed to recover a lost answer. Nothing was charged.'
-export const KEY_FAILED_MESSAGE = 'This browser cannot create a secure spin id, so the spin was not sent. Nothing was charged.'
+export const EARLIER_SPIN_MESSAGE: Message = msg('spin.earlier')
+export const INVALID_RECORD_MESSAGE: Message = msg('spin.invalidRecord')
+export const NOT_SAVED_MESSAGE: Message = msg('spin.notSaved')
+export const KEY_FAILED_MESSAGE: Message = msg('spin.keyFailed')
 
 /** The longest the result waits for the wheel (it may still be loading, or never draw). */
 export const REVEAL_LIMIT_MS = SPIN_DURATION_MS + 3000
@@ -198,7 +200,7 @@ function toSpinError(failure: SpinFailure, request: RouletteSpinRequest): SpinEr
     message: failure.message,
     fieldErrors: failure.fieldErrors.map(({ betIndex, message }) => {
       const bet = betIndex === null ? undefined : request.bets[betIndex]
-      return { betKey: bet ? selectionKey(bet) : null, message }
+      return { betKey: bet ? selectionKey(bet) : null, message: serverFieldMessage(message) }
     }),
   }
 }
@@ -233,10 +235,7 @@ function showOutcome(outcome: FlightOutcome, record: PendingSpin, view: View): v
   }
   const { failure, kept } = outcome
   if (kept) {
-    const message =
-      failure.kind === 'uncertain'
-        ? failure.message
-        : `${failure.message} Your earlier spin is still not confirmed: retry it once this is solved — a retry never charges twice.`
+    const message = failure.kind === 'uncertain' ? failure.message : msg('spin.stillUnconfirmed', { reason: failure.message })
     view.setState({ phase: { kind: 'unresolved', attempt: kept, message }, result: null, error: null })
   } else {
     view.setState({ phase: { kind: 'editing' }, result: null, error: toSpinError(failure, record.request) })
@@ -320,7 +319,7 @@ export function useSpin({
       // Persist before sending (§8.3 rule 2): without the record a lost answer could not be retried.
       setState(
         retry
-          ? { phase: { kind: 'unresolved', attempt, message: `${NOT_SAVED_MESSAGE} Try again in a moment.` }, result: null, error: null }
+          ? { phase: { kind: 'unresolved', attempt, message: msg('spin.notSavedRetry', { reason: NOT_SAVED_MESSAGE }) }, result: null, error: null }
           : { phase: { kind: 'editing' }, result: null, error: { message: NOT_SAVED_MESSAGE, fieldErrors: [] } },
       )
       return
@@ -342,7 +341,7 @@ export function useSpin({
       try {
         request = toSpinRequest(bets) // frozen: exactly this body is sent on every retry
       } catch {
-        setState({ phase: { kind: 'editing' }, result: null, error: { message: 'These bets cannot be sent. Check them and review again.', fieldErrors: [] } })
+        setState({ phase: { kind: 'editing' }, result: null, error: { message: msg('spin.cannotSend'), fieldErrors: [] } })
         return
       }
       try {
