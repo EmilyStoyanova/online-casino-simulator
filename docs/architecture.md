@@ -608,8 +608,10 @@ the new UI in front of the staging backend at once, while that backend is still 
 For that case the UI shows roulette as unavailable (§4.9) and the wallet pages use the Week 3
 endpoints (checked locally against the Week 3 backend on V7 in W5-10). The Week 5 frontend counts as
 staging-ready only after the separately approved
-[roulette rollout](../infrastructure/roulette-rollout.md) has been followed and its release gates
-(screen-reader test, CI) have passed; until then nothing about
+[roulette rollout](../infrastructure/roulette-rollout.md) has been followed. CI is green on the pull
+request; the manual screen-reader test is deferred and has not been performed
+([Week 5 plan §16.9](plans/week-05.md#169-screen-reader-test-deferred-merge-readiness-2026-11-26)).
+Automatic Vercel deployments are to be switched off before the merge; until then nothing about
 staging changes.
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a

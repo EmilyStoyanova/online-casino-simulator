@@ -19,7 +19,10 @@
   checkpoint 2026-11-25 (§16.7, §16.8):** AC-W5-10.2–10.5 met, AC-W5-10.1 met locally (CI needs a pull
   request); Lighthouse 100 on `/roulette` and `/wallet` after a contrast fix; the screen-reader smoke
   test is blocked, so **AC-W5-08.3 stays outstanding** and Week 5 is **not complete**. Week 5 is not merged
-  into `main` and not deployed.
+  into `main` and not deployed. **Revision 20 (2026-11-26, §16.9):** the owner deferred the manual
+  screen-reader smoke test (NVDA), for Week 5 and for the Bulgarian localization, to a later stage; the
+  screen-reader part of AC-W5-08.3 is **deferred, not performed and not passed**. Pull request #11 to
+  `main` is open as a draft and CI is green on `5380681`.
 - **Stage:** 3 — Casino user interface (Weeks 5–6)
 - **Source:** Implementation plan v1.1 (`docs/OnlineCasinoSimulator_ImplementationPlan_v1.1.pdf`,
   editable source `docs/sources/OnlineCasinoSimulator_ImplementationPlan_v1.1.html`), §4 Week 5; §3.1
@@ -36,7 +39,7 @@
   W5-P01 draws it, W5-07 turns it to the server-confirmed number. Week 6 refines the animation and adds
   round history, statistics, sound and the in-app reduced-motion setting.
 - **Branch:** `feature/week-05-roulette-ui` (from `main` at `94a7305`; pushed to `origin` at the first
-  checkpoint `bb9e532`; no pull request, not merged)
+  checkpoint `bb9e532`; pull request #11 to `main`, draft, CI green on `5380681`; not merged)
 
 | Revision | Date | Change |
 |---|---|---|
@@ -59,6 +62,7 @@
 | 17 | 2026-11-25 | W5-09 reviewed and approved: AC-W5-09.1 and 09.2 re-checked (feature branch / `main` / staging distinguished, architecture against the code, idempotency and unresolved spin, S3 without future features, Week 4 rollout steps unchanged, staging limitation explicit, §16.6 still open, AC-W5-08.3 outstanding, no sensitive data, 192 links resolve); W5-09 committed and pushed to the feature branch |
 | 18 | 2026-11-25 | W5-09 checkpoint recorded (`ff83f8a`); W5-10 final verification (§16.7): real-backend scenarios (several bets, insufficient funds, offline, backend stopped, lost answer, reload, two players in one tab), Week 3 backend on V7 and on V9, real Lighthouse 13.5.0 from Chrome's DevTools (96 → contrast fix → 100), screen reader blocked with a manual procedure, `./mvnw -o verify`, 533 frontend tests, Playwright 15/15 with the new `w5-roulette.spec.ts`; §10.3 audit statement on contrast corrected; §16.6 updated |
 | 19 | 2026-11-25 | W5-10 reviewed and approved for the checkpoint: final checks repeated (§16.8: lint, typecheck, 533 tests, build; Playwright 15/15 twice more; Lighthouse reports and repository review re-checked); the intermittent Playwright web-server stop analysed and recorded as **unresolved, most likely environmental** (§16.8); AC-W5-08.3 stays outstanding; §16.7 heading no longer says "pending review" |
+| 20 | 2026-11-26 | Owner decision: the manual screen-reader smoke test (NVDA) is deferred to a later stage, for Week 5 and for the Bulgarian localization; AC-W5-08.3's screen-reader part recorded as **deferred, not passed**; CI on pull request #11 recorded as green (AC-W5-10.1); merge preconditions listed, including switching off automatic Vercel production deployments before the merge (§16.9) |
 
 ---
 
@@ -1485,7 +1489,7 @@ dependency is added (Q11).
 |---|---|---|
 | AC-W5-08.1 | Met | Responsive audit below: 42 views at 320, 375, 768, 1024, 1440 px and 200 % zoom (mocked API) |
 | AC-W5-08.2 | Met | Keyboard-only walkthrough below; focus tests in `RoulettePage.test.tsx` and `WalletPage.test.tsx` |
-| AC-W5-08.3 | **Outstanding — not passed** | No Lighthouse audit and no screen-reader smoke test have been performed (see "Not performed"). Must be recorded before the Week 5 merge (W5-10). *Update W5-10 (§16.7):* Lighthouse part met (100 on both pages after a contrast fix); screen-reader part blocked, so the criterion stays outstanding |
+| AC-W5-08.3 | **Outstanding — not passed** | No Lighthouse audit and no screen-reader smoke test have been performed (see "Not performed"). Must be recorded before the Week 5 merge (W5-10). *Update W5-10 (§16.7):* Lighthouse part met (100 on both pages after a contrast fix); screen-reader part blocked, so the criterion stays outstanding. *Update 2026-11-26 (§16.9):* screen-reader part **deferred** by the owner to a later stage; not performed, not passed |
 | AC-W5-08.4 | Met | Responsible-presentation review below; "no monetary value" on the roulette page (header, odds panel) and the wallet page (header, balance card) |
 | AC-W5-08.5 | Met | `oddsRules.ts`, `OddsInfo.tsx`; checked against `openapi.yaml` by `oddsRules.test.ts` and `OddsInfo.test.tsx` |
 
@@ -2036,10 +2040,11 @@ recorded.
       no availability claim, wallet pages working.
 - [x] Lighthouse accessibility audit on `/roulette` and `/wallet` without violations (AC-W5-08.3).
 - [ ] Screen-reader smoke test of the spin and the history with NVDA or Narrator (AC-W5-08.3). **Blocked** in
-      W5-10: manual procedure in §16.7.
+      W5-10: manual procedure in §16.7. **Deferred** by the owner on 2026-11-26 (§16.9): not performed,
+      not passed.
 - [x] Full final regression (`npm run lint`, `typecheck`, `test`, `build`; W2-16 Playwright; backend
       untouched: `git diff --stat main -- backend` empty) and the repository review (AC-W5-10.1–10.4).
-      CI on the pull request remains (no pull request yet).
+      CI on the pull request: green on pull request #11 for `5380681` (§16.9).
 
 ### 16.7 W5-10 final verification (2026-11-25)
 
@@ -2231,3 +2236,43 @@ the failing runs did not have the debug log. **Uncertainty kept open:**
   CI on the pull request.
 - **Not complete:** Week 5 as a release.
 - **Approved:** nothing beyond the W5-10 checkpoint.
+
+*Update 2026-11-26:* CI on the pull request is green, and the screen-reader smoke test is deferred
+(§16.9).
+
+### 16.9 Screen-reader test deferred; merge readiness (2026-11-26)
+
+**Owner decision (2026-11-26).** The manual screen-reader smoke test (NVDA) is **deferred** to a later
+stage of the project, for Week 5 and for the Bulgarian localization (`feature/bulgarian-language`). It
+has **not** been performed and is **not** marked as passed.
+
+| Criterion | Status |
+|---|---|
+| AC-W5-08.3, Lighthouse part | Met (§16.7: 100 on `/roulette` and `/wallet`, mobile and desktop) |
+| AC-W5-08.3, screen-reader part | **Deferred: not performed, not passed** (owner decision 2026-11-26) |
+| AC-W5-10.1, CI on the pull request | Met: pull request #11 (draft) to `main`; the CI run for `5380681` is green (backend `verify`; frontend lint, typecheck, tests, build) |
+
+**What stays in place.** The deferral changes no code. These stay as they are and must stay green:
+- ARIA roles, names and live regions;
+- keyboard operation and focus management;
+- reduced motion: the CSS rule and `usePrefersReducedMotion` for the wheel;
+- the automated accessibility checks: component tests by role and accessible name, the focus tests,
+  `textContrast.test.ts`, and the Playwright keyboard and 375 px scenarios.
+
+**Remaining accessibility verification (deferred, not dropped).**
+- **NVDA in English:** the steps of §16.7 (chips, a table cell, review and spin, an unresolved spin and
+  "Retry spin", the odds panel, the wallet history). Record Windows, NVDA, Chrome and the synthesizer
+  with their versions, the commit, pass or fail per step, and excerpts from NVDA's Speech Viewer.
+- **NVDA in Bulgarian:** the same steps with the interface in Bulgarian and NVDA's automatic language
+  switching on. Also the EN/BG switcher, and a language change while bets are on the slip.
+- **When:** to be scheduled by the owner; recommended before the public release (Stage 6, Weeks 11–12).
+  Until it is recorded, the accessibility evidence is the automated checks and Lighthouse, and no
+  statement may claim tested screen-reader support.
+
+**Merge preconditions (not yet met).**
+1. **Vercel:** automatic production deployments are switched off before the merge (owner decision
+   2026-11-26), so that merging into `main` deploys nothing. The frontend is deployed later on purpose,
+   after the approved [roulette rollout](../../infrastructure/roulette-rollout.md).
+2. **Approval:** the owner approves the merge.
+3. **Merge method:** a merge commit, not a squash: `feature/bulgarian-language` is based on this branch.
+4. **CI:** green on the final head of pull request #11.

@@ -28,7 +28,7 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 | Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | ✅ Done: Render backend and Vercel frontend deployed and verified (registration closed); Neon `staging` now at V7 |
 | 2 — Virtual currency & game logic | 3 | Virtual wallet and immutable ledger | ✅ Done: merged into `main` (PR #9) and deployed to staging; Neon `staging` migrated V5 → V7 and verified ([rollout record](infrastructure/wallet-rollout.md#rollout-record-2026-11-15)) |
 | | 4 | Roulette engine | ✅ Merged into `main` (PR #10, [Week 4 plan](docs/plans/week-04.md)). **Not deployed**: the Render backend still runs the Week 3 build and Neon `staging` stays at V7 until a separately approved [rollout](infrastructure/roulette-rollout.md) |
-| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | 🚧 Week 5 in progress on `feature/week-05-roulette-ui`: player lobby, wallet page, roulette page with the Phaser wheel implemented and verified locally against the real backend; final verification (W5-10) done locally and approved, screen-reader test outstanding. **Not merged into `main`, not deployed** ([plan](docs/plans/week-05.md)) |
+| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | 🚧 Week 5 in progress on `feature/week-05-roulette-ui`: player lobby, wallet page, roulette page with the Phaser wheel implemented and verified locally against the real backend; final verification (W5-10) done locally and approved; pull request #11 open (draft), CI green; manual screen-reader test deferred by the owner (not performed). **Not merged into `main`, not deployed** ([plan](docs/plans/week-05.md)) |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
 | 5 — Statistics & responsible play | 9–10 | Dashboard, limits, admin panel | Planned |
 | 6 — QA & release | 11–12 | Testing, deployment, beta release | Planned |
@@ -101,7 +101,8 @@ Week 4 roulette backend. None of it is on `main` or on staging yet
   backend), the roulette page says so and the wallet keeps working.
 - **Accessibility and responsible presentation:** keyboard operation with managed focus, layouts from
   320 px, 44 px touch targets for the betting and history controls, wins and losses shown alike, no urgency or "play again" prompts.
-  Lighthouse scores 100 for accessibility on both pages; a screen-reader test is still outstanding.
+  Lighthouse scores 100 for accessibility on both pages. A manual screen-reader test has not been
+  performed: it is deferred to a later stage ([plan §16.9](docs/plans/week-05.md#169-screen-reader-test-deferred-merge-readiness-2026-11-26)).
 
 Verified so far (final verification W5-10, 2026-11-25, local only; reviewed and approved): lint, typecheck,
 533 frontend tests and the build; `./mvnw -o verify`; the Playwright suite 15/15 (W2-16 and a roulette
@@ -123,12 +124,14 @@ no roulette:** V8/V9 and the spin endpoint reach it only through the separately 
 **Week 5 is not on staging.** Vercel deploys `main` automatically, so merging Week 5 would put the new
 UI in front of the Week 3 staging backend at once; roulette would show as unavailable there (checked
 locally against the Week 3 backend on V7 in W5-10). The Week 5 frontend is not staging-ready until the
-approved roulette rollout has been followed and the screen-reader and CI release gates have passed.
+approved roulette rollout has been followed. CI is green on the pull request; the manual screen-reader
+test is deferred (not performed). Automatic Vercel deployments are to be switched off before the merge,
+so that merging Week 5 deploys nothing.
 
 ### Planned (later weeks)
 
-Finishing Week 5: the screen-reader smoke test, CI on the pull request and, after approval, the
-merge into `main`. Week 6:
+Finishing Week 5: switching off automatic Vercel deployments, then, after approval, the merge into
+`main`. The manual screen-reader smoke test is deferred to a later stage. Week 6:
 refinement of the wheel animation, sound, an in-app reduced-motion setting, round history and
 statistics. Later: learning modules,
 quizzes and rewards (Weeks 7–8), statistics and play limits (Week 9), the admin panel (Week 10), and
@@ -570,7 +573,8 @@ Next milestones:
   [`docs/plans/week-04.md`](docs/plans/week-04.md).
 - **Week 5:** the roulette and wallet user interface and the Phaser wheel — implemented on the feature
   branch and verified locally against the real backend; final verification (W5-10) done and approved,
-  screen-reader test outstanding; not merged, not deployed ([`docs/plans/week-05.md`](docs/plans/week-05.md)).
+  pull request #11 open with green CI, manual screen-reader test deferred (not performed); not merged,
+  not deployed ([`docs/plans/week-05.md`](docs/plans/week-05.md)).
 - **Week 6:** animation refinement, sound, round history and statistics.
 
 ## Documentation
