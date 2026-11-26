@@ -10,11 +10,11 @@
 | [`roulette-rollout.md`](roulette-rollout.md) | Runbook for the Week 4 roulette backend on staging (Flyway V7 → V9 at Render start-up): preconditions and approvals, read-only preflight at V7, restore point `staging-before-week-04`, manual deploy, Flyway V8/V9 behaviour, read-only checks with `verify-migrations.sql`, `verify-wallets.sql` and `verify-roulette.sql`, authentication/CSRF smoke checks, an optional approved spin with virtual coins, stop conditions and rollback limits. **Prepared in W4-09, not executed**; every shared-system step is marked APPROVAL REQUIRED | Week 4 |
 | final hosting decision | Production routing and hosting (ADR-0007) | 12 |
 
-**Current staging state:** Render (`https://online-casino-simulator.onrender.com`) and Vercel
-(`https://online-casino-simulator.vercel.app`) run `main` (Weeks 1–3); the Neon `staging` branch is
-at schema **V7** since the Week 3 rollout of 2026-11-15, and its V5 restore point
-`staging-before-week-03` is kept. Registration stays closed. Neon `production` is untouched.
-The Week 4 roulette backend (V8/V9) exists only on `feature/week-04-roulette` and is **not deployed**;
-its staging rollout waits for a separate approval ([roulette-rollout.md](roulette-rollout.md)).
+**Current staging state:** Render (`https://online-casino-simulator.onrender.com`) runs the Week 3
+build of `main` (manual deploy, Auto-Deploy Off), and Vercel (`https://online-casino-simulator.vercel.app`)
+deploys `main` automatically; the Neon `staging` branch is at schema **V7** since the Week 3 rollout of
+2026-11-15, and its V5 restore point `staging-before-week-03` is kept. Registration stays closed. Neon
+`production` is untouched. The Week 4 roulette backend (V8/V9) is merged into `main` (PR #10) but
+**not deployed**; its staging rollout waits for a separate approval ([roulette-rollout.md](roulette-rollout.md)).
 
 Local development infrastructure lives in the repository-root `docker-compose.yml` (PostgreSQL).

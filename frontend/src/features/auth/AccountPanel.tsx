@@ -21,7 +21,7 @@ function SignedIn({ user }: { user: UserProfile }) {
         <Row label="Member since">{formatDate(user.createdAt)}</Row>
         <Row label="18+ confirmed">{formatDate(user.adultConfirmedAt)}</Row>
       </dl>
-      <p className="mt-4 text-xs leading-relaxed text-zinc-500">
+      <p className="mt-4 text-xs leading-relaxed text-zinc-400">
         Your session is kept in a secure cookie. It ends after 30 minutes without activity, 12 hours
         after signing in, or when you sign out.
       </p>

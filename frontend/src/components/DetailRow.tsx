@@ -5,7 +5,7 @@ export function DetailRow({ label, children }: { label: string; children: ReactN
   return (
     <div className="flex items-center justify-between gap-4 py-2">
       <dt className="text-sm text-zinc-400">{label}</dt>
-      <dd className="min-w-0 truncate text-sm font-medium text-zinc-100">{children}</dd>
+      <dd className="min-w-0 text-right text-sm font-medium [overflow-wrap:anywhere] text-zinc-100">{children}</dd>
     </div>
   )
 }

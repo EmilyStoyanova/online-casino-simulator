@@ -271,3 +271,91 @@ describe('onSessionExpired', () => {
     unsubscribe()
   })
 })
+
+describe('caller headers (e.g. Idempotency-Key)', () => {
+  const KEY = '3f2b8c4e-9d1a-4e7b-8c2f-5a6d7e8f9a0b'
+
+  it('sends a caller header with an unsafe request, next to the managed headers', async () => {
+    setCookie('XSRF-TOKEN', 'token')
+    const api = stubApi({ 'POST /api/v1/test': () => jsonResponse({ ok: true }) })
+
+    await expect(apiPost('/api/v1/test', { a: 1 }, { headers: { 'Idempotency-Key': KEY } })).resolves.toEqual({ ok: true })
+
+    expect(api.requests[0]?.headers).toEqual({
+      'Idempotency-Key': KEY,
+      Accept: 'application/json, application/problem+json',
+      'Content-Type': 'application/json',
+      'X-XSRF-TOKEN': 'token',
+    })
+  })
+
+  it('sends a caller header with a safe request, still without a CSRF token', async () => {
+    const api = stubApi({ 'GET /api/v1/test': () => jsonResponse({}) })
+
+    await apiGet('/api/v1/test', { headers: { 'X-Example': 'value' } })
+
+    expect(api.requests[0]?.headers).toEqual({ 'X-Example': 'value', Accept: 'application/json, application/problem+json' })
+  })
+
+  it('repeats the same caller header and body in the retry after 403 CSRF_TOKEN_INVALID', async () => {
+    setCookie('XSRF-TOKEN', 'stale')
+    const api = stubApi({
+      'GET /api/v1/auth/csrf': csrfEndpoint(),
+      'POST /api/v1/test': [() => problemResponse(403, 'CSRF_TOKEN_INVALID'), () => jsonResponse({ ok: true })],
+    })
+
+    await expect(apiPost('/api/v1/test', { bets: [1] }, { headers: { 'Idempotency-Key': KEY } })).resolves.toEqual({ ok: true })
+
+    const posts = api.requestsTo('POST /api/v1/test')
+    expect(posts.map((post) => post.headers['Idempotency-Key'])).toEqual([KEY, KEY])
+    expect(posts.map((post) => post.body)).toEqual([{ bets: [1] }, { bets: [1] }])
+    expect(posts.map((post) => post.headers['X-XSRF-TOKEN'])).toEqual(['stale', 'csrf-1'])
+  })
+
+  it.each(['Accept', 'content-type', 'X-XSRF-TOKEN', 'x-xsrf-token'])(
+    'rejects the managed header %s before anything is sent',
+    async (name) => {
+      setCookie('XSRF-TOKEN', 'token')
+      const api = stubApi({ 'POST /api/v1/test': () => jsonResponse({}) })
+
+      await expect(apiPost('/api/v1/test', {}, { headers: { [name]: 'override' } })).rejects.toBeInstanceOf(TypeError)
+      expect(api.fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('rejects a header name given twice in different case', async () => {
+    const api = stubApi({ 'GET /api/v1/test': () => jsonResponse({}) })
+
+    await expect(apiGet('/api/v1/test', { headers: { 'Idempotency-Key': 'a', 'idempotency-key': 'b' } })).rejects.toThrow(
+      /more than once/,
+    )
+    expect(api.fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps passing the AbortSignal and propagating aborts', async () => {
+    const fetchMock = stubFetch()
+    fetchMock.mockRejectedValue(new DOMException('Aborted', 'AbortError'))
+    const controller = new AbortController()
+
+    await expect(apiGet('/api/v1/test', { signal: controller.signal, headers: { 'X-Example': 'v' } })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/test', expect.objectContaining({ signal: controller.signal }))
+  })
+
+  it('sends exactly the previous headers when no caller headers are given (backward compatible)', async () => {
+    setCookie('XSRF-TOKEN', 'token')
+    const api = stubApi({
+      'GET /api/v1/test': () => jsonResponse({}),
+      'POST /api/v1/test': () => noContent(),
+    })
+
+    await apiGet('/api/v1/test')
+    await apiPost('/api/v1/test')
+
+    expect(api.requests.map((request) => request.headers)).toEqual([
+      { Accept: 'application/json, application/problem+json' },
+      { Accept: 'application/json, application/problem+json', 'X-XSRF-TOKEN': 'token' },
+    ])
+  })
+})

@@ -7,12 +7,22 @@ backend (Flyway **V8** and **V9**, `POST /api/v1/games/roulette/spins`) to the s
 Vercel (frontend, auto-deploys main) ──/api──▶ Render staging backend ──▶ Neon branch staging (V7 before, V9 after)
 ```
 
-**Status: prepared in W4-09, not executed.** No step of this runbook has been run. Neon `staging` is
+**Status: prepared in W4-09, not executed.** Only precondition P1 / step A2 has happened: the Week 4
+pull request (#10) was merged into `main` (`94a7305`) with green CI, including the post-merge run on
+`main`. No Render, Neon or staging-data step of this runbook has been run. Neon `staging` is
 at **V7**; V8 and V9 have been applied only to local and Testcontainers databases, and
 `verify-roulette.sql` has never been run against Neon. Render Auto-Deploy is Off. The rollout is
 decision **Q15** of [`docs/plans/week-04.md`](../docs/plans/week-04.md#131-decisions) (§13.1), which stays
 *Proposed* until the project owner approves the deployment explicitly. The procedure follows the
 executed [Week 3 wallet rollout](wallet-rollout.md) (V5 → V7, 2026-11-15).
+
+**Week 5 frontend (not merged).** The roulette and wallet UI exists only on
+`feature/week-05-roulette-ui`; this runbook was written before it and is unchanged by it. Because Vercel
+deploys `main` automatically, a Week 5 merge reaches the staging frontend at once. Against the Week 3
+backend the UI shows roulette as unavailable and keeps the wallet pages working
+([architecture §4.9](../docs/architecture.md#49-older-backends)); that behaviour was verified locally
+against the real Week 3 backend on V7 (W5-10, 2026-11-25). Merging Week 5 does not replace or approve any
+step of this runbook.
 
 Neon `production` is never touched: every command here uses the `staging` branch only. The existing
 restore point `staging-before-week-03` is never used, changed or deleted by this runbook.

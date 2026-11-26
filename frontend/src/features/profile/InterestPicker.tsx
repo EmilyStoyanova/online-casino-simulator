@@ -42,7 +42,7 @@ export function InterestPicker({ id, catalog, onRetryCatalog, selected, onChange
   return (
     <fieldset aria-describedby={[hintId, errorId].filter(Boolean).join(' ')} className="space-y-3">
       <legend className="text-sm font-medium text-zinc-200">Interests</legend>
-      <div id={hintId} className="space-y-1 text-xs text-zinc-500">
+      <div id={hintId} className="space-y-1 text-xs text-zinc-400">
         <p>
           Choose up to {MAX_INTERESTS} topics you would like to learn about. Your choice is saved when you
           save your profile.

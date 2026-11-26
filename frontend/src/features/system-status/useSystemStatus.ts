@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ApiError } from '../../services/apiClient'
 import { fetchSystemStatus } from '../../services/systemApi'
 import type { SystemStatus } from '../../types/system'
+import { noteSchemaVersion } from '../roulette/rouletteAvailability'
 
 export type SystemStatusState =
   | { kind: 'loading' }
@@ -16,7 +17,11 @@ export function useSystemStatus(): { state: SystemStatusState; refresh: () => vo
     const controller = new AbortController()
 
     fetchSystemStatus({ signal: controller.signal })
-      .then((data) => setState({ kind: 'success', data }))
+      .then((data) => {
+        // A schema below V9 tells the roulette page early that this backend has no roulette (§7.7).
+        noteSchemaVersion(data.database.schemaVersion)
+        setState({ kind: 'success', data })
+      })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         const message =

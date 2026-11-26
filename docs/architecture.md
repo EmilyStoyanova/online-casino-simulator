@@ -38,7 +38,7 @@ Root package `com.casino`. Each direct sub-package is a module:
 | `auth` | Registration, login/logout (session cookies), password hashing, roles PLAYER/ADMIN | 2 | implemented |
 | `user` | Accounts, profile, educational interests (UI preferences from Week 6) | 2 | implemented |
 | `wallet` | Balances, immutable transaction ledger, idempotency ([below](#wallet-module-week-3)) | 3 | implemented, on `main`, deployed to staging |
-| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` ([below](#game-module-week-4)) | 4 | implemented on `feature/week-04-roulette` (W4-04 to W4-08): rules, secure wheel, round persistence, atomic spin service and `POST /api/v1/games/roulette/spins`; **not on `main`, not deployed** ([`docs/plans/week-04.md`](plans/week-04.md)) |
+| `game` | Roulette engine (CSPRNG), bets, rounds, settlement via `wallet` ([below](#game-module-week-4)) | 4 | implemented (W4-04 to W4-08): rules, secure wheel, round persistence, atomic spin service and `POST /api/v1/games/roulette/spins`; on `main` since PR #10, **not deployed** ([`docs/plans/week-04.md`](plans/week-04.md)) |
 | `learning` | Modules, quizzes, answer validation, rewards, daily limits | 7–8 | planned |
 | `responsibleplay` | Session limits, breaks, self-exclusion, play-time tracking | 9 | planned |
 | `admin` | Administrative use cases under `/api/v1/admin/**` | 10 | planned |
@@ -202,8 +202,8 @@ branches.
 
 ### Game module (Week 4)
 
-**Status:** implemented and tested on `feature/week-04-roulette` (W4-04 to W4-08); not merged into
-`main` and **not deployed** (staging runs Weeks 1–3 at schema V7; rollout runbook:
+**Status:** implemented and tested (W4-04 to W4-08); merged into `main` (PR #10) and **not deployed**
+(the Render backend runs the Week 3 build, Neon `staging` is at schema V7; rollout runbook:
 [infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md), not executed). Design and
 decisions: [`docs/plans/week-04.md`](plans/week-04.md); schema:
 [database.md](database.md#roulette-rounds-and-bets-v9); API:
@@ -280,24 +280,34 @@ which is the source of truth. Controllers and DTOs implement it, and contract te
 
 ## 4. Frontend structure
 
+> **Status.** The player lobby, the wallet page and the roulette page (§4.2–§4.8) are Week 5 work on
+> the branch `feature/week-05-roulette-ui`. They are **not merged into `main` and not deployed**
+> (README, [Status](../README.md#status)). Design, decisions and verification records:
+> [`docs/plans/week-05.md`](plans/week-05.md).
+
 ```
 frontend/src
-├── components/   reusable presentational components (layout, buttons, …)
-├── pages/        route-level screens
-├── features/     feature slices: hooks + components per use case (e.g. system-status)
-├── games/        Phaser scenes and game rendering (Week 6)
+├── components/   reusable presentational components (layout, navigation, buttons, cards, coins)
+├── pages/        route-level screens (home/lobby, login, register, profile, roulette, wallet)
+├── features/     feature slices: hooks + components per use case
+│                 (auth, profile, system-status, wallet, roulette)
+├── games/        Phaser scenes and game rendering (since Week 5, W5-P01: the roulette wheel)
 ├── services/     API client and per-resource API functions
 ├── types/        TypeScript types mirroring API contracts
 └── test/         test setup and helpers
 ```
 
+### 4.1 Foundation (Week 2)
+
 - `services/apiClient.ts` is the only place that calls `fetch`. It sends credentials (session
   cookies), maps failures to a typed `ApiError` carrying the Problem Details body (`code`, field
   `errors`, `Retry-After`) and supports request cancellation. Unsafe methods send the CSRF token
   (`XSRF-TOKEN` cookie, read by `services/csrf.ts`) in `X-XSRF-TOKEN`, fetching it from
-  `GET /api/v1/auth/csrf` when missing, and retry once on `403 CSRF_TOKEN_INVALID`.
-- Routing: React Router 8 (declarative `BrowserRouter`); pages `/`, `/login`, `/register` and the
-  protected `/profile`.
+  `GET /api/v1/auth/csrf` when missing, and retry once on `403 CSRF_TOKEN_INVALID`. Callers may add
+  their own headers (`RequestOptions.headers`, used for the `Idempotency-Key`); the managed headers
+  cannot be overridden, and the CSRF retry repeats the same caller headers and body.
+- Routing: React Router 8 (declarative `BrowserRouter`). Public pages `/`, `/login`, `/register`
+  and a not-found page; the protected `/profile`; the player-only `/roulette` and `/wallet` (§4.2).
 - Profile (W2-14): `pages/ProfilePage` shows the saved profile. `features/profile/ProfileForm` edits
   the display name and the interests (`InterestPicker`, catalogue from `GET /api/v1/interests`).
   Each save sends only the changed properties through `AuthProvider.updateProfile`
@@ -319,6 +329,183 @@ frontend/src
   `returnTo` only if `features/auth/returnPath.ts` accepts it as an internal path; anything else goes
   to `/`. The guard is interface only. The backend checks the session and role on every request and
   remains the security boundary. The first protected page is the profile (W2-14).
+
+### 4.2 Player routes and navigation (Week 5)
+
+```tsx
+<AuthProvider>
+  <WalletProvider>
+    <AppLayout>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route element={<RequireAuth />}>
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route element={<PlayerOnly />}>
+            <Route path="/roulette" element={<RoulettePage />} />
+            <Route path="/wallet" element={<WalletPage />} />
+          </Route>
+        </Route>
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </AppLayout>
+  </WalletProvider>
+</AuthProvider>
+```
+
+(`App.tsx`.) `WalletProvider` sits above the routes, so a spin answer that arrives after the player has
+left the roulette page still reaches the shared balance.
+
+- `features/auth/PlayerOnly` is a layout route inside `RequireAuth`: it renders the page for the role
+  `PLAYER` and, for an administrator, a notice that roulette and the wallet are for player accounts.
+  Like `RequireAuth` it only shapes the interface; the backend answers `403` to an administrator.
+- `components/layout/MainNav` (`nav "Main"`: Lobby · Roulette · Wallet, `aria-current`) and the
+  header's `BalanceBadge` are shown only to a signed-in player. The `nav "Account"` menu of Week 2 is
+  unchanged. A "Skip to main content" link comes first.
+- `HomePage` is the lobby for a player (balance card, a "European roulette" card, a wallet card) and
+  stays the welcome page for visitors and administrators.
+
+### 4.3 Wallet state (`WalletProvider`)
+
+One shared, server-confirmed balance for the header, the lobby, the wallet page and the roulette page
+(`features/wallet/WalletProvider`, `useWallet`). No global store and no data-fetching library: the two
+providers (`AuthProvider`, `WalletProvider`) and local reducers hold all state.
+
+- Active only for an authenticated `PLAYER`; otherwise `inactive`, and no wallet request is sent
+  (visitors and administrators never call the wallet).
+- One `GET /api/v1/wallet` per player session; `refresh()` reads again (the "Refresh" button, wallet
+  rules errors of a spin). Navigation does not repeat the request, and there is no polling.
+- **Stale answers are dropped.** Reads are numbered; a newer read aborts the older one, and only the
+  latest may change the state. `applyConfirmedBalance(balance)` (from a confirmed spin) counts as newer
+  than every read started before it, sets the server's balance at once and then reads again to
+  reconcile.
+- The balance is always a value the server returned. The client never adds, subtracts or predicts it.
+- A change of player resets the state during render, before any child sees the previous player's
+  balance (§4.8).
+
+### 4.4 Wallet page and transaction history
+
+`pages/WalletPage` shows the balance card and `features/wallet/TransactionHistory`, fed by
+`useWalletTransactions`:
+
+- `GET /api/v1/wallet/transactions?limit=20`, newest first; "Load older entries" sends the returned
+  `nextCursor` back unchanged (keyset pagination) and appends the next page; the button disappears when
+  `nextCursor` is `null`.
+- "Refresh history" reloads the first page (and the balance). Every request is numbered and only the
+  latest may change the state; a refresh supersedes a pending "load older", whose request is aborted.
+- A rejected cursor or a failed page keeps the entries already shown and offers "Try again"; Refresh
+  recovers from an invalid cursor.
+- Entry types are labelled in `walletFormat.ts` (`STARTING_BALANCE`, `ROULETTE_STAKE`,
+  `ROULETTE_PAYOUT`); a type added by a later contract version is shown as "Other entry" instead of
+  failing. Amounts carry a
+  sign, and "Balance after" is the server's `balanceAfter`.
+
+### 4.5 Roulette page: table, chips, bet slip
+
+`pages/RoulettePage` composes the feature components; state lives in a reducer and one hook:
+
+- `ChipSelector` (radio group, chips 1, 5, 10, 25, 100, 500; default 10), `RouletteBoard` (one native
+  button per number 0–36, dozens and the six outside bets, in ascending DOM order), `BetSlip` (bets,
+  remove, clear, total stake, "Review bets") and, below `md`, the sticky `BetSummaryBar`.
+- `betSlipReducer.ts` is pure: it adds the chip value to a selection, enforces the contract limits for
+  feedback (1–10 bets, 1–1,000 coins per bet, total at most 10,000; "Review bets" is blocked when the
+  total is above the last confirmed balance, while an unknown balance never blocks) and
+  builds the request body (`toSpinRequest`). The server checks the same rules again and decides.
+- `rouletteTable.ts` holds the static table model (cells, names, colours, odds text);
+  `OddsInfo`/`oddsRules.ts` explain the five categories, zero and the house edge of 1/37, checked
+  against `openapi.yaml` by a test. Nothing shows a potential win or a payout before the server's
+  result.
+- "Review bets" opens `SpinConfirmation` (exact bets, total stake, balance, "Confirm and spin" /
+  "Back to bets"); the table is locked while confirming.
+
+### 4.6 React and Phaser
+
+- **React owns** state, the wallet, every API call and every text the user reads. **Phaser** (only in
+  `games/roulette/`) owns the canvas: `RouletteScene` draws the single-zero wheel and turns it;
+  `createWheelGame` creates and destroys the Phaser game.
+- `features/roulette/RouletteWheel` loads Phaser with a dynamic `import()` when the roulette page
+  mounts (a separate chunk; other pages never download it), creates exactly one game per mounted
+  component (also under StrictMode's trial mount) and destroys it, canvas included, on unmount. It
+  exposes one imperative handle, `spinTo(winningNumber)`, which resolves when the wheel has stopped.
+- The canvas is decorative (`aria-hidden`); the same information is in the HTML (a text description of
+  the wheel and the result). Without canvas support, or if the chunk cannot be loaded, the page keeps
+  working without the wheel. With "reduce motion" the wheel moves straight to the number, without the
+  turn.
+- **Server-authoritative outcome.** The scene has no random source and no timers of its own: without a
+  `spinTo` call the wheel stands still, and the only number it is ever given is the `winningNumber` of a
+  validated server response. The animation shows the server's result; it never decides one, and no
+  client code computes a payout ([ADR-0003](decisions/0003-server-authoritative-game-logic.md)).
+
+### 4.7 Spin lifecycle, idempotency and errors (`useSpin`)
+
+`features/roulette/useSpin` is the attempt state machine: `editing` → `confirming` → `submitting` →
+`revealing` → `editing` (with the result), or → `unresolved`.
+
+1. **One key per new spin.** "Confirm and spin" freezes the request body (`toSpinRequest`) and creates
+   one `Idempotency-Key` (`services/idempotency.ts`: `crypto.randomUUID()`, with a
+   `crypto.getRandomValues` fallback, never `Math.random`). The API layer (`services/rouletteApi.ts`)
+   never creates or remembers a key.
+2. **Persist before sending.** The pending record is written to `sessionStorage`
+   (`features/roulette/pendingSpinStore.ts`, key `casino.roulette.pendingSpin.v1.<userId>`: version,
+   user id, key, frozen body, creation time, `ambiguous`, `state`) and read back; only then is the
+   request sent. If the write fails, nothing is sent and the player is told why. The record holds no
+   session id, token, email or balance, and it is the only thing the SPA keeps in browser storage.
+3. **One request per player at a time.** Requests in flight are tracked per user at module level, so
+   double activation, a page left and opened again, or a second component never sends a second
+   request; the answer is handled exactly once.
+4. **Confirmed result.** A `200` body is validated as a spin result first. Only a valid result clears
+   the record, calls `applyConfirmedBalance(result.balance)` of the session that sent the request,
+   resets the slip, turns the wheel to `winningNumber` (`revealing`, at most the animation time plus
+   3 s; without a wheel the result is shown at once) and then shows `SpinResult`: the server's number
+   and colour, each bet with stake, outcome and payout, the totals and the balance after the round,
+   with the same layout and weight for a win and a loss. A `200` that is not a valid result is treated
+   as an unknown outcome.
+5. **Definitive and uncertain failures** (`spinErrors.ts`, by status and code):
+   - *Definitive* — the response proves that key `K` committed nothing: `400 VALIDATION_FAILED` /
+     `MALFORMED_REQUEST` (field messages under the bet rows), `409 INSUFFICIENT_FUNDS` /
+     `BALANCE_LIMIT_EXCEEDED` (the balance is read again). The record is cleared and the slip stays
+     editable. `409 IDEMPOTENCY_KEY_REUSED` also clears it, sends the player to the wallet history and
+     is logged as a defect (impossible with a frozen body).
+   - *Rejected before the round lookup* — `401`, `403`, `404`, `405`, `413`, `415`: only this request
+     did nothing, so the record is cleared only if no earlier send of it had an unknown outcome.
+   - *Uncertain* — network error, `5xx` (including `503`), a gateway answer without Problem Details, a
+     non-JSON or invalid `2xx`: the record is kept as `unresolved` and `ambiguous`.
+6. **Explicit retry.** An unresolved spin locks betting and shows "Spin not confirmed" with the frozen
+   bets, **"Retry spin"** (the same key and the same body) and "Check balance" (reads the wallet,
+   clears nothing). Nothing is ever retried automatically, and an ambiguous spin is never sent with a
+   new key. A record found after a reload or a new sign-in of the same player is shown the same way.
+   The server answers a retry of a committed round with the stored round, so a retry never charges
+   twice.
+7. **Session expiry.** `401 SESSION_EXPIRED` uses the Week 2 flow (login page, `returnTo=/roulette`); an
+   ambiguous record stays and is offered to the same player after signing in again.
+
+### 4.8 Account and session isolation
+
+- The wallet state belongs to one player session: `WalletProvider` resets on a change of player, and
+  `applyConfirmedBalance` is bound to the session that sent the spin, so a late answer never changes
+  the balance shown to a later session or another player.
+- The roulette page keeps its table and spin state per player (keyed by the player id). Pending records
+  are stored and read only under the signed-in user's id: another user in the same tab never sees,
+  sends or clears them. Sign-out does not clear a record, because its outcome is unknown.
+- `sessionStorage` belongs to one tab and ends with it. The outcome of a record lost that way is still
+  visible in the balance and the wallet history.
+
+### 4.9 Older backends
+
+A Week 5 frontend can meet a backend without the roulette endpoint (staging runs the Week 3 build,
+[§6](#6-deployment-view-staging-today-final-decision-week-12)). `features/roulette/rouletteAvailability`
+keeps an in-memory state for the page visit: a `404` from the spin endpoint, or a
+`database.schemaVersion` below 9 in the platform status the app already loads, marks roulette
+**unavailable**. The roulette page then disables betting with "Roulette is not available on this
+server yet" and links to the wallet; the lobby card says "Not available on this server yet". A schema
+version of 9 or more is not proof that the endpoint exists; only the spin response decides, and no
+request is sent just to find out. The wallet pages use Week 3 endpoints and keep working. This
+behaviour is covered by unit tests and was verified locally against the real Week 3 backend, on a V7
+database and on a V9 database (W5-10, [Week 5 plan §16.7](plans/week-05.md#167-w5-10-final-verification-2026-11-25)).
+
+### 4.10 Development, production and staging setup
+
 - Development: the Vite dev server proxies `/api` to the backend (same origin, no CORS).
 - Production (decided in Week 12): the preferred setup keeps the API on the **same site** as the
   frontend, through a reverse proxy for `/api/*`. Session cookies then stay first-party, because
@@ -399,8 +586,8 @@ Design and rationale: [ADR-0006](decisions/0006-session-authentication-security.
 
 | Component | Staging today | Code deployed |
 |---|---|---|
-| Frontend (static build) | Vercel, `https://online-casino-simulator.vercel.app`, same-origin `/api` rewrite to Render; deploys `main` automatically ([infrastructure/vercel](../infrastructure/vercel/README.md)). Cloudflare Pages was the original plan; the final choice is ADR-0007 | `main` (Weeks 1–3 and the deployment foundation) |
-| Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render Free, Frankfurt, `https://online-casino-simulator.onrender.com`, profiles `neon,render`, registration closed, Auto-Deploy Off, manual deploys ([infrastructure/render](../infrastructure/render/README.md)) | `main` |
+| Frontend (static build) | Vercel, `https://online-casino-simulator.vercel.app`, same-origin `/api` rewrite to Render; deploys `main` automatically ([infrastructure/vercel](../infrastructure/vercel/README.md)). Cloudflare Pages was the original plan; the final choice is ADR-0007 | `main`, deployed automatically (Week 4 changed no frontend file) |
+| Backend (Docker image, [`backend/Dockerfile`](../backend/Dockerfile)) | Render Free, Frankfurt, `https://online-casino-simulator.onrender.com`, profiles `neon,render`, registration closed, Auto-Deploy Off, manual deploys ([infrastructure/render](../infrastructure/render/README.md)) | the Week 3 build of `main` (manual deploy 2026-11-15) |
 | Database | Neon (managed PostgreSQL 18), branch `staging`; `production` untouched until Week 12. Local development and tests use 17 | schema **V7** |
 
 Week 3 (wallet, V6/V7) is **deployed to staging** (2026-11-15): merged into `main` (PR #9), deployed
@@ -409,11 +596,23 @@ the verification results are in
 [infrastructure/wallet-rollout.md](../infrastructure/wallet-rollout.md#rollout-record-2026-11-15).
 Registration stays closed; Neon `production` is untouched.
 
-Week 4 (roulette, V8/V9) is **not deployed**: it exists only on `feature/week-04-roulette`, and Render
-Auto-Deploy is Off, so even a merge into `main` would not change the backend. Its staging rollout
+Week 4 (roulette, V8/V9) is **not deployed**: it is merged into `main` (PR #10), but Render
+Auto-Deploy is Off, so the merge did not change the backend. Its staging rollout
 (V7 → V9) needs a separate approval and follows
 [infrastructure/roulette-rollout.md](../infrastructure/roulette-rollout.md) (prepared in W4-09, not
 executed).
+
+Week 5 (the player lobby, wallet and roulette UI, §4) is **neither merged nor deployed**: it exists only
+on `feature/week-05-roulette-ui`. Because Vercel deploys `main` automatically, a future merge would put
+the new UI in front of the staging backend at once, while that backend is still the Week 3 build at V7.
+For that case the UI shows roulette as unavailable (§4.9) and the wallet pages use the Week 3
+endpoints (checked locally against the Week 3 backend on V7 in W5-10). The Week 5 frontend counts as
+staging-ready only after the separately approved
+[roulette rollout](../infrastructure/roulette-rollout.md) has been followed. CI is green on the pull
+request; the manual screen-reader test is deferred and has not been performed
+([Week 5 plan §16.9](plans/week-05.md#169-screen-reader-test-deferred-merge-readiness-2026-11-26)).
+Automatic Vercel deployments are to be switched off before the merge; until then nothing about
+staging changes.
 
 Local development uses Docker Compose for PostgreSQL; the backend and frontend run natively for a
 fast feedback loop. The Spring profile `neon` points a local backend at a Neon branch instead

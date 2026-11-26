@@ -67,7 +67,19 @@ describe('vercel.json rewrites', () => {
   })
 
   it('serves the SPA for every client-side route, including unknown ones (React Router shows 404)', () => {
-    for (const path of ['/', '/login', '/register', '/profile', '/profile/', '/no/such/page', '/apiary', '/assets']) {
+    for (const path of [
+      '/',
+      '/login',
+      '/register',
+      '/profile',
+      '/profile/',
+      '/roulette',
+      '/wallet',
+      '/wallet/',
+      '/no/such/page',
+      '/apiary',
+      '/assets',
+    ]) {
       expect(route(path), path).toBe('/index.html')
     }
   })

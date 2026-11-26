@@ -7,3 +7,6 @@ export const primaryButton = `${base} bg-emerald-500 text-zinc-950 shadow-lg sha
 export const secondaryButton = `${base} border border-zinc-700 text-zinc-200 hover:bg-zinc-800`
 
 export const ghostButton = `${base} text-zinc-300 hover:bg-zinc-800/70 hover:text-zinc-100`
+
+/** At least 44 × 44 CSS px below `md`, where touch is likely (§10.1); desktop keeps the compact size. */
+export const touchTarget = 'max-md:min-h-11 max-md:min-w-11'

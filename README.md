@@ -27,8 +27,8 @@ the original version 1.0 is [`docs/OnlineCasinoSimulator_ImplementationPlan.pdf`
 | | 2 | Authentication, users, roles, profile & interests | ✅ Done |
 | Deployment foundation | — | Neon staging database, Render backend staging, Vercel frontend staging | ✅ Done: Render backend and Vercel frontend deployed and verified (registration closed); Neon `staging` now at V7 |
 | 2 — Virtual currency & game logic | 3 | Virtual wallet and immutable ledger | ✅ Done: merged into `main` (PR #9) and deployed to staging; Neon `staging` migrated V5 → V7 and verified ([rollout record](infrastructure/wallet-rollout.md#rollout-record-2026-11-15)) |
-| | 4 | Roulette engine | 🚧 Backend implemented and tested on `feature/week-04-roulette` (W4-01 to W4-08; [Week 4 plan](docs/plans/week-04.md)); documentation and rollout runbook in W4-09; final verification and pull request (W4-10) pending. **Not merged into `main`, not deployed**: staging stays at V7 until a separately approved [rollout](infrastructure/roulette-rollout.md) |
-| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | Planned |
+| | 4 | Roulette engine | ✅ Merged into `main` (PR #10, [Week 4 plan](docs/plans/week-04.md)). **Not deployed**: the Render backend still runs the Week 3 build and Neon `staging` stays at V7 until a separately approved [rollout](infrastructure/roulette-rollout.md) |
+| 3 — Casino UI | 5–6 | Roulette UI, Phaser animations | 🚧 Week 5 in progress on `feature/week-05-roulette-ui`: player lobby, wallet page, roulette page with the Phaser wheel implemented and verified locally against the real backend; final verification (W5-10) done locally and approved; pull request #11 open (draft), CI green; manual screen-reader test deferred by the owner (not performed). **Not merged into `main`, not deployed** ([plan](docs/plans/week-05.md)) |
 | 4 — Learning & rewards | 7–8 | Learning library, quizzes, rewards | Planned |
 | 5 — Statistics & responsible play | 9–10 | Dashboard, limits, admin panel | Planned |
 | 6 — QA & release | 11–12 | Testing, deployment, beta release | Planned |
@@ -58,13 +58,13 @@ Week 3 (on `main`, deployed to staging):
 - **Immutable ledger:** every balance change is one append-only ledger entry; balances never go
   below 0 or above 2⁵³ − 1, and repeated operations (idempotency keys) never apply twice.
 - **Read-only API for players:** `GET /api/v1/wallet` (balance) and `GET /api/v1/wallet/transactions`
-  (history in pages). There is no endpoint that adds or removes coins, and no wallet UI yet
-  (Week 5).
+  (history in pages). There is no endpoint that adds or removes coins. `main` has no wallet UI yet;
+  it is part of Week 5 (feature branch, below).
 
-### On the Week 4 branch (implemented, not deployed)
+### Week 4 (on `main`, not deployed)
 
-`feature/week-04-roulette` adds the European roulette backend. It runs locally and in the automated
-tests (Flyway V8 and V9 on the local database and Testcontainers), not on staging:
+Week 4 (PR #10) adds the European roulette backend. It runs locally and in the automated tests
+(Flyway V8 and V9 on the local database and Testcontainers), not on staging:
 
 - **Roulette engine:** single-zero wheel 0–36, each number drawn on the server with `SecureRandom`;
   five bet categories (straight number, red/black, even/odd, low/high, dozens) with standard payouts
@@ -75,19 +75,65 @@ tests (Flyway V8 and V9 on the local database and Testcontainers), not on stagin
   ([API](docs/api.md#roulette-spin-post-apiv1gamesroulettespins)).
 - **Ledger:** stakes and payouts appear in the wallet history as `ROULETTE_STAKE` and
   `ROULETTE_PAYOUT`; rounds and bets are append-only (V9).
-- No roulette screen yet (Week 5) and no round history (Week 6).
+- `main` has no roulette screen yet (Week 5, feature branch, below) and no round history (Week 6).
+
+### Week 5 (feature branch only: not merged, not deployed)
+
+On `feature/week-05-roulette-ui` the frontend gets the player interface for the Week 3 wallet and the
+Week 4 roulette backend. None of it is on `main` or on staging yet
+([plan](docs/plans/week-05.md); architecture: [§4](docs/architecture.md#4-frontend-structure)).
+
+- **Player lobby and navigation:** players see Lobby · Roulette · Wallet and their balance in the
+  header; `/roulette` and `/wallet` are for signed-in players only (administrators get a notice).
+- **One shared balance:** every page shows the same server-confirmed balance; the browser never
+  calculates it.
+- **Wallet page (`/wallet`):** the balance and the transaction history, newest first, 20 entries per
+  page with "Load older entries".
+- **Roulette page (`/roulette`):** chips, the single-zero table with the five bet types, a bet slip,
+  an explicit review step, and the result of each round as the server sent it. An "Odds and rules"
+  panel explains the probabilities, payouts and the house edge of 1/37.
+- **Phaser wheel:** the wheel turns to the number the **server** drew, then the result is shown. It
+  never decides a number (with "reduce motion" it moves straight to the number).
+- **Safe retries:** every spin has one `Idempotency-Key`. If the answer is lost, the spin stays
+  "not confirmed" until the player presses **Retry spin**, which resends the same key and bets, so a
+  round is never charged twice.
+- **Older backends:** if the server has no roulette endpoint (for example the current staging
+  backend), the roulette page says so and the wallet keeps working.
+- **Accessibility and responsible presentation:** keyboard operation with managed focus, layouts from
+  320 px, 44 px touch targets for the betting and history controls, wins and losses shown alike, no urgency or "play again" prompts.
+  Lighthouse scores 100 for accessibility on both pages. A manual screen-reader test has not been
+  performed: it is deferred to a later stage ([plan §16.9](docs/plans/week-05.md#169-screen-reader-test-deferred-merge-readiness-2026-11-26)).
+
+Verified so far (final verification W5-10, 2026-11-25, local only; reviewed and approved): lint, typecheck,
+533 frontend tests and the build; `./mvnw -o verify`; the Playwright suite 15/15 (W2-16 and a roulette
+scenario); and the **real** Spring Boot backend and PostgreSQL with several bets, insufficient funds, an
+offline browser, a backend stopped during a spin, lost answers, reloads, two players in one tab, and the
+older Week 3 backend
+([W5-10 record](docs/plans/week-05.md#167-w5-10-final-verification-2026-11-25),
+[first run](docs/plans/week-05.md#165-first-real-local-integration-run-2026-11-25-accepted)).
 
 ### Deployed to staging
 
-Staging runs `main` (Weeks 1–3): the backend on Render with the Neon `staging` branch (schema **V7**)
-and closed registration, the frontend on Vercel ([runbook](infrastructure/vercel/README.md)). The wallet
+Staging runs Weeks 1–3: the backend on Render (the Week 3 build, deployed manually; Auto-Deploy Off)
+with the Neon `staging` branch (schema **V7**) and closed registration, the frontend on Vercel, which
+deploys `main` automatically (Week 4 changed no frontend file; [runbook](infrastructure/vercel/README.md)). The wallet
 reached staging through the approved [Week 3 rollout](infrastructure/wallet-rollout.md). **Staging has
 no roulette:** V8/V9 and the spin endpoint reach it only through the separately approved
 [Week 4 rollout](infrastructure/roulette-rollout.md), which is prepared but not executed.
 
+**Week 5 is not on staging.** Vercel deploys `main` automatically, so merging Week 5 would put the new
+UI in front of the Week 3 staging backend at once; roulette would show as unavailable there (checked
+locally against the Week 3 backend on V7 in W5-10). The Week 5 frontend is not staging-ready until the
+approved roulette rollout has been followed. CI is green on the pull request; the manual screen-reader
+test is deferred (not performed). Automatic Vercel deployments are to be switched off before the merge,
+so that merging Week 5 deploys nothing.
+
 ### Planned (later weeks)
 
-The roulette UI and the wallet UI (Week 5), animations and round history (Week 6), learning modules,
+Finishing Week 5: switching off automatic Vercel deployments, then, after approval, the merge into
+`main`. The manual screen-reader smoke test is deferred to a later stage. Week 6:
+refinement of the wheel animation, sound, an in-app reduced-motion setting, round history and
+statistics. Later: learning modules,
 quizzes and rewards (Weeks 7–8), statistics and play limits (Week 9), the admin panel (Week 10), and
 the release (Weeks 11–12). See the table above.
 
@@ -96,9 +142,8 @@ the release (Weeks 11–12). See the table above.
 ```
  Browser ──► React + TypeScript (Vite) ──/api/v1──► Spring Boot modular monolith ──► PostgreSQL
              renders server results only            common · auth · user · wallet   Flyway-managed
-                                                    (+ game on the Week 4 branch;   schema
-                                                     learning · responsibleplay ·
-                                                     admin later)
+                                                    · game (learning ·              schema
+                                                     responsibleplay · admin later)
 ```
 
 - The backend is one deployable with explicit module boundaries, checked by ArchUnit.
@@ -121,7 +166,8 @@ Details: [`docs/architecture.md`](docs/architecture.md).
 | Testing | JUnit Jupiter, Mockito, Spring Security Test, Testcontainers, ArchUnit, JaCoCo, Vitest, React Testing Library, Playwright (local) |
 | Tooling | Maven Wrapper (Maven 3.9), Docker Compose, GitHub Actions |
 | Hosting (staging) | Vercel (frontend), Render (backend, Docker), Neon (PostgreSQL); final hosting decision in Week 12 (ADR-0007) |
-| Later stages | Phaser (Week 6), Playwright in CI (Week 11) |
+| Game rendering | Phaser 4 (from Week 5: the roulette wheel, W5-P01; animation refinement in Week 6) |
+| Later stages | Playwright in CI (Week 11) |
 
 Exact versions and the reasons for them: [ADR-0002](docs/decisions/0002-technology-baseline.md).
 
@@ -129,7 +175,7 @@ Exact versions and the reasons for them: [ADR-0002](docs/decisions/0002-technolo
 
 ```
 ├── backend/                 Spring Boot application (Maven Wrapper: ./mvnw)
-│   └── src/main/java/com/casino/<module>/   one package per module (common, auth, user, wallet; game on the Week 4 branch)
+│   └── src/main/java/com/casino/<module>/   one package per module (common, auth, user, wallet, game)
 ├── frontend/                React + Vite single-page application
 ├── infrastructure/          Deployment runbooks: Neon read-only checks (neon/), Render (render/), Vercel (vercel/), Week 3 and Week 4 rollouts
 ├── docs/                    Architecture, API, database, plans, ADRs
@@ -224,6 +270,11 @@ docker compose ps        # wait until STATUS shows "(healthy)"
 The data is kept in the Docker volume `postgres-data` across restarts. `docker compose down` stops
 the container and keeps the data.
 
+**Check the port before starting the backend.** If another program already uses 5432, set
+`POSTGRES_PORT` (e.g. `5434`) in `.env` **and** the same port in `DB_URL`. Never assume that whatever
+listens on 5432 is this project's database: with the default `DB_URL` the backend would connect to it
+and Flyway would try to migrate it. `docker compose ps` shows the port of this project's container.
+
 ### 4. Start the backend (http://localhost:8080)
 
 ```bash
@@ -234,7 +285,7 @@ cd backend
 On start-up Flyway applies pending migrations; the log ends with `Started CasinoSimulatorApplication`.
 The first start of a build with the wallet applies V6 and V7 to your local database: every local player
 account gets a wallet with 1,000 coins (once; [database.md](docs/database.md#v7-wallets-for-existing-players)).
-A build of the Week 4 branch also applies V8 (roulette ledger types) and V9 (roulette tables). Flyway
+A build of `main` since Week 4 also applies V8 (roulette ledger types) and V9 (roulette tables). Flyway
 has no undo: they stay in your local database when you switch back to an older branch, and a build
 without the roulette types cannot read the ledger entries of rounds played locally.
 Stop it with `Ctrl+C`. In PowerShell or `cmd.exe` the wrapper is `mvnw.cmd` instead of `./mvnw`.
@@ -257,6 +308,34 @@ In the browser:
 - **Create account** (`/register`) and **Sign in** (`/login`) use the real backend.
 - **My profile** (`/profile`, signed-in users only) edits the display name and the interests.
 - After a page reload the session is restored from the cookie.
+
+#### Roulette and wallet (Week 5 feature branch only)
+
+These pages exist only on `feature/week-05-roulette-ui` and need a backend from `main` since Week 4
+(schema V9; `GET /api/v1/system/status` shows `schemaVersion` 9). Sign in as a **player** (a new account
+from **Create account** starts with 1,000 virtual coins); administrators have no wallet.
+
+1. **Lobby (`/`):** the balance card and the "European roulette" and "Wallet" cards. The header shows
+   the balance and the links Lobby · Roulette · Wallet.
+2. **Place bets (`/roulette`):** choose a chip (1–500 coins), then numbers or outside bets; each click
+   adds the chip value. The bet slip lists the bets and the total stake (1–10 bets, 1–1,000 coins per
+   bet, at most 10,000 in total). "Odds and rules" explains the chances and payouts.
+3. **Review and confirm:** "Review bets" shows the exact bets, the total stake and your balance.
+   **Confirm and spin** sends the bets once, with a new `Idempotency-Key` and the CSRF token
+   (DevTools → Network shows both on `POST /api/v1/games/roulette/spins`).
+4. **The result:** the server draws the number and settles the wallet. The Phaser wheel then turns to
+   exactly that number, and only after it stops the result appears: the number and colour, each bet's
+   outcome and payout, the totals and the balance after the round. The header balance is the server's.
+5. **Wallet history (`/wallet`):** the round appears as "Roulette stake" (and "Roulette payout" on a
+   win), newest first, each with "Balance after". "Load older entries" pages back; "Refresh history"
+   reloads.
+6. **Unresolved spin:** if the answer is lost (for example the connection drops), the page shows
+   **"Spin not confirmed"** and locks betting. **Retry spin** resends the same key and bets: if the
+   server had already played the round it returns that round, without charging again. **Check balance**
+   only reads the wallet. Nothing is retried automatically, also not after a reload in the same tab.
+
+Against a backend without the roulette endpoint (an older build, such as the current staging backend)
+the roulette page shows "Roulette is not available on this server yet"; the wallet page still works.
 
 ### 6. Optional: create the first administrator
 
@@ -354,10 +433,10 @@ npm run build
   to `main` and on every pull request.
 - Test reports: `backend/target/surefire-reports/` (unit) and `backend/target/failsafe-reports/`
   (integration).
-- **Coverage (JaCoCo):** `./mvnw verify` fails if `com.casino.wallet.service` (and, on the Week 4
-  branch, `com.casino.game.model` and `com.casino.game.service`) drops below 80 % lines or 70 % branches
+- **Coverage (JaCoCo):** `./mvnw verify` fails if `com.casino.wallet.service` (and, since Week 4,
+  `com.casino.game.model` and `com.casino.game.service`) drops below 80 % lines or 70 % branches
   (measured: 100 % / 100 % for each).
-- **Roulette randomness (Week 4 branch):** the deterministic tests run in every build; the statistical
+- **Roulette randomness (since Week 4):** the deterministic tests run in every build; the statistical
   check of the real wheel is opt-in:
   `./mvnw test -Dtest=SecureRandomRouletteWheelStatisticsTest -Droulette.statistics=true`. Reports: `backend/target/site/jacoco/index.html`
   (unit + integration) and `backend/target/site/jacoco-unit/` (unit only).
@@ -383,7 +462,7 @@ What the tests use:
   backend on 8091 and Vite on `127.0.0.1:5174`, with random secrets that are never printed. The
   bootstrap test restarts the backend with a throwaway administrator that exists only in that
   container. Your local
-  database, `.env` and dev servers on 5432/8080/5173 are not used. The container and its data are
+  database (`POSTGRES_PORT`), `.env` and dev servers on 8080/5173 are not used. The container and its data are
   removed afterwards.
 - **The installed Chrome** (`channel: 'chrome'`), so no Playwright browser download is needed.
 - **Real waits:** the session-expiry scenario waits for a real 1-minute idle timeout, and some tests
@@ -391,6 +470,11 @@ What the tests use:
 - **Reports:** failures leave a screenshot and a trace in `frontend/test-results/`; the HTML report
   is in `frontend/playwright-report/` (`npx playwright show-report`). Both are git-ignored. Traces
   contain the disposable test passwords.
+- **Week 5 branch:** `e2e/w5-roulette.spec.ts` adds two roulette scenarios (a round with several bets
+  checked against the database; a lost answer that is retried with the same key after a reload). The
+  whole suite passed 15/15 on `feature/week-05-roulette-ui` (2026-11-25). The W5 scenario registers its
+  players through the form: after W2-16 the fixture address has used its 10 registrations per hour
+  ([record](docs/plans/week-05.md#167-w5-10-final-verification-2026-11-25)).
 
 ## Configuration reference
 
@@ -424,7 +508,7 @@ and in the hosting provider's secret store in production.
 | `APP_BOOTSTRAP_ADMIN_EMAIL` / `APP_BOOTSTRAP_ADMIN_PASSWORD` | Backend | no (both or neither) | empty = disabled | First administrator; password = secret; remove after the first start |
 | `APP_REGISTRATION_ENABLED` | Backend | no | `true`; `false` with profile `render` | `false` closes registration (`403 REGISTRATION_DISABLED`); login is unaffected. Opening it on Render: [runbook](infrastructure/render/README.md#registrations-on-a-public-url) |
 | `APP_WALLET_STARTING_BALANCE` | Backend | no | `1000` | Coins of a new player's wallet (1 … 2⁵³ − 1; an invalid value stops the start). Affects only wallets opened afterwards; V7 always used 1,000. Since Week 3 |
-| `APP_WALLET_LOCK_TIMEOUT` | Backend | no | `5s` | Longest wait for a wallet's row lock (100 ms … 1 min); then `503`, nothing changed. Since Week 3; on the Week 4 branch it also bounds the lock of a roulette spin |
+| `APP_WALLET_LOCK_TIMEOUT` | Backend | no | `5s` | Longest wait for a wallet's row lock (100 ms … 1 min); then `503`, nothing changed. Since Week 3; since Week 4 it also bounds the lock of a roulette spin |
 | `VITE_API_BASE_URL` | Frontend build | no | empty (same origin) | Leave empty: the API is on the page's own origin (Vite proxy locally, Vercel rewrite on staging). A backend on another site would break cookie sign-in (ADR-0006) |
 | `VITE_DEV_PROXY_TARGET` | Frontend dev server | no | `http://localhost:8080` | Target of the Vite `/api` proxy |
 
@@ -483,21 +567,25 @@ Next milestones:
   done: merged (PR #9), deployed to staging and verified
   ([rollout record](infrastructure/wallet-rollout.md#rollout-record-2026-11-15)).
 - **Week 4:** server-side European roulette engine (stakes and payouts through the wallet) —
-  implemented on `feature/week-04-roulette`, including the removal of the test-only ledger types
-  `TEST_CREDIT`/`TEST_DEBIT` (release gate, Week 3 plan §7.13); final verification and pull request
-  next (W4-10). The staging rollout is a separate, approval-gated step
-  ([runbook](infrastructure/roulette-rollout.md)). Plan: [`docs/plans/week-04.md`](docs/plans/week-04.md).
-- **Week 5:** the roulette and wallet user interface.
+  merged into `main` (PR #10), including the removal of the test-only ledger types
+  `TEST_CREDIT`/`TEST_DEBIT` (release gate, Week 3 plan §7.13). **Not deployed:** the staging rollout
+  is a separate, approval-gated step ([runbook](infrastructure/roulette-rollout.md)). Plan:
+  [`docs/plans/week-04.md`](docs/plans/week-04.md).
+- **Week 5:** the roulette and wallet user interface and the Phaser wheel — implemented on the feature
+  branch and verified locally against the real backend; final verification (W5-10) done and approved,
+  pull request #11 open with green CI, manual screen-reader test deferred (not performed); not merged,
+  not deployed ([`docs/plans/week-05.md`](docs/plans/week-05.md)).
+- **Week 6:** animation refinement, sound, round history and statistics.
 
 ## Documentation
 
 - [Architecture](docs/architecture.md) — modules, layers, security, frontend, deployment checklist
-- [API](docs/api.md) — conventions, authentication and CSRF, every implemented operation (incl. the wallet and, on the Week 4 branch, the roulette spin)
-- [Database](docs/database.md) — migrations (V1–V9; V8/V9 on the Week 4 branch only), tables incl. wallets, ledger and roulette rounds, read-only verification scripts, Neon, session revocation runbook
+- [API](docs/api.md) — conventions, authentication and CSRF, every implemented operation (incl. the wallet and the roulette spin)
+- [Database](docs/database.md) — migrations (V1–V9; staging at V7), tables incl. wallets, ledger and roulette rounds, read-only verification scripts, Neon, session revocation runbook
 - [User scenarios](docs/user-scenarios.md)
 - [Architecture decision records](docs/decisions/)
 - [Week 2 implementation plan](docs/plans/week-02.md), [Week 3 implementation plan](docs/plans/week-03.md),
-  [Week 4 implementation plan](docs/plans/week-04.md)
+  [Week 4 implementation plan](docs/plans/week-04.md), [Week 5 implementation plan](docs/plans/week-05.md) (in progress)
 - Deployment: [Render](infrastructure/render/README.md), [Vercel](infrastructure/vercel/README.md),
   [Week 3 wallet rollout](infrastructure/wallet-rollout.md) (executed),
   [Week 4 roulette rollout](infrastructure/roulette-rollout.md) (prepared, not executed)

@@ -1,6 +1,9 @@
 # Week 4 Plan — European Roulette Engine
 
-- **Status:** Revision 9. W4-01 reviewed 2026-11-15: direction approved; Q2–Q6, Q10 and Q14
+- **Status:** Revision 11. **Week 4 complete: merged into `main` via PR #10 (`94a7305`), backend and
+  frontend CI green, including the post-merge run on `main`. Not deployed:** the Render backend still
+  runs the Week 3 build and Neon `staging` is at V7; the rollout (Q15) stays separately approval-gated.
+  History of the review gates: W4-01 reviewed 2026-11-15: direction approved; Q2–Q6, Q10 and Q14
   approved with corrections (§13.1). W4-02 contract 0.5.0 approved (Q1a, Q13, Q16, Q18). W4-03 (V8,
   production ledger types) approved. W4-04 rules and secure wheel approved 2026-11-16 (§4.7; Q7,
   Q7a, Q9, R16); checkpoint pushed (`058dcb3`). W4-05 persistence approved (§5.7; Q8, Q11, Q19).
@@ -46,6 +49,7 @@
 | 8 | 2026-11-19 | W4-07 approved; W4-08: `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, `verify-roulette.sql`, `verify-migrations.sql` with round counts, JaCoCo rule proven for `game.service`, Q18 scope review (§5.8) |
 | 9 | 2026-11-19 | W4-08 reviewed (`523c5cc`); W4-09: documentation aligned with the implementation (architecture, database, API, README, infrastructure), `infrastructure/roulette-rollout.md` (V7 → V9 runbook, not executed), approval gates and W4-10 readiness (§15.4); stale "pending review" task labels updated to the recorded approvals |
 | 10 | 2026-11-19 | W4-09 approved (`1f8cb9d`); W4-10: local verification evidence, `game/package-info.java` Javadoc corrected, Week 3 build on V9 verified locally (scenarios A and B) and the rollback statements updated from "expected" to the observed results (§15.3, §15.5) |
+| 11 | 2026-11-24 | Status only: W4-10 reviewed; PR #10 merged into `main` (`94a7305`) with green CI; not deployed (recorded at the start of Week 5) |
 
 ---
 
@@ -1376,7 +1380,7 @@ Size: **S** ≤ 2 h, **M** ≈ ½ day, **L** ≈ 1 day. **Endpoint tasks follow*
 | W4-07 | **Endpoint `POST /api/v1/games/roulette/spins` (done, approved, §6.6)** (①–⑥): DTOs with validation, `RouletteController`, `SecurityConfig` rule, strict JSON numbers (Q10); `RouletteControllerTest`, `RouletteSpinIT`, `OpenApiContractIT`, `AccessRulesContractIT`; marker removed | M | W4-06 |
 | W4-08 | **Integrity, concurrency, coverage (done, reviewed, §5.8):** `RouletteConcurrencyIT`, `RoundLedgerIntegrityIT`, JaCoCo rule for `com.casino.game.service`; `verify-roulette.sql`, `verify-migrations.sql` (V9 state), both tested read-only on PG 17/18 | M | W4-07 |
 | W4-09 | **Documentation and rollout preparation (done, approved, §15.4):** `architecture.md` (game module, R16, R15 retired), `database.md` (V8/V9), `api.md` (spin, 0.5.0, payout table), README, `infrastructure/roulette-rollout.md` (V8/V9 runbook, §15); ADR-0003 needs no change | M | W4-03…W4-08 |
-| W4-10 | **Verification and pull request (local verification done, pending review, §15.5; PR not opened):** `./mvnw verify` (PG 17/18, JaCoCo), frontend checks unchanged, real-HTTP check on a throwaway local stack, option D gate, PR. **No staging rollout.** | M | all |
+| W4-10 | **Verification and pull request (done; PR #10 merged into `main` as `94a7305`, §15.5):** `./mvnw verify` (PG 17/18, JaCoCo), frontend checks unchanged, real-HTTP check on a throwaway local stack, option D gate, PR. **No staging rollout.** | M | all |
 
 ```mermaid
 graph LR
